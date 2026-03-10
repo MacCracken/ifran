@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use synapse_types::error::Result;
-use synapse_types::training::{TrainingJobConfig, TrainingJobId};
+use synapse_types::training::{TrainingJobConfig, TrainingJobId, TrainingMethod};
 use synapse_types::SynapseError;
 use tokio::process::Command;
 use tokio::sync::RwLock;
@@ -37,8 +37,15 @@ impl TrainingExecutor for DockerExecutor {
             .map_err(|e| SynapseError::TrainingError(e.to_string()))?;
 
         let container_name = format!("synapse-train-{}", job_id);
+        let script = match config.method {
+            TrainingMethod::Lora | TrainingMethod::Qlora => "scripts/train_sft.py",
+            TrainingMethod::FullFineTune => "scripts/train_full.py",
+            TrainingMethod::Dpo => "scripts/train_dpo.py",
+            TrainingMethod::Rlhf => "scripts/train_rlhf.py",
+            TrainingMethod::Distillation => "scripts/train_distill.py",
+        };
 
-        info!(job_id = %job_id, image = %self.image, "Starting training container");
+        info!(job_id = %job_id, image = %self.image, script = %script, "Starting training container");
 
         let output = Command::new("docker")
             .args([
@@ -48,8 +55,9 @@ impl TrainingExecutor for DockerExecutor {
                 "--rm",
                 "-e", &format!("TRAINING_CONFIG={config_json}"),
                 "-e", &format!("JOB_ID={job_id}"),
-                "-v", &format!("{}:/data/dataset", config.dataset.path),
+                "-v", &format!("{}:/workspace/datasets/data", config.dataset.path),
                 &self.image,
+                script,
             ])
             .output()
             .await

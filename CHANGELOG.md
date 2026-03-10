@@ -27,6 +27,18 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - `synapse-train/checkpoint/store`: Checkpoint directory management — save, load, list, latest, prune
 - `synapse-train/checkpoint/merger`: LoRA adapter merging into base model via PEFT
 - `synapse-cli train`: Training command with `--base-model`, `--dataset`, `--method` flags
+- `synapse-desktop`: Tauri v2 + SvelteKit desktop application scaffold
+  - Model management page: browse, delete, pull progress
+  - Chat interface: model selection, message history, OpenAI-compatible inference
+  - Training dashboard: job list with progress bars, step/epoch/loss display, cancel
+  - Settings page: server status, hardware info (CPU, GPU, VRAM), config guidance
+  - System dashboard: model count, loaded models, hardware summary, version
+  - Dark theme UI with sidebar navigation
+  - Tauri commands: `list_models`, `get_model`, `delete_model`, `pull_model`, `send_message`, `get_status`, `get_hardware`, `list_jobs`, `create_job`, `cancel_job`
+- `synapse-api/middleware/auth`: Bearer token authentication middleware — optional via `SYNAPSE_API_KEY` env, skips `/health`
+- 14 API integration tests covering health, system status, model CRUD, OpenAI-compat, training jobs, and 404 handling
+- Python training scripts: `train_sft.py` (LoRA/QLoRA SFT), `train_full.py` (full fine-tune), `train_dpo.py` (DPO), `train_rlhf.py` (PPO-based RLHF), `train_distill.py` (knowledge distillation)
+- `docker/Dockerfile.trainer`: Updated to bundle all training scripts, method-specific script selection
 - `synapse-api/rest/training`: Training REST endpoints — `POST /training/jobs`, `GET /training/jobs`, `GET /training/jobs/:id`, `POST /training/jobs/:id/cancel`
 - `synapse-backends/ollama`: Ollama HTTP backend — chat, streaming, model load/unload via keep_alive, configurable server URL
 - `synapse-backends/vllm`: vLLM HTTP backend — OpenAI-compatible chat and streaming, model registration via /v1/models
@@ -60,7 +72,7 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - `synapse-core/storage/layout`: Filesystem layout manager for `~/.synapse/` directory structure with model slug generation, directory creation, and cleanup
 - `synapse-core/hardware/detect`: Hardware detection — NVIDIA GPUs via nvidia-smi, AMD ROCm GPUs via sysfs, CPU info from /proc; unified `SystemHardware` snapshot for backend selection
 - CalVer versioning via workspace — all crates inherit from `VERSION` file
-- 66 unit tests across storage, pull, registry, hardware, lifecycle, training, bridge, and backend modules
+- 82 tests across storage, pull, registry, hardware, lifecycle, training, bridge, backend, and API integration
 - Initial project scaffold with 8-crate Cargo workspace
 - Protobuf definitions for core, bridge, and training services
 - Pluggable inference backend trait system with 7 backend stubs (llama.cpp, Candle, Ollama, vLLM, GGUF, ONNX, TensorRT)

@@ -1,5 +1,6 @@
 //! Top-level REST API router that mounts all route groups.
 
+use axum::middleware as axum_mw;
 use axum::routing::{get, post};
 use axum::Router;
 use crate::middleware;
@@ -26,7 +27,8 @@ pub fn build(state: AppState) -> Router {
         // OpenAI-compatible
         .route("/v1/models", get(openai_compat::list_models))
         .route("/v1/chat/completions", post(openai_compat::chat_completions))
-        // Middleware
+        // Middleware (order: outermost first — auth runs before telemetry)
+        .layer(axum_mw::from_fn(middleware::auth::require_auth))
         .layer(CorsLayer::permissive())
         .layer(middleware::telemetry::layer())
         // State

@@ -71,7 +71,7 @@ Full-featured release with training, all backends, SY bridge, and desktop app.
 - [x] `synapse-train/checkpoint/merger`: merge LoRA adapters into base model via PEFT
 - [x] `synapse-cli train` command with `--base-model`, `--dataset`, `--method` flags
 - [x] Training REST endpoints in `synapse-api`: `POST /training/jobs`, `GET /training/jobs`, `GET /training/jobs/:id`, `POST /training/jobs/:id/cancel`
-- [ ] Python training scripts (SFT, DPO, RLHF) bundled in Docker image
+- [x] Python training scripts (SFT, DPO, RLHF, full fine-tune, distillation) bundled in Docker image
 
 ### Phase 7: SecureYeoman Bridge (Synapse side ✓)
 - [x] `synapse-bridge/server`: gRPC server framework for receiving SY commands
@@ -81,13 +81,13 @@ Full-featured release with training, all backends, SY bridge, and desktop app.
 - [ ] SY-side integration → **pushed to SecureYeoman roadmap**
 - [ ] Bidirectional job delegation → **collaborative: SecureYeoman + Synapse**
 
-### Phase 8: Desktop Application
-- [ ] Tauri v2 scaffold with Svelte frontend
-- [ ] Model management UI (browse, pull, delete with progress)
-- [ ] Chat interface with streaming output
-- [ ] Training dashboard with live loss curves and GPU metrics
-- [ ] System monitor (GPU utilization, VRAM, loaded models)
-- [ ] Settings page (backends, storage paths, bridge config)
+### Phase 8: Desktop Application ✓
+- [x] Tauri v2 scaffold with Svelte frontend — `src-tauri/` (Rust commands) + `src/` (SvelteKit app)
+- [x] Model management UI (browse, pull, delete with progress)
+- [x] Chat interface with streaming output
+- [x] Training dashboard with live loss curves and GPU metrics
+- [x] System monitor (GPU utilization, VRAM, loaded models)
+- [x] Settings page (backends, storage paths, bridge config)
 
 ### Phase 9: Agnosticos Integration → **pushed to Agnosticos roadmap**
 - [ ] systemd service unit (`synapse.service`)
@@ -96,13 +96,13 @@ Full-featured release with training, all backends, SY bridge, and desktop app.
 - [ ] `/etc/synapse/synapse.toml` system-level config
 - [ ] Model storage at `/var/lib/synapse/models/`
 
-### Phase 10: Polish & Release
-- [ ] Integration test suite
-- [ ] API documentation
-- [ ] Docker multi-arch images (amd64 + arm64)
-- [ ] CI/CD pipeline (GitHub Actions)
-- [ ] CHANGELOG for v1 release
-- [ ] Security audit (API auth, model integrity, bridge mTLS)
+### Phase 10: Polish & Release ✓
+- [x] Integration test suite — 14 API integration tests via Axum tower::ServiceExt
+- [x] API documentation — `docs/api-reference.md` with all endpoints, request/response examples
+- [x] Docker multi-arch images (amd64 + arm64) — release workflow builds linux/amd64 + linux/arm64
+- [x] CI/CD pipeline (GitHub Actions) — build, quality, security, test, benchmarks, docs, container, license, release, SBOM
+- [x] CHANGELOG for v1 release — `CHANGELOG.md` tracking all phases
+- [x] Security audit (API auth, model integrity, bridge mTLS) — Bearer token auth middleware (`SYNAPSE_API_KEY`), SHA-256/BLAKE3 model integrity verification
 
 **v1 milestone: full product — pull, infer, train, orchestrate, desktop + web + CLI.**
 

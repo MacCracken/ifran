@@ -5,9 +5,25 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /trainer
+
+# Install Python dependencies (cached layer)
 COPY crates/synapse-train/src/scripts/requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-COPY crates/synapse-train/src/scripts/ /trainer/scripts/
+# Copy all training scripts
+COPY crates/synapse-train/src/scripts/*.py /trainer/scripts/
 
+# Create workspace directories for checkpoints, datasets, and configs
+RUN mkdir -p /workspace/checkpoints /workspace/datasets /workspace/configs
+
+# Default: run the SFT script. Override with the appropriate script per method:
+#   docker run ... synapse-trainer scripts/train_sft.py --config-file /workspace/configs/config.json
+#   docker run ... synapse-trainer scripts/train_dpo.py --config-json '...'
+#   docker run ... synapse-trainer scripts/train_rlhf.py --config-json '...'
+#   docker run ... synapse-trainer scripts/train_full.py --config-json '...'
+#   docker run ... synapse-trainer scripts/train_distill.py --config-json '...'
+#
+# Or pass config via TRAINING_CONFIG env var (used by Synapse DockerExecutor):
+#   docker run -e TRAINING_CONFIG='...' ... synapse-trainer scripts/train_sft.py
 ENTRYPOINT ["python3"]
+CMD ["scripts/train_sft.py"]

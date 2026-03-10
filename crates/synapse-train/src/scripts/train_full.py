@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Supervised fine-tuning (SFT) script for Synapse training jobs.
+"""Full parameter fine-tuning script for Synapse.
 
-Supports LoRA, QLoRA, and full fine-tuning via the --config-json flag or
-TRAINING_CONFIG environment variable.
+Trains all model parameters (no LoRA adapter). Requires significant VRAM.
 """
 
 import argparse
@@ -13,18 +12,12 @@ from pathlib import Path
 
 import torch
 from datasets import load_dataset
-from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    BitsAndBytesConfig,
-    TrainingArguments,
-)
+from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
 from trl import SFTTrainer
 
 
 def parse_config():
-    parser = argparse.ArgumentParser(description="Synapse SFT training")
+    parser = argparse.ArgumentParser(description="Synapse full fine-tuning")
     parser.add_argument("--config-json", type=str, help="Training config as JSON string")
     parser.add_argument("--config-file", type=str, help="Path to JSON config file")
     args = parser.parse_args()
@@ -63,7 +56,6 @@ def load_training_dataset(dataset_cfg):
 
 
 def format_instruction(example):
-    """Format dataset examples into instruction-response pairs."""
     if "instruction" in example and "response" in example:
         text = f"### Instruction:\n{example['instruction']}\n\n### Response:\n{example['response']}"
         if example.get("input"):
@@ -72,12 +64,10 @@ def format_instruction(example):
     elif "text" in example:
         return {"text": example["text"]}
     elif "messages" in example:
-        # Chat format
         msgs = example["messages"]
         text = "\n".join(f"{m['role']}: {m['content']}" for m in msgs)
         return {"text": text}
     else:
-        # Use first two string columns as instruction/response
         keys = [k for k, v in example.items() if isinstance(v, str)]
         if len(keys) >= 2:
             return {"text": f"### Instruction:\n{example[keys[0]]}\n\n### Response:\n{example[keys[1]]}"}
@@ -87,14 +77,11 @@ def format_instruction(example):
 def main():
     config = parse_config()
     job_id = os.environ.get("JOB_ID", "unknown")
-    print(f"[synapse] Job {job_id}: Starting SFT training")
-    print(f"[synapse] Base model: {config['base_model']}")
-    print(f"[synapse] Method: {config['method']}")
+    print(f"[synapse] Job {job_id}: Starting full fine-tuning")
 
     hp = config["hyperparams"]
-    method = config["method"]
     base_model = config["base_model"]
-    output_name = config.get("output_name", f"synapse-sft-{job_id}")
+    output_name = config.get("output_name", f"synapse-full-{job_id}")
     output_dir = f"/workspace/checkpoints/{output_name}"
 
     # Load tokenizer
@@ -102,50 +89,29 @@ def main():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Load model with quantization if QLoRA
-    model_kwargs = {"trust_remote_code": True}
+    # Load model — full precision, all parameters trainable
+    model = AutoModelForCausalLM.from_pretrained(
+        base_model,
+        torch_dtype=torch.bfloat16,
+        trust_remote_code=True,
+    )
 
-    if method == "qlora":
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
-            bnb_4bit_use_double_quant=True,
-        )
-        model_kwargs["quantization_config"] = bnb_config
-        model_kwargs["torch_dtype"] = torch.bfloat16
-    elif method == "lora":
-        model_kwargs["torch_dtype"] = torch.bfloat16
-
-    model = AutoModelForCausalLM.from_pretrained(base_model, **model_kwargs)
-
-    # Apply LoRA if applicable
-    if method in ("lora", "qlora"):
-        if method == "qlora":
-            model = prepare_model_for_kbit_training(model)
-
-        lora_cfg = config.get("lora", {})
-        peft_config = LoraConfig(
-            task_type=TaskType.CAUSAL_LM,
-            r=lora_cfg.get("rank", 16),
-            lora_alpha=lora_cfg.get("alpha", 32),
-            lora_dropout=lora_cfg.get("dropout", 0.05),
-            target_modules=lora_cfg.get("target_modules", ["q_proj", "v_proj"]),
-        )
-        model = get_peft_model(model, peft_config)
-        model.print_trainable_parameters()
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"[synapse] Total parameters: {total_params:,}")
+    print(f"[synapse] Trainable parameters: {trainable_params:,}")
 
     # Load dataset
     dataset = load_training_dataset(config["dataset"])
     dataset = dataset.map(format_instruction)
 
-    # Training arguments
+    # Training arguments — full fine-tuning uses lower LR and more gradient accumulation
     training_args = TrainingArguments(
         output_dir=output_dir,
         num_train_epochs=hp.get("epochs", 3),
-        per_device_train_batch_size=hp.get("batch_size", 4),
-        gradient_accumulation_steps=hp.get("gradient_accumulation_steps", 4),
-        learning_rate=hp.get("learning_rate", 2e-4),
+        per_device_train_batch_size=hp.get("batch_size", 1),
+        gradient_accumulation_steps=hp.get("gradient_accumulation_steps", 16),
+        learning_rate=hp.get("learning_rate", 2e-5),
         warmup_steps=hp.get("warmup_steps", 100),
         weight_decay=hp.get("weight_decay", 0.01),
         logging_steps=10,
@@ -155,6 +121,7 @@ def main():
         report_to="none",
         max_grad_norm=1.0,
         lr_scheduler_type="cosine",
+        gradient_checkpointing=True,
     )
 
     # Train
@@ -166,13 +133,13 @@ def main():
         max_seq_length=hp.get("max_seq_length", 2048),
     )
 
-    print(f"[synapse] Job {job_id}: Training started — {len(dataset)} samples, {hp.get('epochs', 3)} epochs")
+    print(f"[synapse] Job {job_id}: Full fine-tuning started — {len(dataset)} samples, {hp.get('epochs', 3)} epochs")
     trainer.train()
 
     # Save
     trainer.save_model(output_dir)
     tokenizer.save_pretrained(output_dir)
-    print(f"[synapse] Job {job_id}: Training complete — saved to {output_dir}")
+    print(f"[synapse] Job {job_id}: Full fine-tuning complete — saved to {output_dir}")
 
 
 if __name__ == "__main__":
