@@ -62,7 +62,9 @@ jobs:
       - name: Create release tarball
         run: |
           VERSION=${{ steps.setup.outputs.project-version }}
-          TARBALL_NAME="synapse-${VERSION}-linux-${{ matrix.arch }}"
+          # Convert CalVer YYYY.M.D[-N] to compact YYYYMMDD[N]
+          COMPACT_DATE=$(echo "$VERSION" | awk -F'[.-]' '{s=sprintf("%04d%02d%02d", $1, $2, $3); if ($4) s=s $4; print s}')
+          TARBALL_NAME="synapse-${COMPACT_DATE}-linux-${{ matrix.arch }}"
           mkdir -p "${TARBALL_NAME}"
 
           cp target/${{ matrix.target }}/release/synapse "${TARBALL_NAME}/"
@@ -169,10 +171,23 @@ jobs:
           echo "" >> changelog.md
           echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREVIOUS_TAG}...${CURRENT_TAG}" >> changelog.md
 
-      - name: Download all release artifacts
+      - name: Download release artifacts (amd64)
         uses: actions/download-artifact@v4
         with:
-          path: artifacts/
+          name: release-amd64
+          path: artifacts/release-amd64
+
+      - name: Download release artifacts (arm64)
+        uses: actions/download-artifact@v4
+        with:
+          name: release-arm64
+          path: artifacts/release-arm64
+
+      - name: Download SBOM artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom
+          path: artifacts/sbom
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
