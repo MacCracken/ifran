@@ -24,13 +24,13 @@ The minimum viable product delivers a working CLI and API server that can pull m
 - [x] `synapse-cli list` command
 - [x] `synapse-cli rm` command
 
-### Phase 3: Inference — llama.cpp Backend
-- [ ] `synapse-backends/traits`: finalize `InferenceBackend` trait
-- [ ] `synapse-backends/llamacpp`: llama.cpp FFI via `llama-cpp-2` crate
-- [ ] `synapse-core/lifecycle/manager`: model load/unload orchestration
-- [ ] `synapse-core/lifecycle/memory`: VRAM budget checks before loading
-- [ ] `synapse-cli run` command (interactive prompt)
-- [ ] `synapse-cli serve` command (start API server)
+### Phase 3: Inference — llama.cpp Backend ✓
+- [x] `synapse-backends/traits`: finalize `InferenceBackend` trait
+- [x] `synapse-backends/llamacpp`: llama.cpp via `llama-server` subprocess (OpenAI-compatible API)
+- [x] `synapse-core/lifecycle/manager`: model load/unload orchestration
+- [x] `synapse-core/lifecycle/memory`: VRAM budget checks before loading
+- [x] `synapse-cli run` command (interactive prompt with streaming)
+- [x] `synapse-cli serve` command (start API server)
 
 ### Phase 4: API Server
 - [ ] `synapse-api/rest/router`: Axum router setup

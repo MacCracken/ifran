@@ -8,6 +8,11 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 ## [2026.3.10] — (in progress)
 
 ### Added
+- `synapse-backends/llamacpp`: llama.cpp backend via `llama-server` subprocess — load/unload models, inference, streaming via OpenAI-compatible API
+- `synapse-core/lifecycle/manager`: Model load/unload orchestration with backend-agnostic handle tracking
+- `synapse-core/lifecycle/memory`: VRAM/RAM budget estimation and pre-load memory checks with GPU/CPU fallback
+- `synapse-cli run`: Interactive inference session with streaming output
+- `synapse-cli serve`: Minimal API server with `/health` and `/v1/models` endpoints
 - `synapse-core/registry/huggingface`: HuggingFace Hub API client — model info, GGUF file resolution by quant level, search
 - `synapse-core/pull/downloader`: Chunked HTTP downloader with resume support via `.part` files and Range headers
 - `synapse-core/pull/verifier`: SHA-256 and BLAKE3 integrity verification with auto-detection
@@ -20,7 +25,7 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - `synapse-core/storage/layout`: Filesystem layout manager for `~/.synapse/` directory structure with model slug generation, directory creation, and cleanup
 - `synapse-core/hardware/detect`: Hardware detection — NVIDIA GPUs via nvidia-smi, AMD ROCm GPUs via sysfs, CPU info from /proc; unified `SystemHardware` snapshot for backend selection
 - CalVer versioning via workspace — all crates inherit from `VERSION` file
-- 28 unit tests across storage, pull, registry, and hardware modules
+- 36 unit tests across storage, pull, registry, hardware, and lifecycle modules
 - Initial project scaffold with 8-crate Cargo workspace
 - Protobuf definitions for core, bridge, and training services
 - Pluggable inference backend trait system with 7 backend stubs (llama.cpp, Candle, Ollama, vLLM, GGUF, ONNX, TensorRT)

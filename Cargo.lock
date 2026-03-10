@@ -2009,6 +2009,7 @@ version = "2026.3.10"
 dependencies = [
  "async-trait",
  "dashmap",
+ "futures",
  "reqwest",
  "serde_json",
  "synapse-core",
@@ -2034,11 +2035,14 @@ dependencies = [
 name = "synapse-cli"
 version = "2026.3.10"
 dependencies = [
+ "axum 0.8.8",
  "chrono",
  "clap",
+ "futures",
  "indicatif",
  "serde_json",
  "synapse-api",
+ "synapse-backends",
  "synapse-core",
  "synapse-types",
  "tokio",

@@ -24,10 +24,17 @@ enum Commands {
     },
     /// List locally available models
     List,
-    /// Run inference on a model
-    Run,
+    /// Run interactive inference on a model
+    Run {
+        /// Model name or ID
+        model: String,
+    },
     /// Start the API server
-    Serve,
+    Serve {
+        /// Bind address (e.g. 0.0.0.0:8420)
+        #[arg(short, long)]
+        bind: Option<String>,
+    },
     /// Start or manage training jobs
     Train,
     /// Show status of running models and jobs
@@ -50,10 +57,10 @@ async fn main() {
     let result = match cli.command {
         Commands::Pull { model, quant } => commands::pull::execute(&model, quant.as_deref()).await,
         Commands::List => commands::list::execute().await,
-        Commands::Run => { commands::run::execute().await; Ok(()) }
-        Commands::Serve => { commands::serve::execute().await; Ok(()) }
-        Commands::Train => { commands::train::execute().await; Ok(()) }
-        Commands::Status => { commands::status::execute().await; Ok(()) }
+        Commands::Run { model } => commands::run::execute(&model).await,
+        Commands::Serve { bind } => commands::serve::execute(bind.as_deref()).await,
+        Commands::Train => { commands::train::execute().await; Ok(()) },
+        Commands::Status => { commands::status::execute().await; Ok(()) },
         Commands::Remove { model, yes } => commands::remove::execute(&model, yes).await,
     };
 

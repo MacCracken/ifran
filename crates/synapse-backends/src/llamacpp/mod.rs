@@ -1,5 +1,349 @@
 //! llama.cpp backend integration.
 //!
-//! Wraps the llama.cpp inference runtime, providing high-performance CPU and
-//! GPU inference for GGUF-quantised large language models via the llama.cpp
-//! C/C++ library.
+//! Wraps the llama.cpp inference runtime via `llama-server` subprocess. This
+//! approach avoids linking against C++ at compile time, supports any llama.cpp
+//! build (CPU, CUDA, ROCm, Metal), and allows hot-swapping versions.
+//!
+//! The backend spawns a `llama-server` process per loaded model and
+//! communicates via its HTTP API (OpenAI-compatible).
+
+use async_trait::async_trait;
+use std::collections::HashMap;
+use std::sync::Arc;
+use synapse_types::backend::{AcceleratorType, BackendCapabilities, BackendId, DeviceConfig};
+use synapse_types::error::Result;
+use synapse_types::inference::{
+    FinishReason, InferenceRequest, InferenceResponse, StreamChunk, TokenUsage,
+};
+use synapse_types::model::{ModelFormat, ModelManifest};
+use synapse_types::SynapseError;
+use tokio::process::{Child, Command};
+use tokio::sync::{mpsc, RwLock};
+use tracing::{info, warn};
+
+use crate::traits::{InferenceBackend, ModelHandle};
+
+/// A running llama-server instance for one model.
+struct ServerInstance {
+    process: Child,
+    port: u16,
+    #[allow(dead_code)]
+    model_path: String,
+}
+
+/// llama.cpp backend using `llama-server` subprocess.
+pub struct LlamaCppBackend {
+    /// Path to the llama-server binary.
+    server_bin: String,
+    /// Running instances keyed by model handle.
+    instances: Arc<RwLock<HashMap<String, ServerInstance>>>,
+    /// Next port to assign.
+    next_port: Arc<RwLock<u16>>,
+    /// HTTP client for communicating with instances.
+    client: reqwest::Client,
+}
+
+impl LlamaCppBackend {
+    /// Create a new llama.cpp backend.
+    ///
+    /// `server_bin` is the path to the `llama-server` binary. If None, looks
+    /// in PATH.
+    pub fn new(server_bin: Option<String>) -> Self {
+        Self {
+            server_bin: server_bin.unwrap_or_else(|| "llama-server".into()),
+            instances: Arc::new(RwLock::new(HashMap::new())),
+            next_port: Arc::new(RwLock::new(8430)),
+            client: reqwest::Client::new(),
+        }
+    }
+
+    /// Allocate the next available port.
+    async fn allocate_port(&self) -> u16 {
+        let mut port = self.next_port.write().await;
+        let p = *port;
+        *port += 1;
+        p
+    }
+
+    /// Wait for a server instance to be ready (health endpoint).
+    async fn wait_for_ready(&self, port: u16) -> Result<()> {
+        let url = format!("http://127.0.0.1:{port}/health");
+        for _ in 0..60 {
+            if let Ok(resp) = self.client.get(&url).send().await {
+                if resp.status().is_success() {
+                    return Ok(());
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+        Err(SynapseError::BackendError(
+            "llama-server failed to start within 60 seconds".into(),
+        ))
+    }
+}
+
+#[async_trait]
+impl InferenceBackend for LlamaCppBackend {
+    fn id(&self) -> BackendId {
+        BackendId("llamacpp".into())
+    }
+
+    fn capabilities(&self) -> BackendCapabilities {
+        BackendCapabilities {
+            accelerators: vec![AcceleratorType::Cpu, AcceleratorType::Cuda, AcceleratorType::Rocm],
+            max_context_length: Some(131072),
+            supports_streaming: true,
+            supports_embeddings: false,
+            supports_vision: false,
+        }
+    }
+
+    fn supported_formats(&self) -> &[ModelFormat] {
+        &[ModelFormat::Gguf]
+    }
+
+    async fn load_model(
+        &self,
+        manifest: &ModelManifest,
+        device: &DeviceConfig,
+    ) -> Result<ModelHandle> {
+        let port = self.allocate_port().await;
+        let model_path = &manifest.info.local_path;
+
+        let mut cmd = Command::new(&self.server_bin);
+        cmd.arg("--model").arg(model_path)
+            .arg("--port").arg(port.to_string())
+            .arg("--host").arg("127.0.0.1");
+
+        // GPU layers
+        if device.accelerator != AcceleratorType::Cpu {
+            let gpu_layers = manifest.gpu_layers.unwrap_or(999);
+            cmd.arg("--n-gpu-layers").arg(gpu_layers.to_string());
+        } else {
+            cmd.arg("--n-gpu-layers").arg("0");
+        }
+
+        // Context length
+        if let Some(ctx) = manifest.context_length {
+            cmd.arg("--ctx-size").arg(ctx.to_string());
+        }
+
+        cmd.stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+
+        let process = cmd.spawn().map_err(|e| {
+            SynapseError::BackendError(format!(
+                "Failed to start llama-server ({}): {e}",
+                self.server_bin
+            ))
+        })?;
+
+        let handle_id = format!("llamacpp-{port}");
+        info!(handle = %handle_id, port, model = %model_path, "Starting llama-server");
+
+        self.wait_for_ready(port).await?;
+
+        let instance = ServerInstance {
+            process,
+            port,
+            model_path: model_path.clone(),
+        };
+
+        self.instances.write().await.insert(handle_id.clone(), instance);
+        Ok(ModelHandle(handle_id))
+    }
+
+    async fn unload_model(&self, handle: ModelHandle) -> Result<()> {
+        let mut instances = self.instances.write().await;
+        if let Some(mut instance) = instances.remove(&handle.0) {
+            info!(handle = %handle.0, "Stopping llama-server");
+            let _ = instance.process.kill().await;
+            Ok(())
+        } else {
+            Err(SynapseError::ModelNotFound(handle.0))
+        }
+    }
+
+    async fn infer(
+        &self,
+        handle: &ModelHandle,
+        req: &InferenceRequest,
+    ) -> Result<InferenceResponse> {
+        let instances = self.instances.read().await;
+        let instance = instances
+            .get(&handle.0)
+            .ok_or_else(|| SynapseError::ModelNotFound(handle.0.clone()))?;
+
+        let url = format!("http://127.0.0.1:{}/v1/chat/completions", instance.port);
+
+        let messages = build_messages(req);
+        let body = serde_json::json!({
+            "messages": messages,
+            "max_tokens": req.max_tokens.unwrap_or(512),
+            "temperature": req.temperature.unwrap_or(0.7),
+            "top_p": req.top_p.unwrap_or(0.9),
+            "stream": false,
+        });
+
+        let resp = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| SynapseError::BackendError(e.to_string()))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(SynapseError::BackendError(format!(
+                "llama-server returned HTTP {status}: {text}"
+            )));
+        }
+
+        let json: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| SynapseError::BackendError(e.to_string()))?;
+
+        parse_completion_response(&json)
+    }
+
+    async fn infer_stream(
+        &self,
+        handle: &ModelHandle,
+        req: InferenceRequest,
+    ) -> Result<mpsc::Receiver<StreamChunk>> {
+        let instances = self.instances.read().await;
+        let instance = instances
+            .get(&handle.0)
+            .ok_or_else(|| SynapseError::ModelNotFound(handle.0.clone()))?;
+
+        let url = format!("http://127.0.0.1:{}/v1/chat/completions", instance.port);
+        let messages = build_messages(&req);
+        let body = serde_json::json!({
+            "messages": messages,
+            "max_tokens": req.max_tokens.unwrap_or(512),
+            "temperature": req.temperature.unwrap_or(0.7),
+            "top_p": req.top_p.unwrap_or(0.9),
+            "stream": true,
+        });
+
+        let resp = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| SynapseError::BackendError(e.to_string()))?;
+
+        let (tx, rx) = mpsc::channel(64);
+
+        tokio::spawn(async move {
+            use futures::StreamExt;
+            let mut stream = resp.bytes_stream();
+            let mut buffer = String::new();
+
+            while let Some(chunk) = stream.next().await {
+                let chunk = match chunk {
+                    Ok(c) => c,
+                    Err(e) => {
+                        warn!("Stream error: {e}");
+                        break;
+                    }
+                };
+
+                buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+                // Parse SSE lines
+                while let Some(line_end) = buffer.find('\n') {
+                    let line = buffer[..line_end].trim().to_string();
+                    buffer = buffer[line_end + 1..].to_string();
+
+                    if line.starts_with("data: ") {
+                        let data = &line[6..];
+                        if data == "[DONE]" {
+                            let _ = tx
+                                .send(StreamChunk {
+                                    text: String::new(),
+                                    done: true,
+                                    usage: None,
+                                })
+                                .await;
+                            return;
+                        }
+
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                            let text = json["choices"][0]["delta"]["content"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_string();
+
+                            if !text.is_empty() {
+                                let _ = tx
+                                    .send(StreamChunk {
+                                        text,
+                                        done: false,
+                                        usage: None,
+                                    })
+                                    .await;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        Ok(rx)
+    }
+
+    async fn health_check(&self) -> Result<bool> {
+        // Check if llama-server binary exists
+        match Command::new(&self.server_bin).arg("--version").output().await {
+            Ok(output) => Ok(output.status.success()),
+            Err(_) => Ok(false),
+        }
+    }
+}
+
+/// Build OpenAI-compatible messages array from an InferenceRequest.
+fn build_messages(req: &InferenceRequest) -> Vec<serde_json::Value> {
+    let mut messages = Vec::new();
+    if let Some(ref system) = req.system_prompt {
+        messages.push(serde_json::json!({
+            "role": "system",
+            "content": system,
+        }));
+    }
+    messages.push(serde_json::json!({
+        "role": "user",
+        "content": &req.prompt,
+    }));
+    messages
+}
+
+/// Parse an OpenAI-compatible chat completion response.
+fn parse_completion_response(json: &serde_json::Value) -> Result<InferenceResponse> {
+    let text = json["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+
+    let finish_reason = match json["choices"][0]["finish_reason"].as_str() {
+        Some("stop") => FinishReason::Stop,
+        Some("length") => FinishReason::MaxTokens,
+        _ => FinishReason::Stop,
+    };
+
+    let usage = TokenUsage {
+        prompt_tokens: json["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32,
+        completion_tokens: json["usage"]["completion_tokens"].as_u64().unwrap_or(0) as u32,
+        total_tokens: json["usage"]["total_tokens"].as_u64().unwrap_or(0) as u32,
+    };
+
+    Ok(InferenceResponse {
+        text,
+        usage,
+        finish_reason,
+    })
+}
