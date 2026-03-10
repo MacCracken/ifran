@@ -1,0 +1,83 @@
+name: "Setup Rust Environment"
+description: "Reusable composite action for Rust environment setup with caching"
+
+inputs:
+  toolchain:
+    description: "Rust toolchain version"
+    required: false
+    default: "stable"
+  targets:
+    description: "Additional Rust targets to install (comma-separated)"
+    required: false
+    default: ""
+  components:
+    description: "Rust components to install (comma-separated)"
+    required: false
+    default: "rustfmt,clippy"
+  cache-prefix:
+    description: "Prefix for cache key to allow cache segmentation"
+    required: false
+    default: "rust"
+  install-cross:
+    description: "Install cross-compilation tool"
+    required: false
+    default: "false"
+  install-protoc:
+    description: "Install protobuf compiler"
+    required: false
+    default: "true"
+
+outputs:
+  project-version:
+    description: "Project version read from VERSION file"
+    value: ${{ steps.version.outputs.version }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Read VERSION file
+      id: version
+      shell: bash
+      run: |
+        if [ -f VERSION ]; then
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Project version: ${VERSION}"
+        else
+          echo "::warning::VERSION file not found"
+          echo "version=unknown" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ inputs.toolchain }}
+        targets: ${{ inputs.targets }}
+        components: ${{ inputs.components }}
+
+    - name: Install protoc
+      if: inputs.install-protoc == 'true'
+      shell: bash
+      run: |
+        sudo apt-get update -q
+        sudo apt-get install -yq protobuf-compiler libprotobuf-dev
+        protoc --version
+
+    - name: Install cross
+      if: inputs.install-cross == 'true'
+      shell: bash
+      run: |
+        cargo install cross --locked
+        cross --version
+
+    - name: Cache Cargo registry, git, and target
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target/
+        key: ${{ inputs.cache-prefix }}-${{ runner.os }}-${{ runner.arch }}-${{ inputs.toolchain }}-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ inputs.cache-prefix }}-${{ runner.os }}-${{ runner.arch }}-${{ inputs.toolchain }}-
+          ${{ inputs.cache-prefix }}-${{ runner.os }}-${{ runner.arch }}-

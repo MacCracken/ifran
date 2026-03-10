@@ -1,9 +1,45 @@
 /target
 **/*.rs.bk
 *.pdb
+
+# Environment
 .env
+.env.*
+!.env.example
+
+# Database
 *.db
 *.db-journal
+
+# Build artifacts
 /dist
+/sbom
+
+# Frontend
 node_modules/
+
+# Coverage
+/coverage
+tarpaulin-report.*
+cobertura.xml
+
+# Security reports
+vulnerability-report.json
+
+# OS
 .DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Models (too large for git)
+*.gguf
+*.safetensors
+*.bin
+*.onnx
+*.pt

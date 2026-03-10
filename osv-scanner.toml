@@ -1,0 +1,13 @@
+[[scanned]]
+ecosystem = "crates.io"
+
+[[scanned]]
+ecosystem = "PyPI"
+
+[config]
+exclude = ["**/test_data/**", "**/fuzz/**", "**/benches/**"]
+scan = ["cargo", "pip"]
+
+[output]
+format = "json"
+output = "vulnerability-report.json"

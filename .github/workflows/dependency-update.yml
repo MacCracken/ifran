@@ -1,0 +1,55 @@
+name: Dependency Update
+
+on:
+  schedule:
+    - cron: "0 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  update-dependencies:
+    name: Update Dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust environment
+        uses: ./.github/actions/setup-rust-env
+        with:
+          cache-prefix: deps-update
+
+      - name: Install cargo-outdated
+        run: cargo install cargo-outdated --locked
+
+      - name: Check for outdated dependencies
+        run: cargo outdated --root-deps-only
+        continue-on-error: true
+
+      - name: Update dependencies
+        run: cargo update
+
+      - name: Run tests with updated dependencies
+        run: cargo test --workspace
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(deps): update cargo dependencies"
+          title: "chore(deps): update cargo dependencies"
+          body: |
+            Automated dependency update.
+
+            This PR was created by the scheduled dependency update workflow.
+            Please review the changes and ensure all tests pass before merging.
+          branch: chore/dependency-update
+          labels: dependencies
+          delete-branch: true

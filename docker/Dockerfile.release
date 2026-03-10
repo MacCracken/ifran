@@ -1,24 +1,5 @@
-FROM rust:1.85-bookworm AS builder
-
-WORKDIR /build
-
-# Install build dependencies
-RUN apt-get update && apt-get install -y \
-    protobuf-compiler \
-    cmake \
-    pkg-config \
-    libssl-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy manifests first for dependency caching
-COPY Cargo.toml Cargo.lock ./
-COPY crates/ crates/
-COPY proto/ proto/
-
-# Build release binaries
-RUN cargo build --release --package synapse-api --package synapse-cli
-
-# Runtime stage
+# Runtime-only container for CI/CD releases.
+# Expects pre-built binaries passed via build context.
 FROM debian:bookworm-slim
 
 ARG VERSION
@@ -33,16 +14,14 @@ RUN apt-get update && apt-get install -y \
     tini \
     && rm -rf /var/lib/apt/lists/*
 
-# Non-root user
 RUN groupadd -g 1000 synapse && \
     useradd -u 1000 -g synapse -m -s /bin/bash synapse
 
-# Create data directories
 RUN mkdir -p /var/lib/synapse/models /var/lib/synapse/checkpoints /var/lib/synapse/cache && \
     chown -R synapse:synapse /var/lib/synapse
 
-COPY --from=builder /build/target/release/synapse-api /usr/local/bin/synapse-server
-COPY --from=builder /build/target/release/synapse /usr/local/bin/synapse
+COPY synapse-server /usr/local/bin/synapse-server
+COPY synapse /usr/local/bin/synapse
 
 USER synapse
 EXPOSE 8420 8421

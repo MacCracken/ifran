@@ -1,0 +1,40 @@
+# Auto detect text files and ensure LF line endings
+* text=auto eol=lf
+
+# Rust sources
+*.rs text diff=rust
+*.toml text
+
+# Proto
+*.proto text
+
+# Frontend
+*.ts text
+*.svelte text
+*.js text
+*.css text
+*.html text
+
+# Documentation
+*.md text
+*.txt text
+
+# Scripts
+*.sh text eol=lf
+*.py text
+
+# Docker
+Dockerfile* text
+docker-compose*.yml text
+
+# Binary
+*.gguf binary
+*.bin binary
+*.safetensors binary
+*.onnx binary
+*.png binary
+*.ico binary
+
+# GitHub Linguist
+Cargo.lock linguist-generated
+*.lock linguist-generated

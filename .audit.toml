@@ -1,0 +1,9 @@
+[advisories]
+db = "https://github.com/rustsec/advisory-db"
+
+[severity]
+high = "deny"
+critical = "deny"
+
+[yank]
+warn = true

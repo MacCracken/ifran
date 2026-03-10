@@ -1,0 +1,236 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "[0-9]*"
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+env:
+  CARGO_TERM_COLOR: always
+  REGISTRY: ghcr.io
+  IMAGE_NAME: maccracken/synapse
+
+jobs:
+  ci-gate:
+    name: CI Gate
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
+  build-release:
+    name: Build Release (${{ matrix.target }})
+    needs: ci-gate
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            use-cross: false
+            arch: amd64
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-latest
+            use-cross: true
+            arch: arm64
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust environment
+        id: setup
+        uses: ./.github/actions/setup-rust-env
+        with:
+          targets: ${{ matrix.target }}
+          cache-prefix: release-${{ matrix.target }}
+          install-cross: ${{ matrix.use-cross }}
+
+      - name: Build release (native)
+        if: matrix.use-cross == false
+        run: cargo build --workspace --release --target ${{ matrix.target }}
+
+      - name: Build release (cross)
+        if: matrix.use-cross == true
+        run: cross build --workspace --release --target ${{ matrix.target }}
+
+      - name: Create release tarball
+        run: |
+          VERSION=${{ steps.setup.outputs.project-version }}
+          TARBALL_NAME="synapse-${VERSION}-linux-${{ matrix.arch }}"
+          mkdir -p "${TARBALL_NAME}"
+
+          cp target/${{ matrix.target }}/release/synapse "${TARBALL_NAME}/"
+          cp target/${{ matrix.target }}/release/synapse-api "${TARBALL_NAME}/"
+          cp LICENSE "${TARBALL_NAME}/"
+          cp README.md "${TARBALL_NAME}/"
+
+          if [ -d docs ]; then
+            cp -r docs "${TARBALL_NAME}/"
+          fi
+
+          tar czf "${TARBALL_NAME}.tar.gz" "${TARBALL_NAME}"
+          sha256sum "${TARBALL_NAME}.tar.gz" > "${TARBALL_NAME}.tar.gz.sha256"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.arch }}
+          path: |
+            synapse-*.tar.gz
+            synapse-*.tar.gz.sha256
+          retention-days: 7
+
+  generate-sbom:
+    name: Generate SBOM
+    needs: ci-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust environment
+        uses: ./.github/actions/setup-rust-env
+        with:
+          cache-prefix: sbom
+
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx --locked
+
+      - name: Generate CycloneDX SBOM (JSON)
+        run: cargo cyclonedx --format json --output-cdx
+
+      - name: Generate CycloneDX SBOM (XML)
+        run: cargo cyclonedx --format xml --output-cdx
+
+      - name: Install cargo-license
+        run: cargo install cargo-license --locked
+
+      - name: Generate license report (JSON)
+        run: cargo license --json > license-report.json
+
+      - name: Generate license report (TXT)
+        run: cargo license > license-report.txt
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: |
+            *bom.cdx.json
+            *bom.cdx.xml
+            license-report.json
+            license-report.txt
+          retention-days: 90
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build-release, generate-sbom]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read VERSION
+        id: version
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -E '^[0-9]' | head -n 2 | tail -n 1 || echo "")
+          CURRENT_TAG="${GITHUB_REF_NAME}"
+
+          echo "## What's Changed" > changelog.md
+          echo "" >> changelog.md
+
+          if [ -n "$PREVIOUS_TAG" ]; then
+            echo "Changes since ${PREVIOUS_TAG}:" >> changelog.md
+            echo "" >> changelog.md
+            git log "${PREVIOUS_TAG}..${CURRENT_TAG}" --pretty=format:"- %s (%h)" --no-merges >> changelog.md
+          else
+            echo "Initial release." >> changelog.md
+            echo "" >> changelog.md
+            git log --pretty=format:"- %s (%h)" --no-merges >> changelog.md
+          fi
+
+          echo "" >> changelog.md
+          echo "" >> changelog.md
+          echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREVIOUS_TAG}...${CURRENT_TAG}" >> changelog.md
+
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Synapse ${{ steps.version.outputs.version }}"
+          body_path: changelog.md
+          prerelease: true
+          files: |
+            artifacts/release-amd64/*
+            artifacts/release-arm64/*
+            artifacts/sbom/*
+          generate_release_notes: false
+
+  container:
+    name: Publish Container Images
+    needs: [build-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read VERSION
+        id: version
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=latest
+            type=raw,value=alpha
+
+      - name: Build and push multi-arch container image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

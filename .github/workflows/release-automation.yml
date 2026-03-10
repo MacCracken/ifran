@@ -1,0 +1,66 @@
+name: Release Automation
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (CalVer: YYYY.M.D or YYYY.M.D-N)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  create-release-tag:
+    name: Create Release Tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate CalVer format
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [[ ! "$VERSION" =~ ^[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}(-[0-9]+)?$ ]]; then
+            echo "::error::Invalid CalVer format: '${VERSION}'. Expected YYYY.M.D or YYYY.M.D-N"
+            exit 1
+          fi
+          echo "Version '${VERSION}' is valid CalVer format"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check tag does not already exist
+        run: |
+          VERSION="${{ inputs.version }}"
+          if git rev-parse "refs/tags/${VERSION}" >/dev/null 2>&1; then
+            echo "::error::Tag '${VERSION}' already exists"
+            exit 1
+          fi
+          echo "Tag '${VERSION}' does not exist, proceeding"
+
+      - name: Update VERSION file
+        run: |
+          echo "${{ inputs.version }}" > VERSION
+          echo "Updated VERSION file to: $(cat VERSION)"
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit VERSION update
+        run: |
+          git add VERSION
+          git commit -m "release: ${{ inputs.version }}"
+
+      - name: Create annotated tag
+        run: |
+          git tag -a "${{ inputs.version }}" -m "Release ${{ inputs.version }}"
+
+      - name: Push commit and tag
+        run: |
+          git push origin HEAD
+          git push origin "${{ inputs.version }}"
