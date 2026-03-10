@@ -1,1 +1,4 @@
-//! Native in-process training executor for direct execution within the server process.
+//! Native in-process training executor.
+//!
+//! Placeholder for future pure-Rust training. Currently unused — training
+//! is orchestrated via Docker or subprocess executors.

@@ -2027,7 +2027,10 @@ dependencies = [
 name = "synapse-bridge"
 version = "2026.3.10"
 dependencies = [
+ "chrono",
  "prost",
+ "serde",
+ "serde_json",
  "synapse-types",
  "thiserror",
  "tokio",
@@ -2048,6 +2051,7 @@ dependencies = [
  "synapse-api",
  "synapse-backends",
  "synapse-core",
+ "synapse-train",
  "synapse-types",
  "tokio",
  "tracing",
@@ -2088,6 +2092,7 @@ dependencies = [
  "serde_json",
  "synapse-core",
  "synapse-types",
+ "tempfile",
  "thiserror",
  "tokio",
  "tracing",

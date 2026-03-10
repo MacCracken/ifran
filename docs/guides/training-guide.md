@@ -15,7 +15,31 @@ Create a JSONL file with instruction-response pairs:
 {"instruction": "Explain LoRA", "response": "LoRA (Low-Rank Adaptation) is a parameter-efficient fine-tuning method..."}
 ```
 
-### 2. Create a training config
+Supported formats: JSONL, CSV, Parquet, HuggingFace datasets.
+
+### 2. Start a training job via CLI
+
+```bash
+# LoRA fine-tune (default method)
+synapse train --base-model meta-llama/Llama-3.1-8B-Instruct --dataset ./my-dataset.jsonl
+
+# Explicit method selection
+synapse train --base-model meta-llama/Llama-3.1-8B-Instruct --dataset ./data.jsonl --method qlora
+synapse train --base-model meta-llama/Llama-3.1-8B-Instruct --dataset ./data.jsonl --method dpo
+synapse train --base-model meta-llama/Llama-3.1-8B-Instruct --dataset ./data.jsonl --method full
+```
+
+The CLI validates the dataset, selects the appropriate executor (Docker or subprocess), and submits the job to the training manager.
+
+### 3. Monitor progress
+
+```bash
+synapse status
+```
+
+### 4. Advanced: Config file
+
+For full control over hyperparameters, create a TOML config:
 
 ```toml
 # train-config.toml
@@ -43,20 +67,6 @@ dropout = 0.05
 target_modules = ["q_proj", "v_proj", "k_proj", "o_proj"]
 ```
 
-### 3. Submit the job
-
-```bash
-synapse train train-config.toml
-```
-
-### 4. Monitor progress
-
-```bash
-synapse status
-```
-
-Or via the API: `GET http://localhost:8420/training/jobs/:id`
-
 ## Training Methods
 
 | Method | Use Case | Config `method` |
@@ -70,11 +80,10 @@ Or via the API: `GET http://localhost:8420/training/jobs/:id`
 
 ## Executors
 
-Training runs via one of three executors (configured in `synapse.toml`):
+Training runs via one of two executors:
 
-- **docker** (default): Runs in `synapse-trainer` container with all Python deps
-- **subprocess**: Spawns Python directly on the host
-- **native**: In-process Rust training (experimental)
+- **docker** (default): Runs in a `synapse-trainer` container with GPU passthrough (`--gpus all`) and all Python dependencies pre-installed
+- **subprocess**: Spawns Python training scripts directly on the host (requires local Python + transformers/PEFT/trl)
 
 ## SecureYeoman Integration
 

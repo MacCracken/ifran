@@ -8,6 +8,33 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 ## [2026.3.10] — (in progress)
 
 ### Added
+- `synapse-bridge/server`: gRPC bridge server with connection state machine, heartbeat, and degraded mode support
+- `synapse-bridge/client`: gRPC bridge client with connect, reconnect (exponential backoff), capability announcement, GPU requests, progress reporting
+- `synapse-bridge/protocol`: Bridge protocol types — connection states, heartbeat config, capability announcement
+- `synapse-bridge/discovery`: SY endpoint discovery chain (explicit config → `SY_ENDPOINT` env → localhost:9420)
+- `synapse-train/job/manager`: Training job lifecycle manager with concurrent job limits and background task spawning
+- `synapse-train/job/scheduler`: FIFO priority queue for training job scheduling
+- `synapse-train/job/status`: Job state machine (Queued → Running → Completed/Failed/Cancelled) with progress tracking
+- `synapse-train/executor/docker`: Docker container executor with GPU passthrough and container cancellation
+- `synapse-train/executor/subprocess`: Python subprocess executor with method-specific training scripts
+- `synapse-train/dataset/loader`: Dataset loading for JSONL, CSV, Parquet, and HuggingFace datasets with sample counting
+- `synapse-train/dataset/validator`: Schema validation for JSONL and CSV training data formats
+- `synapse-train/methods/lora`: LoRA/QLoRA default configs (rank 16, alpha 32) and CLI argument generation
+- `synapse-train/methods/full`: Full fine-tuning defaults and argument generation
+- `synapse-train/methods/dpo`: DPO defaults (lr 5e-6, beta 0.1) and argument generation
+- `synapse-train/methods/rlhf`: RLHF argument generation
+- `synapse-train/methods/distillation`: Knowledge distillation argument generation
+- `synapse-train/checkpoint/store`: Checkpoint directory management — save, load, list, latest, prune
+- `synapse-train/checkpoint/merger`: LoRA adapter merging into base model via PEFT
+- `synapse-cli train`: Training command with `--base-model`, `--dataset`, `--method` flags
+- `synapse-api/rest/training`: Training REST endpoints — `POST /training/jobs`, `GET /training/jobs`, `GET /training/jobs/:id`, `POST /training/jobs/:id/cancel`
+- `synapse-backends/ollama`: Ollama HTTP backend — chat, streaming, model load/unload via keep_alive, configurable server URL
+- `synapse-backends/vllm`: vLLM HTTP backend — OpenAI-compatible chat and streaming, model registration via /v1/models
+- `synapse-backends/candle`: Candle (pure Rust) backend for SafeTensors — full trait impl, inference pending candle crate dependency
+- `synapse-backends/gguf`: Direct GGUF loading backend — full trait impl, inference pending candle-gguf dependency
+- `synapse-backends/onnx`: ONNX Runtime backend — full trait impl, inference pending ort crate dependency
+- `synapse-backends/tensorrt`: TensorRT-LLM backend — HTTP client to Triton server with streaming
+- `synapse-backends/router`: Smart backend auto-selection based on model format, hardware, and user preference
 - `synapse-api/rest/router`: Full Axum router with model, inference, system, and OpenAI-compatible routes + CORS + telemetry
 - `synapse-api/rest/models`: Model CRUD endpoints — `GET /models`, `GET /models/:id`, `DELETE /models/:id`
 - `synapse-api/rest/inference`: Inference endpoints — `POST /inference` (full) and `POST /inference/stream` (SSE)
@@ -33,7 +60,7 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - `synapse-core/storage/layout`: Filesystem layout manager for `~/.synapse/` directory structure with model slug generation, directory creation, and cleanup
 - `synapse-core/hardware/detect`: Hardware detection — NVIDIA GPUs via nvidia-smi, AMD ROCm GPUs via sysfs, CPU info from /proc; unified `SystemHardware` snapshot for backend selection
 - CalVer versioning via workspace — all crates inherit from `VERSION` file
-- 36 unit tests across storage, pull, registry, hardware, and lifecycle modules
+- 66 unit tests across storage, pull, registry, hardware, lifecycle, training, bridge, and backend modules
 - Initial project scaffold with 8-crate Cargo workspace
 - Protobuf definitions for core, bridge, and training services
 - Pluggable inference backend trait system with 7 backend stubs (llama.cpp, Candle, Ollama, vLLM, GGUF, ONNX, TensorRT)

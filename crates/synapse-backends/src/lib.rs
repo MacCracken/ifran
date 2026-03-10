@@ -18,7 +18,7 @@ pub mod vllm;
 #[cfg(feature = "ollama")]
 pub mod ollama;
 
-/// GGUF model loading utilities (always available as a format helper).
+#[cfg(feature = "gguf")]
 pub mod gguf;
 
 #[cfg(feature = "onnx")]

@@ -12,6 +12,7 @@ path = "src/main.rs"
 synapse-types = { path = "../synapse-types" }
 synapse-core = { path = "../synapse-core" }
 synapse-backends = { path = "../synapse-backends" }
+synapse-train = { path = "../synapse-train" }
 synapse-api = { path = "../synapse-api" }
 tokio = { workspace = true }
 clap = { workspace = true }

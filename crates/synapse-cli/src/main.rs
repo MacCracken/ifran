@@ -35,9 +35,19 @@ enum Commands {
         #[arg(short, long)]
         bind: Option<String>,
     },
-    /// Start or manage training jobs
-    Train,
-    /// Show status of running models and jobs
+    /// Start a training job
+    Train {
+        /// Base model name or path
+        #[arg(long)]
+        base_model: String,
+        /// Dataset path (JSONL file)
+        #[arg(long)]
+        dataset: String,
+        /// Training method: lora, qlora, full, dpo, rlhf, distillation
+        #[arg(long, default_value = "lora")]
+        method: String,
+    },
+    /// Show status of system, models, and jobs
     Status,
     /// Remove a local model
     Remove {
@@ -59,8 +69,10 @@ async fn main() {
         Commands::List => commands::list::execute().await,
         Commands::Run { model } => commands::run::execute(&model).await,
         Commands::Serve { bind } => commands::serve::execute(bind.as_deref()).await,
-        Commands::Train => { commands::train::execute().await; Ok(()) },
-        Commands::Status => { commands::status::execute().await; Ok(()) },
+        Commands::Train { base_model, dataset, method } => {
+            commands::train::execute(&base_model, &dataset, &method).await
+        }
+        Commands::Status => commands::status::execute().await,
         Commands::Remove { model, yes } => commands::remove::execute(&model, yes).await,
     };
 

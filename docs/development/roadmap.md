@@ -48,38 +48,38 @@ The minimum viable product delivers a working CLI and API server that can pull m
 
 Full-featured release with training, all backends, SY bridge, and desktop app.
 
-### Phase 5: Additional Backends
-- [ ] `synapse-backends/candle`: HuggingFace Candle (pure Rust) for SafeTensors
-- [ ] `synapse-backends/ollama`: HTTP client to Ollama API
-- [ ] `synapse-backends/gguf`: direct GGUF loading (via candle-gguf)
-- [ ] `synapse-backends/onnx`: ONNX Runtime via `ort` crate
-- [ ] `synapse-backends/vllm`: HTTP client to vLLM server
-- [ ] `synapse-backends/tensorrt`: TensorRT-LLM integration
-- [ ] `synapse-backends/router`: smart backend auto-selection based on model format + hardware
+### Phase 5: Additional Backends ✓
+- [x] `synapse-backends/candle`: HuggingFace Candle (pure Rust) for SafeTensors — backend trait impl, model load/unload, inference wiring pending candle crate dep
+- [x] `synapse-backends/ollama`: HTTP client to Ollama API — full chat/streaming, model load/unload via keep_alive
+- [x] `synapse-backends/gguf`: direct GGUF loading backend — trait impl, model load/unload, inference wiring pending candle-gguf dep
+- [x] `synapse-backends/onnx`: ONNX Runtime backend — trait impl, model load/unload, inference wiring pending ort crate dep
+- [x] `synapse-backends/vllm`: HTTP client to vLLM server — full OpenAI-compatible chat/streaming
+- [x] `synapse-backends/tensorrt`: TensorRT-LLM integration — HTTP client to Triton server, chat/streaming
+- [x] `synapse-backends/router`: smart backend auto-selection based on model format + hardware + user preference
 
-### Phase 6: Training
-- [ ] `synapse-train/executor/docker`: launch training containers
-- [ ] `synapse-train/executor/subprocess`: spawn Python training scripts
-- [ ] `synapse-train/job/manager`: job lifecycle (create, start, stop, resume)
-- [ ] `synapse-train/job/scheduler`: priority queue with GPU-aware scheduling
-- [ ] `synapse-train/dataset/loader`: JSONL, Parquet, HuggingFace datasets
-- [ ] `synapse-train/dataset/validator`: schema validation, quality checks
-- [ ] `synapse-train/methods/lora`: LoRA/QLoRA orchestration
-- [ ] `synapse-train/methods/full`: full parameter fine-tuning
-- [ ] `synapse-train/methods/dpo`: Direct Preference Optimization
-- [ ] `synapse-train/checkpoint/store`: checkpoint save/load/prune
-- [ ] `synapse-train/checkpoint/merger`: merge LoRA adapters into base model
-- [ ] `synapse-cli train` command
-- [ ] Training REST/gRPC endpoints in `synapse-api`
+### Phase 6: Training ✓
+- [x] `synapse-train/executor/docker`: launch training containers with GPU passthrough
+- [x] `synapse-train/executor/subprocess`: spawn Python training scripts as child processes
+- [x] `synapse-train/job/manager`: job lifecycle (create, start, cancel) with concurrent job limits
+- [x] `synapse-train/job/scheduler`: FIFO priority queue
+- [x] `synapse-train/dataset/loader`: JSONL, CSV, Parquet, HuggingFace dataset loading with sample counting
+- [x] `synapse-train/dataset/validator`: schema validation for JSONL and CSV formats
+- [x] `synapse-train/methods/lora`: LoRA/QLoRA default configs and argument generation
+- [x] `synapse-train/methods/full`: full parameter fine-tuning defaults
+- [x] `synapse-train/methods/dpo`: Direct Preference Optimization defaults
+- [x] `synapse-train/checkpoint/store`: checkpoint save/load/prune with metadata
+- [x] `synapse-train/checkpoint/merger`: merge LoRA adapters into base model via PEFT
+- [x] `synapse-cli train` command with `--base-model`, `--dataset`, `--method` flags
+- [x] Training REST endpoints in `synapse-api`: `POST /training/jobs`, `GET /training/jobs`, `GET /training/jobs/:id`, `POST /training/jobs/:id/cancel`
 - [ ] Python training scripts (SFT, DPO, RLHF) bundled in Docker image
 
-### Phase 7: SecureYeoman Bridge
-- [ ] `synapse-bridge/server`: gRPC server receiving SY commands
-- [ ] `synapse-bridge/client`: gRPC client calling back to SY
-- [ ] `synapse-bridge/protocol`: heartbeat, reconnection, degraded mode
-- [ ] `synapse-bridge/discovery`: SY instance discovery (env, config, mDNS)
-- [ ] SY-side integration: Synapse as a managed service in SecureYeoman orchestrator
-- [ ] Bidirectional job delegation (SY delegates training, Synapse requests GPU scaling)
+### Phase 7: SecureYeoman Bridge (Synapse side ✓)
+- [x] `synapse-bridge/server`: gRPC server framework for receiving SY commands
+- [x] `synapse-bridge/client`: gRPC client for calling back to SY (GPU allocation, progress, model registration)
+- [x] `synapse-bridge/protocol`: heartbeat, connection state machine, degraded mode, capability announcement
+- [x] `synapse-bridge/discovery`: SY instance discovery (config → env → well-known localhost)
+- [ ] SY-side integration → **pushed to SecureYeoman roadmap**
+- [ ] Bidirectional job delegation → **collaborative: SecureYeoman + Synapse**
 
 ### Phase 8: Desktop Application
 - [ ] Tauri v2 scaffold with Svelte frontend
@@ -89,7 +89,7 @@ Full-featured release with training, all backends, SY bridge, and desktop app.
 - [ ] System monitor (GPU utilization, VRAM, loaded models)
 - [ ] Settings page (backends, storage paths, bridge config)
 
-### Phase 9: Agnosticos Integration
+### Phase 9: Agnosticos Integration → **pushed to Agnosticos roadmap**
 - [ ] systemd service unit (`synapse.service`)
 - [ ] Agnosticos package spec (`synapse.pkg.toml`)
 - [ ] Agent-runtime registration as capability provider

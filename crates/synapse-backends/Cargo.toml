@@ -5,9 +5,10 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["llamacpp", "candle-backend"]
+default = ["llamacpp", "candle-backend", "gguf", "ollama", "vllm", "onnx", "tensorrt"]
 llamacpp = []
 candle-backend = []
+gguf = []
 onnx = []
 tensorrt = []
 vllm = []
