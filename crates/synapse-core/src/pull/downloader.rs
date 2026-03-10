@@ -1,3 +1,163 @@
-//! Chunked parallel downloader with resume support.
+//! Chunked HTTP downloader with resume support.
+//!
+//! Downloads a file from a URL to a local path. Supports:
+//! - Resume via HTTP `Range` header (checks for partial `.part` file)
+//! - Progress callbacks via [`ProgressTracker`]
+//! - Configurable timeouts
 
-// TODO: Implementation
+use crate::pull::progress::{ProgressEvent, ProgressTracker};
+use reqwest::Client;
+use std::path::PathBuf;
+use synapse_types::error::Result;
+use synapse_types::registry::DownloadState;
+use synapse_types::SynapseError;
+use tokio::io::AsyncWriteExt;
+
+/// Configuration for a download.
+pub struct DownloadRequest {
+    pub url: String,
+    pub dest: PathBuf,
+    pub model_name: String,
+    pub expected_sha256: Option<String>,
+}
+
+/// Download a file from a URL, supporting resume via `.part` files.
+///
+/// The file is first downloaded to `<dest>.part`, then renamed to `<dest>` on
+/// success. If a `.part` file already exists, the download resumes from where
+/// it left off (if the server supports `Range` requests).
+pub async fn download(
+    client: &Client,
+    request: &DownloadRequest,
+    progress: &ProgressTracker,
+) -> Result<()> {
+    let part_path = PathBuf::from(format!("{}.part", request.dest.display()));
+
+    // Check existing partial download size for resume
+    let existing_len = if part_path.exists() {
+        tokio::fs::metadata(&part_path)
+            .await
+            .map(|m| m.len())
+            .unwrap_or(0)
+    } else {
+        if let Some(parent) = part_path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        0
+    };
+
+    // Build request with optional Range header for resume
+    let mut req = client.get(&request.url);
+    if existing_len > 0 {
+        req = req.header("Range", format!("bytes={existing_len}-"));
+    }
+
+    let response = req
+        .send()
+        .await
+        .map_err(|e| SynapseError::DownloadError(e.to_string()))?;
+
+    if !response.status().is_success() && response.status().as_u16() != 206 {
+        return Err(SynapseError::DownloadError(format!(
+            "HTTP {}: {}",
+            response.status(),
+            request.url
+        )));
+    }
+
+    let is_resumed = response.status().as_u16() == 206;
+    let content_length = response.content_length();
+    let total_bytes = content_length.map(|cl| cl + if is_resumed { existing_len } else { 0 });
+
+    progress.send(ProgressEvent {
+        model_name: request.model_name.clone(),
+        state: DownloadState::Downloading,
+        downloaded_bytes: existing_len,
+        total_bytes,
+        speed_bytes_per_sec: 0,
+        message: if is_resumed {
+            Some(format!("Resuming from {} bytes", existing_len))
+        } else {
+            None
+        },
+    });
+
+    // Open file for append (resume) or create
+    let mut file = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(is_resumed)
+        .write(true)
+        .truncate(!is_resumed)
+        .open(&part_path)
+        .await?;
+
+    let mut downloaded = existing_len;
+    let mut stream = response.bytes_stream();
+    let mut last_progress = std::time::Instant::now();
+    let mut bytes_since_last = 0u64;
+
+    use futures::StreamExt;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| SynapseError::DownloadError(e.to_string()))?;
+        file.write_all(&chunk).await?;
+        downloaded += chunk.len() as u64;
+        bytes_since_last += chunk.len() as u64;
+
+        // Emit progress at most every 100ms
+        let elapsed = last_progress.elapsed();
+        if elapsed.as_millis() >= 100 {
+            let speed = (bytes_since_last as f64 / elapsed.as_secs_f64()) as u64;
+            progress.send(ProgressEvent {
+                model_name: request.model_name.clone(),
+                state: DownloadState::Downloading,
+                downloaded_bytes: downloaded,
+                total_bytes,
+                speed_bytes_per_sec: speed,
+                message: None,
+            });
+            last_progress = std::time::Instant::now();
+            bytes_since_last = 0;
+        }
+    }
+
+    file.flush().await?;
+    drop(file);
+
+    // Verify integrity if expected hash is provided
+    if let Some(ref expected) = request.expected_sha256 {
+        progress.emit(
+            &request.model_name,
+            DownloadState::Verifying,
+            "Verifying SHA-256 integrity...",
+        );
+        crate::pull::verifier::verify_file(
+            &part_path,
+            expected,
+            crate::pull::verifier::HashAlgorithm::Sha256,
+        )?;
+    }
+
+    // Rename .part to final destination
+    tokio::fs::rename(&part_path, &request.dest).await?;
+
+    progress.send(ProgressEvent {
+        model_name: request.model_name.clone(),
+        state: DownloadState::Complete,
+        downloaded_bytes: downloaded,
+        total_bytes,
+        speed_bytes_per_sec: 0,
+        message: Some("Download complete".to_string()),
+    });
+
+    Ok(())
+}
+
+/// Build a reusable reqwest client with sensible defaults.
+pub fn build_client() -> Result<Client> {
+    Client::builder()
+        .user_agent(format!("synapse/{}", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(3600)) // 1 hour max for large models
+        .build()
+        .map_err(|e| SynapseError::DownloadError(e.to_string()))
+}

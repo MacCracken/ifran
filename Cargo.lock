@@ -1985,7 +1985,7 @@ dependencies = [
 
 [[package]]
 name = "synapse-api"
-version = "0.1.0"
+version = "2026.3.10"
 dependencies = [
  "axum 0.8.8",
  "serde",
@@ -2005,7 +2005,7 @@ dependencies = [
 
 [[package]]
 name = "synapse-backends"
-version = "0.1.0"
+version = "2026.3.10"
 dependencies = [
  "async-trait",
  "dashmap",
@@ -2020,7 +2020,7 @@ dependencies = [
 
 [[package]]
 name = "synapse-bridge"
-version = "0.1.0"
+version = "2026.3.10"
 dependencies = [
  "prost",
  "synapse-types",
@@ -2032,8 +2032,9 @@ dependencies = [
 
 [[package]]
 name = "synapse-cli"
-version = "0.1.0"
+version = "2026.3.10"
 dependencies = [
+ "chrono",
  "clap",
  "indicatif",
  "serde_json",
@@ -2043,11 +2044,12 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
 name = "synapse-core"
-version = "0.1.0"
+version = "2026.3.10"
 dependencies = [
  "anyhow",
  "blake3",
@@ -2070,7 +2072,7 @@ dependencies = [
 
 [[package]]
 name = "synapse-train"
-version = "0.1.0"
+version = "2026.3.10"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2086,7 +2088,7 @@ dependencies = [
 
 [[package]]
 name = "synapse-types"
-version = "0.1.0"
+version = "2026.3.10"
 dependencies = [
  "chrono",
  "prost",

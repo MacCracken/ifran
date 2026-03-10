@@ -1,6 +1,6 @@
 .PHONY: build release test test-unit test-integration test-coverage \
        clean dev lint fmt format-check check \
-       security-scan docs \
+       security-scan docs version-sync \
        ci-build ci-test ci-docs \
        docker-build docker-dev docker-release
 
@@ -78,5 +78,12 @@ docker-dev:
 docker-release:
 	docker build -t ghcr.io/maccracken/synapse:$(VERSION) -f docker/Dockerfile .
 	docker tag ghcr.io/maccracken/synapse:$(VERSION) ghcr.io/maccracken/synapse:latest
+
+# === Version ===
+
+version-sync:
+	@echo "Syncing version $(VERSION) to Cargo.toml"
+	@sed -i 's/^version = .*/version = "$(VERSION)"/' Cargo.toml
+	@echo "Version set to $(VERSION)"
 
 .DEFAULT_GOAL := build

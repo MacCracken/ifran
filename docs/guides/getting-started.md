@@ -36,15 +36,40 @@ pkg install synapse
 synapse pull meta-llama/Llama-3.1-8B-Instruct --quant q4_k_m
 ```
 
-This downloads from HuggingFace Hub, verifies integrity, and registers in the local catalog.
+This resolves the model on HuggingFace Hub, finds the matching GGUF file for the requested quantization, downloads it with a progress bar, verifies SHA-256 integrity, and registers it in the local SQLite catalog.
 
-### 2. Chat with it
+Downloads support resume — if interrupted, re-running the same command picks up where it left off via HTTP Range requests and `.part` files.
+
+Set `HF_TOKEN` for gated models:
+```bash
+export HF_TOKEN=hf_xxxxx
+synapse pull meta-llama/Llama-3.1-8B-Instruct --quant q4_k_m
+```
+
+### 2. List models
+
+```bash
+synapse list
+```
+
+Shows all locally registered models with name, format, quantization, size, and pull date.
+
+### 3. Remove a model
+
+```bash
+synapse remove meta-llama/Llama-3.1-8B-Instruct
+synapse remove <model-name> -y   # skip confirmation
+```
+
+Removes the model files from disk and deletes it from the catalog.
+
+### 4. Chat with it
 
 ```bash
 synapse run meta-llama/Llama-3.1-8B-Instruct
 ```
 
-### 3. Start the API server
+### 5. Start the API server
 
 ```bash
 synapse serve
@@ -55,7 +80,7 @@ The server exposes:
 - gRPC at `localhost:8421`
 - OpenAI-compatible endpoint at `http://localhost:8420/v1/chat/completions`
 
-### 4. Use the desktop app
+### 6. Use the desktop app
 
 ```bash
 cd crates/synapse-desktop

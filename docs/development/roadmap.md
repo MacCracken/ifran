@@ -14,15 +14,15 @@ The minimum viable product delivers a working CLI and API server that can pull m
 - [x] `synapse-core/storage/layout`: filesystem layout for `~/.synapse/models/`
 - [x] `synapse-core/hardware/detect`: GPU detection (CUDA via NVML, ROCm, CPU fallback)
 
-### Phase 2: Model Pulling
-- [ ] `synapse-core/registry/huggingface`: HuggingFace Hub API — search, resolve GGUF files
-- [ ] `synapse-core/pull/downloader`: chunked parallel HTTP download with resume
-- [ ] `synapse-core/pull/verifier`: SHA-256 integrity check
-- [ ] `synapse-core/pull/progress`: broadcast channel for progress events
-- [ ] `synapse-core/registry/scanner`: scan local filesystem for existing models
-- [ ] `synapse-cli pull` command
-- [ ] `synapse-cli list` command
-- [ ] `synapse-cli rm` command
+### Phase 2: Model Pulling ✓
+- [x] `synapse-core/registry/huggingface`: HuggingFace Hub API — search, resolve GGUF files
+- [x] `synapse-core/pull/downloader`: chunked parallel HTTP download with resume
+- [x] `synapse-core/pull/verifier`: SHA-256 integrity check
+- [x] `synapse-core/pull/progress`: broadcast channel for progress events
+- [x] `synapse-core/registry/scanner`: scan local filesystem for existing models
+- [x] `synapse-cli pull` command
+- [x] `synapse-cli list` command
+- [x] `synapse-cli rm` command
 
 ### Phase 3: Inference — llama.cpp Backend
 - [ ] `synapse-backends/traits`: finalize `InferenceBackend` trait

@@ -1,5 +1,61 @@
 /// List all locally available models.
 
-pub async fn execute() {
-    // TODO: Implement model listing with table output.
+use synapse_core::config::SynapseConfig;
+use synapse_core::storage::db::ModelDatabase;
+use synapse_types::error::Result;
+
+pub async fn execute() -> Result<()> {
+    let config = SynapseConfig::default();
+    let db = ModelDatabase::open(&config.storage.database)?;
+    let models = db.list()?;
+
+    if models.is_empty() {
+        eprintln!("No models found. Use 'synapse pull <model>' to download one.");
+        return Ok(());
+    }
+
+    // Header
+    println!(
+        "{:<40} {:<12} {:<8} {:<12} {}",
+        "NAME", "FORMAT", "QUANT", "SIZE", "PULLED"
+    );
+    println!("{}", "-".repeat(90));
+
+    for model in &models {
+        let size = format_size(model.size_bytes);
+        let format = format!("{:?}", model.format).to_lowercase();
+        let quant = format!("{:?}", model.quant);
+        let pulled = model.pulled_at.format("%Y-%m-%d").to_string();
+
+        println!(
+            "{:<40} {:<12} {:<8} {:<12} {}",
+            truncate(&model.name, 39),
+            format,
+            quant,
+            size,
+            pulled,
+        );
+    }
+
+    eprintln!("\n{} model(s)", models.len());
+    Ok(())
+}
+
+fn format_size(bytes: u64) -> String {
+    const GB: u64 = 1_000_000_000;
+    const MB: u64 = 1_000_000;
+
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else {
+        format!("{:.0} MB", bytes as f64 / MB as f64)
+    }
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}…", &s[..max - 1])
+    }
 }
