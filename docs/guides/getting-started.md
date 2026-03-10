@@ -14,8 +14,7 @@
 ```bash
 git clone git@github.com:MacCracken/synapse.git
 cd synapse
-./scripts/setup-dev.sh
-make release
+cargo build --release
 ```
 
 The binaries will be at:
@@ -26,7 +25,14 @@ The binaries will be at:
 
 ```bash
 pkg install synapse
+systemctl enable --now synapse
 ```
+
+This installs:
+- `/usr/local/bin/synapse` and `/usr/local/bin/synapse-server`
+- `/etc/synapse/synapse.toml` (system config)
+- `/var/lib/synapse/` (models, database, checkpoints, cache)
+- `synapse.service` (systemd unit with security hardening)
 
 ## First Steps
 
@@ -57,8 +63,8 @@ Shows all locally registered models with name, format, quantization, size, and p
 ### 3. Remove a model
 
 ```bash
-synapse remove meta-llama/Llama-3.1-8B-Instruct
-synapse remove <model-name> -y   # skip confirmation
+synapse rm meta-llama/Llama-3.1-8B-Instruct
+synapse rm <model-name> -y   # skip confirmation
 ```
 
 Removes the model files from disk and deletes it from the catalog.
@@ -80,16 +86,46 @@ The server exposes:
 - gRPC at `localhost:8421`
 - OpenAI-compatible endpoint at `http://localhost:8420/v1/chat/completions`
 
-### 6. Use the desktop app
+### 6. Enable authentication
+
+```bash
+export SYNAPSE_API_KEY=your-secret-token
+synapse serve
+```
+
+All endpoints except `/health` will require `Authorization: Bearer your-secret-token`.
+
+### 7. Use the desktop app
 
 ```bash
 cd crates/synapse-desktop
 cargo tauri dev
 ```
 
+## Configuration
+
+Synapse discovers config in this order:
+
+1. `SYNAPSE_CONFIG` environment variable (explicit path)
+2. `~/.synapse/synapse.toml` (user config)
+3. `/etc/synapse/synapse.toml` (system config, Agnosticos)
+4. Built-in defaults
+
+Create `~/.synapse/synapse.toml` or copy from `deploy/synapse.toml.example`.
+
+Key settings:
+- `server.bind` — REST API address (default: `0.0.0.0:8420`)
+- `server.grpc_bind` — gRPC address (default: `0.0.0.0:8421`)
+- `storage.models_dir` — where models are stored (default: `~/.synapse/models/`)
+- `storage.database` — SQLite catalog path (default: `~/.synapse/synapse.db`)
+- `backends.default` — which inference backend to use (default: `llamacpp`)
+- `training.executor` — `docker` or `subprocess` (default: `docker`)
+- `bridge.sy_endpoint` — SecureYeoman connection (if using orchestration)
+- `hardware.gpu_memory_reserve_mb` — VRAM to keep free (default: 512 MB)
+
 ## Storage Layout
 
-Synapse stores all data under `~/.synapse/` by default:
+Synapse stores all data under `~/.synapse/` by default (or `/var/lib/synapse/` on Agnosticos):
 
 ```text
 ~/.synapse/
@@ -99,28 +135,16 @@ Synapse stores all data under `~/.synapse/` by default:
 ├── checkpoints/        # Training checkpoints
 └── models/
     ├── llama-3.1-8b-instruct-q4km/
-    │   ├── model.gguf
-    │   └── metadata.json
+    │   └── model.gguf
     └── mistral-7b-q5km/
-        ├── model.gguf
-        └── metadata.json
+        └── model.gguf
 ```
 
 Models are tracked in a SQLite catalog (`synapse.db`) and stored in slugified directories under `models/`.
 
-## Configuration
-
-Create `~/.synapse/synapse.toml` or copy from `deploy/synapse.toml.example`.
-
-Key settings:
-- `storage.models_dir` — where models are stored (default: `~/.synapse/models/`)
-- `storage.database` — SQLite catalog path (default: `~/.synapse/synapse.db`)
-- `backends.default` — which inference backend to use
-- `bridge.sy_endpoint` — SecureYeoman connection (if using orchestration)
-- `hardware.gpu_memory_reserve_mb` — VRAM to keep free (default: 512 MB)
-
 ## Next Steps
 
-- [Add a new backend](../backends.md)
-- [Start a training job](./training-guide.md)
-- [Connect to SecureYeoman](./sy-integration.md)
+- [Inference Backends](../backends.md) — configure and add backends
+- [Training Guide](./training-guide.md) — fine-tune models
+- [SY Integration](./sy-integration.md) — connect to SecureYeoman
+- [API Reference](../api-reference.md) — full endpoint documentation

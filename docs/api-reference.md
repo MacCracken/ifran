@@ -2,10 +2,27 @@
 
 Synapse exposes a REST API (default `:8420`) and a gRPC API (default `:8421`).
 
+## Authentication
+
+Set `SYNAPSE_API_KEY` to require Bearer token authentication:
+
+```bash
+export SYNAPSE_API_KEY=your-secret-token
+synapse serve
+```
+
+All endpoints except `/health` require the header:
+
+```
+Authorization: Bearer your-secret-token
+```
+
+When `SYNAPSE_API_KEY` is unset, the API is open (no auth required).
+
 ## REST Endpoints
 
 ### System
-- `GET /health` — liveness probe, returns `"ok"`
+- `GET /health` — liveness probe, returns `"ok"` (always unauthenticated)
 - `GET /system/status` — system info: version, loaded models, registered backends, hardware (CPU, GPUs)
 
 ### Models

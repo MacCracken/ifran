@@ -4,39 +4,69 @@
 
 - Rust stable (via `rustup`)
 - `protoc` (protobuf compiler)
-- Docker (for training executor)
+- Docker (optional, for training executor)
 - CUDA toolkit (optional, for GPU backends)
 
 ## Quick Start
 
 ```bash
-# Setup dev dependencies
-./scripts/setup-dev.sh
-
 # Build all crates
-make build
+cargo build --workspace
 
 # Run tests
-make test
+cargo test --workspace
 
-# Start dev server with auto-reload
-make dev
-
-# Lint + format + test
-make check
+# Check formatting + clippy
+cargo fmt --all -- --check
+cargo clippy --workspace -- -D warnings
 ```
+
+## Testing
+
+132 tests across 7 crates. CI runs per-package test matrix with coverage via cargo-tarpaulin.
+
+```bash
+# All tests
+cargo test --workspace
+
+# Single crate
+cargo test -p synapse-core
+
+# Coverage (requires cargo-tarpaulin)
+cargo tarpaulin --workspace --out html
+```
+
+Current coverage: ~45%. Target: 80%. See [roadmap.md](./roadmap.md) for the coverage improvement plan.
 
 ## Project Structure
 
 See [architecture.md](../architecture.md) for the full workspace layout and design decisions.
 
-See [roadmap.md](./roadmap.md) for the development roadmap and phased delivery plan.
+See [roadmap.md](./roadmap.md) for remaining work.
+
+## Configuration
+
+Config is auto-discovered: `SYNAPSE_CONFIG` env → `~/.synapse/synapse.toml` → `/etc/synapse/synapse.toml` → defaults.
+
+See `deploy/synapse.toml.example` for all options.
 
 ## Versioning
 
 CalVer format: `YYYY.M.D` for releases, `YYYY.M.D-N` for patches.
 
 Matches the convention used by Agnosticos and SecureYeoman.
+
+## CI/CD
+
+GitHub Actions workflows:
+- **Build** — x86_64 native + aarch64 cross-compilation (via `cross`)
+- **Quality** — `cargo fmt --check` + `cargo clippy -D warnings`
+- **Security** — Trivy scan, `cargo audit`, `cargo deny`
+- **Tests** — per-package matrix (7 jobs in parallel)
+- **Coverage** — `cargo tarpaulin` with 45% threshold
+- **Docs** — verify required files exist, `cargo doc --no-deps`
+- **Container** — Docker build verification
+- **License** — MIT license check
 
 ## Related Projects
 

@@ -4,25 +4,52 @@ Synapse orchestrates LLM training via subprocess/Docker executors, avoiding embe
 
 ## Training Methods
 
-- **Full Fine-Tune** — full parameter training
-- **LoRA / QLoRA** — low-rank adaptation (4-bit quantized)
-- **DPO** — Direct Preference Optimization
-- **RLHF** — Reinforcement Learning from Human Feedback
-- **Distillation** — model knowledge distillation
+| Method | Description | Script |
+|--------|-------------|--------|
+| **LoRA** | Low-rank adaptation, parameter-efficient | `train_sft.py` |
+| **QLoRA** | 4-bit quantized LoRA, lower VRAM | `train_sft.py` |
+| **Full Fine-Tune** | Full parameter training | `train_full.py` |
+| **DPO** | Direct Preference Optimization | `train_dpo.py` |
+| **RLHF** | Reinforcement Learning from Human Feedback (PPO) | `train_rlhf.py` |
+| **Distillation** | Knowledge transfer from teacher to student | `train_distill.py` |
+
+## Dataset Formats
+
+- **JSONL** — `{"instruction": "...", "response": "..."}` or `{"text": "..."}` or `{"messages": [...]}`
+- **CSV** — columns auto-detected
+- **Parquet** — columnar format
+- **HuggingFace** — dataset hub references
+
+The dataset loader auto-detects column structure. The validator checks schema before training begins.
 
 ## Execution Model
 
-Training jobs are submitted as configurations and executed by one of three executors:
+Training jobs are submitted as configurations and executed by one of two executors:
 
-1. **Docker** (default) — launches a container with the `synapse-trainer` image containing Python + PyTorch + Unsloth + PEFT + TRL
-2. **Subprocess** — directly spawns `python3 scripts/train_sft.py` for environments without Docker
-3. **Native** — in-process Rust training via candle/burn (experimental, for smaller models)
+1. **Docker** (default) — launches a container with the `synapse-trainer` image containing Python + PyTorch + PEFT + TRL. Method-specific script is selected automatically.
+2. **Subprocess** — directly spawns `python3 scripts/train_<method>.py` for environments without Docker.
+
+Both executors pass training config as JSON (`--config-json` argument or `TRAINING_CONFIG` env var).
 
 ## Job Lifecycle
 
-`Queued → Preparing → Running → Completed/Failed/Cancelled`
+```
+Queued → Running → Completed / Failed / Cancelled
+```
 
-Jobs can be paused and resumed. Checkpoints are saved periodically and tracked in the checkpoint store.
+The `JobManager` enforces a concurrent job limit (default: 2). The `JobScheduler` uses FIFO ordering. Checkpoints are saved periodically and tracked in the `CheckpointStore`, which supports listing, pruning, and LoRA adapter merging.
+
+## Python Scripts
+
+Located in `crates/synapse-train/src/scripts/`:
+
+- **`train_sft.py`** — SFT with LoRA/QLoRA/full support via transformers + PEFT + TRL
+- **`train_full.py`** — Full parameter fine-tuning with gradient checkpointing
+- **`train_dpo.py`** — DPO with reference model and QLoRA by default
+- **`train_rlhf.py`** — PPO-based RLHF with reward model (two-phase)
+- **`train_distill.py`** — Knowledge distillation with custom KL divergence + CE loss
+
+Config is passed via `--config-json`, `--config-file`, or `TRAINING_CONFIG` env var.
 
 ## SecureYeoman Integration
 

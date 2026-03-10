@@ -14,7 +14,7 @@ In `synapse.toml`:
 
 ```toml
 [bridge]
-sy_endpoint = "http://your-sy-host:9000"
+sy_endpoint = "http://your-sy-host:9420"
 enabled = true
 heartbeat_interval_secs = 10
 ```
@@ -22,7 +22,7 @@ heartbeat_interval_secs = 10
 Or via environment variable:
 
 ```bash
-export SY_GRPC_ENDPOINT="http://your-sy-host:9000"
+export SY_ENDPOINT="http://your-sy-host:9420"
 ```
 
 ### 2. Start Synapse
@@ -31,7 +31,7 @@ export SY_GRPC_ENDPOINT="http://your-sy-host:9000"
 synapse serve
 ```
 
-Synapse will connect to SY and register itself. Heartbeats maintain the connection.
+Synapse will connect to SY, announce its capabilities (GPU count, supported training methods), and begin sending heartbeats with status updates.
 
 ## Communication Flow
 
@@ -54,12 +54,34 @@ Synapse will connect to SY and register itself. Heartbeats maintain the connecti
 | `RequestScaleOut` | Request additional instances |
 | `RegisterCompletedModel` | Notify of newly trained model |
 
+## Endpoint Discovery
+
+The SY endpoint is resolved in order:
+1. `bridge.sy_endpoint` in config
+2. `SY_ENDPOINT` environment variable
+3. `http://127.0.0.1:9420` (well-known local address)
+
 ## Degraded Mode
 
 If SY is unavailable, Synapse operates independently:
 - Inference and local training continue normally
 - Orchestration features (scaling, GPU allocation) are disabled
-- Automatic reconnection with exponential backoff
+- Automatic reconnection with exponential backoff (base 5s, max 10 attempts)
+- After max attempts, enters degraded mode until manually reconnected
+
+## Agnosticos Deployment
+
+When installed via `pkg install synapse` on Agnosticos, Synapse automatically registers as a capability provider:
+
+```bash
+agnosticos capability register synapse \
+    --type llm-inference \
+    --endpoint http://127.0.0.1:8420 \
+    --grpc-endpoint http://127.0.0.1:8421 \
+    --capabilities 'model-pull,inference,training,openai-compat'
+```
+
+SY discovers Synapse instances through the Agnosticos agent-runtime capability registry.
 
 ## Proto Definitions
 

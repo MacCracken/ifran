@@ -22,15 +22,28 @@ Synapse calls back to SY:
 
 ## Connection Lifecycle
 
-1. Synapse reads `SY_GRPC_ENDPOINT` from config/env
-2. Connects to SY and registers itself
-3. Heartbeats flow every 10 seconds in both directions
+1. Synapse reads the SY endpoint from config or `SY_ENDPOINT` env var
+2. Connects to SY and announces capabilities (GPU count, supported methods)
+3. Heartbeats flow every 10 seconds with instance status (loaded models, free VRAM, active jobs)
 4. If SY is unavailable, Synapse operates in degraded mode (no orchestration)
-5. Reconnection is automatic with exponential backoff
+5. Reconnection is automatic with exponential backoff (max 10 attempts)
+
+## Protocol Configuration
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `heartbeat_interval` | 10s | Time between heartbeats |
+| `heartbeat_timeout` | 30s | Max time to wait for heartbeat response |
+| `reconnect_delay` | 5s | Base delay between reconnect attempts |
+| `max_reconnect_attempts` | 10 | Max reconnects before entering degraded mode |
 
 ## Discovery
 
-SY instances can be discovered via:
-- Environment variable (`SY_GRPC_ENDPOINT`)
-- Config file (`synapse.toml` → `bridge.sy_endpoint`)
-- mDNS (future)
+SY endpoint is resolved in order:
+1. `bridge.sy_endpoint` in `synapse.toml`
+2. `SY_ENDPOINT` environment variable
+3. `http://127.0.0.1:9420` (well-known local address)
+
+## Proto Definitions
+
+The shared contract lives in `proto/bridge.proto`. SY generates its TypeScript client from the same proto files.
