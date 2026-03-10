@@ -12,7 +12,7 @@
 
 ### Test Coverage → 80%
 
-Current: **~45%** across 132 tests. CI threshold: 45%.
+Current: **~45%** across 164 tests. CI threshold: 45%.
 
 Raise by 5% per milestone. Priority by coverage gap:
 
@@ -31,11 +31,51 @@ Milestones:
 
 ---
 
+## In Progress — New Features
+
+### Model Evaluation Benchmarks
+> Types, core runner, SQLite store, REST API, CLI stub — all wired
+
+- [x] Eval types: `EvalConfig`, `EvalResult`, `EvalStatus`, `BenchmarkKind` (Perplexity/MMLU/HellaSwag/HumanEval/Custom)
+- [x] Eval runner: create/start/complete/fail runs, `run_custom_benchmark()` with closure-based inference
+- [x] Eval store: SQLite `eval_results` table, CRUD
+- [x] Benchmarks: `load_samples()` from JSONL, `score_exact_match()`, `score_contains_match()`
+- [x] REST: `POST/GET /eval/runs`, `GET /eval/runs/:id`
+- [x] CLI: `synapse eval --benchmark <kind> --dataset <path>`
+- [ ] Wire inference backends to eval runner for real benchmarks
+- [ ] Implement perplexity calculation
+- [ ] Standard benchmark datasets (MMLU, HellaSwag, HumanEval)
+
+### Model Marketplace
+> Types, catalog, publisher, resolver, REST API, CLI — all wired
+
+- [x] Marketplace types: `MarketplaceEntry`, `MarketplaceQuery`
+- [x] SQLite catalog: publish/search/list/unpublish/count
+- [x] Publisher: `create_entry()` from `ModelInfo`
+- [x] Resolver: peer management, remote search stub
+- [x] REST: `GET /marketplace/search`, `GET/POST /marketplace/entries`, `DELETE /marketplace/entries/:name`
+- [x] CLI: `synapse marketplace search/publish/unpublish`
+- [ ] Remote peer search (query `GET /marketplace/search` on peers)
+- [ ] Model download/pull from marketplace entries
+- [ ] Trust/verification layer for remote models
+
+### Distributed Training
+> Types and core modules complete, needs API/CLI wiring and real execution
+
+- [x] Types: `DistributedTrainingConfig`, `DistributedStrategy`, `WorkerAssignment`, `DistributedJobState`
+- [x] Coordinator: job creation, worker assignment, lifecycle management
+- [x] Worker: local state, extra CLI args for distributed scripts, lifecycle
+- [x] Aggregator: `AggregationPlan`, checkpoint merging command builder
+- [ ] REST endpoints for distributed job management
+- [ ] CLI `--distributed` flag for `synapse train`
+- [ ] Wire to SY bridge for cross-node worker coordination
+- [ ] Checkpoint synchronization between workers
+- [ ] Federated averaging implementation
+
+---
+
 ## Post-v1 Considerations
 
-- Model marketplace / shared registry between Synapse instances
-- Distributed training across multiple Synapse nodes (via SY orchestration)
-- Model evaluation benchmarks (automated quality scoring)
 - Prompt management and versioning
 - RAG pipeline integration
 - WebAssembly builds for browser-based inference

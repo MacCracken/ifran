@@ -16,6 +16,10 @@ pub enum RegistrySource {
     LocalPath {
         path: String,
     },
+    Marketplace {
+        instance_url: String,
+        model_name: String,
+    },
 }
 
 /// Status of an active download.

@@ -78,10 +78,10 @@ pub async fn delete_model(
 
     // Remove files
     let local_path = std::path::Path::new(&model.local_path);
-    if let Some(model_dir) = local_path.parent()
-        && model_dir.exists()
-    {
-        let _ = std::fs::remove_dir_all(model_dir);
+    if let Some(model_dir) = local_path.parent() {
+        if model_dir.exists() {
+            let _ = std::fs::remove_dir_all(model_dir);
+        }
     }
 
     db.delete(model.id)

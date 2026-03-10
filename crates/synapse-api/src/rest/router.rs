@@ -1,11 +1,11 @@
 //! Top-level REST API router that mounts all route groups.
 
 use crate::middleware;
-use crate::rest::{inference, models, openai_compat, system, training};
+use crate::rest::{eval, inference, marketplace, models, openai_compat, system, training};
 use crate::state::AppState;
 use axum::Router;
 use axum::middleware as axum_mw;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use tower_http::cors::CorsLayer;
 
 /// Build the complete API router with all routes and middleware.
@@ -30,6 +30,17 @@ pub fn build(state: AppState) -> Router {
         )
         .route("/training/jobs/{id}", get(training::get_job))
         .route("/training/jobs/{id}/cancel", post(training::cancel_job))
+        // Eval
+        .route("/eval/runs", post(eval::create_run).get(eval::list_runs))
+        .route("/eval/runs/{id}", get(eval::get_run))
+        // Marketplace
+        .route("/marketplace/search", get(marketplace::search))
+        .route("/marketplace/entries", get(marketplace::list_entries))
+        .route("/marketplace/publish", post(marketplace::publish))
+        .route(
+            "/marketplace/entries/{name}",
+            delete(marketplace::unpublish),
+        )
         // OpenAI-compatible
         .route("/v1/models", get(openai_compat::list_models))
         .route(

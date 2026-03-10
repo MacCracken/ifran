@@ -25,3 +25,6 @@ thiserror = { workspace = true }
 reqwest = { workspace = true }
 serde_json = { workspace = true }
 futures = { workspace = true }
+
+[lints]
+workspace = true

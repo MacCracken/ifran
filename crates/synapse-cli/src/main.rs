@@ -56,6 +56,44 @@ enum Commands {
         #[arg(short = 'y', long)]
         yes: bool,
     },
+    /// Evaluate a model with benchmarks
+    Eval {
+        /// Model name
+        model: String,
+        /// Benchmark: perplexity, mmlu, hellaswag, humaneval, custom
+        #[arg(long, default_value = "perplexity")]
+        benchmark: String,
+        /// Dataset path (required for custom benchmark)
+        #[arg(long)]
+        dataset: Option<String>,
+        /// Max samples to evaluate
+        #[arg(long)]
+        sample_limit: Option<usize>,
+    },
+    /// Marketplace commands
+    Marketplace {
+        #[command(subcommand)]
+        action: MarketplaceAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum MarketplaceAction {
+    /// Search the model marketplace
+    Search {
+        /// Search query
+        query: Option<String>,
+    },
+    /// Publish a local model to the marketplace
+    Publish {
+        /// Model name to publish
+        model: String,
+    },
+    /// Unpublish a model from the marketplace
+    Unpublish {
+        /// Model name to unpublish
+        model: String,
+    },
 }
 
 #[tokio::main]
@@ -75,6 +113,21 @@ async fn main() {
         } => commands::train::execute(&base_model, &dataset, &method).await,
         Commands::Status => commands::status::execute().await,
         Commands::Remove { model, yes } => commands::remove::execute(&model, yes).await,
+        Commands::Eval {
+            model,
+            benchmark,
+            dataset,
+            sample_limit,
+        } => commands::eval::execute(&model, &benchmark, dataset.as_deref(), sample_limit).await,
+        Commands::Marketplace { action } => match action {
+            MarketplaceAction::Search { query } => {
+                commands::marketplace::search(query.as_deref()).await
+            }
+            MarketplaceAction::Publish { model } => commands::marketplace::publish(&model).await,
+            MarketplaceAction::Unpublish { model } => {
+                commands::marketplace::unpublish(&model).await
+            }
+        },
     };
 
     if let Err(e) = result {

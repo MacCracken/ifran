@@ -35,6 +35,15 @@ pub enum SynapseError {
     #[error("Hardware error: {0}")]
     HardwareError(String),
 
+    #[error("Evaluation error: {0}")]
+    EvalError(String),
+
+    #[error("Marketplace error: {0}")]
+    MarketplaceError(String),
+
+    #[error("Distributed training error: {0}")]
+    DistributedError(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 

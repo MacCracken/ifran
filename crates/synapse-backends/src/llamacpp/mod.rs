@@ -69,10 +69,10 @@ impl LlamaCppBackend {
     async fn wait_for_ready(&self, port: u16) -> Result<()> {
         let url = format!("http://127.0.0.1:{port}/health");
         for _ in 0..60 {
-            if let Ok(resp) = self.client.get(&url).send().await
-                && resp.status().is_success()
-            {
-                return Ok(());
+            if let Ok(resp) = self.client.get(&url).send().await {
+                if resp.status().is_success() {
+                    return Ok(());
+                }
             }
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }

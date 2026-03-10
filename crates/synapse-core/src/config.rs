@@ -109,29 +109,29 @@ impl SynapseConfig {
         // 1. Explicit env override
         if let Ok(path) = std::env::var("SYNAPSE_CONFIG") {
             let p = PathBuf::from(&path);
-            if p.exists()
-                && let Ok(cfg) = Self::load(&p)
-            {
-                return cfg;
+            if p.exists() {
+                if let Ok(cfg) = Self::load(&p) {
+                    return cfg;
+                }
             }
         }
 
         // 2. User config
         if let Ok(home) = std::env::var("HOME") {
             let user_config = PathBuf::from(home).join(".synapse/synapse.toml");
-            if user_config.exists()
-                && let Ok(cfg) = Self::load(&user_config)
-            {
-                return cfg;
+            if user_config.exists() {
+                if let Ok(cfg) = Self::load(&user_config) {
+                    return cfg;
+                }
             }
         }
 
         // 3. System config (Agnosticos / systemd)
         let system_config = PathBuf::from("/etc/synapse/synapse.toml");
-        if system_config.exists()
-            && let Ok(cfg) = Self::load(&system_config)
-        {
-            return cfg;
+        if system_config.exists() {
+            if let Ok(cfg) = Self::load(&system_config) {
+                return cfg;
+            }
         }
 
         // 4. Built-in defaults

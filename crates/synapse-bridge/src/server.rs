@@ -86,7 +86,10 @@ mod tests {
     #[tokio::test]
     async fn starts_disconnected() {
         let server = test_server();
-        assert_eq!(server.connection_state().await, ConnectionState::Disconnected);
+        assert_eq!(
+            server.connection_state().await,
+            ConnectionState::Disconnected
+        );
     }
 
     #[tokio::test]

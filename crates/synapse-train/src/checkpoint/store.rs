@@ -37,11 +37,12 @@ impl CheckpointStore {
         for entry in std::fs::read_dir(&dir)?.flatten() {
             let path = entry.path();
             let meta_path = path.join("checkpoint_meta.json");
-            if meta_path.exists()
-                && let Ok(content) = std::fs::read_to_string(&meta_path)
-                && let Ok(info) = serde_json::from_str::<CheckpointInfo>(&content)
-            {
-                checkpoints.push(info);
+            if meta_path.exists() {
+                if let Ok(content) = std::fs::read_to_string(&meta_path) {
+                    if let Ok(info) = serde_json::from_str::<CheckpointInfo>(&content) {
+                        checkpoints.push(info);
+                    }
+                }
             }
         }
 

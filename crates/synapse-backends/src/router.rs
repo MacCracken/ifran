@@ -80,11 +80,12 @@ impl BackendRouter {
         }
 
         // 2. Configured default, if it supports the format
-        if let Some(ref default_id) = self.default_backend
-            && let Some(b) = self.get(default_id)
-            && b.supported_formats().contains(&format)
-        {
-            return Some(b);
+        if let Some(ref default_id) = self.default_backend {
+            if let Some(b) = self.get(default_id) {
+                if b.supported_formats().contains(&format) {
+                    return Some(b);
+                }
+            }
         }
 
         // 3. First backend that supports the format

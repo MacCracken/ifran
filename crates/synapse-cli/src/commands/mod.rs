@@ -1,4 +1,6 @@
+pub mod eval;
 pub mod list;
+pub mod marketplace;
 pub mod pull;
 pub mod remove;
 pub mod run;

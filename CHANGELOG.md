@@ -10,7 +10,7 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 ### Added
 
 #### Core
-- `synapse-types`: Core data structures — models, backends, inference, training, errors
+- `synapse-types`: Core data structures — models, backends, inference, training, eval, marketplace, distributed, errors
 - `synapse-core/config`: TOML config loading with auto-discovery (`SYNAPSE_CONFIG` → `~/.synapse/` → `/etc/synapse/` → defaults)
 - `synapse-core/storage/db`: SQLite model catalog with full CRUD, schema migrations, and indexes
 - `synapse-core/storage/layout`: Filesystem layout for `~/.synapse/models/` with slug generation
@@ -22,6 +22,12 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - `synapse-core/pull/progress`: Broadcast-channel progress tracking for multi-consumer updates
 - `synapse-core/lifecycle/manager`: Model load/unload orchestration with backend-agnostic handle tracking
 - `synapse-core/lifecycle/memory`: VRAM/RAM budget estimation with GPU/CPU fallback
+- `synapse-core/eval/runner`: Eval runner with run lifecycle, custom benchmark execution via closure-based inference
+- `synapse-core/eval/store`: SQLite eval results store with CRUD
+- `synapse-core/eval/benchmarks`: JSONL sample loading, exact/contains match scoring
+- `synapse-core/marketplace/catalog`: SQLite marketplace catalog — publish, search, list, unpublish
+- `synapse-core/marketplace/publisher`: Create marketplace entries from local models
+- `synapse-core/marketplace/resolver`: Peer management for remote marketplace search
 - CalVer versioning via `VERSION` file — all crates inherit from workspace
 - Protobuf definitions for core, bridge, and training services
 
@@ -42,6 +48,8 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - `synapse-api/rest/inference`: `POST /inference`, `POST /inference/stream` (SSE)
 - `synapse-api/rest/openai_compat`: `POST /v1/chat/completions` (streaming + non-streaming), `GET /v1/models`
 - `synapse-api/rest/training`: `POST /training/jobs`, `GET /training/jobs`, `GET /training/jobs/:id`, `POST /training/jobs/:id/cancel`
+- `synapse-api/rest/eval`: `POST /eval/runs`, `GET /eval/runs`, `GET /eval/runs/:id`
+- `synapse-api/rest/marketplace`: `GET /marketplace/search`, `GET /marketplace/entries`, `POST /marketplace/publish`, `DELETE /marketplace/entries/:name`
 - `synapse-api/rest/system`: `GET /health`, `GET /system/status`
 - `synapse-api/middleware/telemetry`: Request tracing via tower-http
 - `synapse-api/middleware/auth`: Optional Bearer token auth via `SYNAPSE_API_KEY`
@@ -58,6 +66,9 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - `synapse-train/methods`: LoRA/QLoRA, full fine-tune, DPO, RLHF, distillation configs and arg generation
 - `synapse-train/checkpoint/store`: Checkpoint save/load/list/prune with metadata
 - `synapse-train/checkpoint/merger`: LoRA adapter merging into base model via PEFT
+- `synapse-train/distributed/coordinator`: Distributed job creation, worker assignment, lifecycle
+- `synapse-train/distributed/worker`: Worker local state, distributed CLI arg generation, lifecycle
+- `synapse-train/distributed/aggregator`: Checkpoint aggregation plans (average/weighted), command builder
 - Python training scripts: `train_sft.py`, `train_full.py`, `train_dpo.py`, `train_rlhf.py`, `train_distill.py`
 
 #### SY Bridge
@@ -74,6 +85,8 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - `synapse serve`: Full API server
 - `synapse train`: Training job creation with `--base-model`, `--dataset`, `--method`
 - `synapse status`: Hardware and catalog status
+- `synapse eval`: Model evaluation with benchmark selection (`--benchmark`, `--dataset`, `--sample-limit`)
+- `synapse marketplace search/publish/unpublish`: Model marketplace management
 
 #### Desktop Application
 - Tauri v2 + SvelteKit scaffold with dark theme UI
@@ -99,4 +112,4 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - rustls-tls for cross-compilation without OpenSSL headers
 - Dependency update automation (weekly cargo update PRs)
 - Governance: CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, SUPPORT
-- 132 tests across all modules (~45% coverage)
+- 164 tests across all modules (~45% coverage)
