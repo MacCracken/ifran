@@ -104,10 +104,10 @@ jobs:
         run: cargo install cargo-cyclonedx --locked
 
       - name: Generate CycloneDX SBOM (JSON)
-        run: cargo cyclonedx --format json --output-cdx
+        run: cargo cyclonedx --format json
 
       - name: Generate CycloneDX SBOM (XML)
-        run: cargo cyclonedx --format xml --output-cdx
+        run: cargo cyclonedx --format xml
 
       - name: Install cargo-license
         run: cargo install cargo-license --locked
