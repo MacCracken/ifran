@@ -32,15 +32,15 @@ The minimum viable product delivers a working CLI and API server that can pull m
 - [x] `synapse-cli run` command (interactive prompt with streaming)
 - [x] `synapse-cli serve` command (start API server)
 
-### Phase 4: API Server
-- [ ] `synapse-api/rest/router`: Axum router setup
-- [ ] `synapse-api/rest/models`: `GET/POST /models` endpoints
-- [ ] `synapse-api/rest/inference`: `POST /inference` + SSE streaming
-- [ ] `synapse-api/rest/openai_compat`: `POST /v1/chat/completions` (OpenAI-compatible)
-- [ ] `synapse-api/rest/system`: `GET /health`, `GET /system/status`
-- [ ] `synapse-api/middleware/telemetry`: request tracing with `tracing`
+### Phase 4: API Server ✓
+- [x] `synapse-api/rest/router`: Axum router setup with all route groups + CORS + telemetry
+- [x] `synapse-api/rest/models`: `GET /models`, `GET /models/:id`, `DELETE /models/:id`
+- [x] `synapse-api/rest/inference`: `POST /inference` + `POST /inference/stream` (SSE)
+- [x] `synapse-api/rest/openai_compat`: `POST /v1/chat/completions` + `GET /v1/models` (OpenAI-compatible)
+- [x] `synapse-api/rest/system`: `GET /health`, `GET /system/status`
+- [x] `synapse-api/middleware/telemetry`: request tracing with `tower-http`
 
-**MVP milestone: a user can `synapse pull`, `synapse run`, and hit a local OpenAI-compatible API.**
+**MVP milestone: a user can `synapse pull`, `synapse run`, and hit a local OpenAI-compatible API.** ✓
 
 ---
 

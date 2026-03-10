@@ -1,35 +1,31 @@
 /// Start the synapse API server.
 
+use synapse_api::state::AppState;
 use synapse_core::config::SynapseConfig;
 use synapse_types::error::Result;
 use synapse_types::SynapseError;
 
 pub async fn execute(bind: Option<&str>) -> Result<()> {
-    let config = SynapseConfig::default();
-    let addr = bind.unwrap_or(&config.server.bind);
+    let mut config = SynapseConfig::default();
+    if let Some(addr) = bind {
+        config.server.bind = addr.to_string();
+    }
 
-    eprintln!("Starting Synapse API server on {addr}");
-    eprintln!("  REST:  http://{addr}");
-    eprintln!("  gRPC:  {}", config.server.grpc_bind);
-    eprintln!("  OpenAI-compat: http://{addr}/v1/chat/completions");
+    let bind_addr = config.server.bind.clone();
 
-    // TODO: Wire up actual Axum router from synapse-api once Phase 4 is complete.
-    // For now, start a minimal health-check server so `synapse serve` is functional.
+    eprintln!("Starting Synapse API server on {bind_addr}");
+    eprintln!("  REST:  http://{bind_addr}");
+    eprintln!("  OpenAI-compat: http://{bind_addr}/v1/chat/completions");
 
-    let app = axum::Router::new()
-        .route("/health", axum::routing::get(|| async { "ok" }))
-        .route(
-            "/v1/models",
-            axum::routing::get(|| async {
-                axum::Json(serde_json::json!({ "data": [] }))
-            }),
-        );
+    let state = AppState::new(config)
+        .map_err(|e| SynapseError::Other(format!("Failed to initialize state: {e}")))?;
+    let app = synapse_api::router::build(state);
 
-    let listener = tokio::net::TcpListener::bind(addr)
+    let listener = tokio::net::TcpListener::bind(&bind_addr)
         .await
-        .map_err(|e| SynapseError::Other(format!("Failed to bind {addr}: {e}")))?;
+        .map_err(|e| SynapseError::Other(format!("Failed to bind {bind_addr}: {e}")))?;
 
-    eprintln!("Server listening on {addr}");
+    eprintln!("Server ready");
 
     axum::serve(listener, app)
         .await

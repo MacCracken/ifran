@@ -1987,7 +1987,10 @@ dependencies = [
 name = "synapse-api"
 version = "2026.3.10"
 dependencies = [
+ "async-stream",
  "axum 0.8.8",
+ "chrono",
+ "futures",
  "serde",
  "serde_json",
  "synapse-backends",
@@ -2001,6 +2004,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

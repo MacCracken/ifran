@@ -8,6 +8,14 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 ## [2026.3.10] — (in progress)
 
 ### Added
+- `synapse-api/rest/router`: Full Axum router with model, inference, system, and OpenAI-compatible routes + CORS + telemetry
+- `synapse-api/rest/models`: Model CRUD endpoints — `GET /models`, `GET /models/:id`, `DELETE /models/:id`
+- `synapse-api/rest/inference`: Inference endpoints — `POST /inference` (full) and `POST /inference/stream` (SSE)
+- `synapse-api/rest/openai_compat`: OpenAI drop-in replacement — `POST /v1/chat/completions` (streaming + non-streaming) and `GET /v1/models`
+- `synapse-api/rest/system`: System endpoints — `GET /health` and `GET /system/status` (hardware, loaded models, backends)
+- `synapse-api/middleware/telemetry`: Request tracing middleware via `tower-http`
+- `synapse-api/state`: Shared application state with config, DB, backend router, and model manager
+- `synapse-cli serve`: Now uses the full API router instead of minimal stub
 - `synapse-backends/llamacpp`: llama.cpp backend via `llama-server` subprocess — load/unload models, inference, streaming via OpenAI-compatible API
 - `synapse-core/lifecycle/manager`: Model load/unload orchestration with backend-agnostic handle tracking
 - `synapse-core/lifecycle/memory`: VRAM/RAM budget estimation and pre-load memory checks with GPU/CPU fallback
