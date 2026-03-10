@@ -62,14 +62,37 @@ cd crates/synapse-desktop
 cargo tauri dev
 ```
 
+## Storage Layout
+
+Synapse stores all data under `~/.synapse/` by default:
+
+```text
+~/.synapse/
+├── synapse.toml        # Configuration file
+├── synapse.db          # SQLite model catalog
+├── cache/              # Temporary download cache
+├── checkpoints/        # Training checkpoints
+└── models/
+    ├── llama-3.1-8b-instruct-q4km/
+    │   ├── model.gguf
+    │   └── metadata.json
+    └── mistral-7b-q5km/
+        ├── model.gguf
+        └── metadata.json
+```
+
+Models are tracked in a SQLite catalog (`synapse.db`) and stored in slugified directories under `models/`.
+
 ## Configuration
 
 Create `~/.synapse/synapse.toml` or copy from `deploy/synapse.toml.example`.
 
 Key settings:
-- `storage.models_dir` — where models are stored
+- `storage.models_dir` — where models are stored (default: `~/.synapse/models/`)
+- `storage.database` — SQLite catalog path (default: `~/.synapse/synapse.db`)
 - `backends.default` — which inference backend to use
 - `bridge.sy_endpoint` — SecureYeoman connection (if using orchestration)
+- `hardware.gpu_memory_reserve_mb` — VRAM to keep free (default: 512 MB)
 
 ## Next Steps
 

@@ -21,3 +21,6 @@ blake3 = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

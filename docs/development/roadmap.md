@@ -6,13 +6,13 @@
 
 The minimum viable product delivers a working CLI and API server that can pull models, run inference through llama.cpp, and expose an OpenAI-compatible endpoint.
 
-### Phase 1: Foundation
+### Phase 1: Foundation ✓
 - [x] Project scaffold (workspace, crate layout, proto definitions)
-- [ ] `synapse-types`: finalize core data structures
-- [ ] `synapse-core/config`: TOML config loading with defaults
-- [ ] `synapse-core/storage/db`: SQLite model catalog (create, read, update, delete)
-- [ ] `synapse-core/storage/layout`: filesystem layout for `~/.synapse/models/`
-- [ ] `synapse-core/hardware/detect`: GPU detection (CUDA via NVML, ROCm, CPU fallback)
+- [x] `synapse-types`: finalize core data structures
+- [x] `synapse-core/config`: TOML config loading with defaults
+- [x] `synapse-core/storage/db`: SQLite model catalog (create, read, update, delete)
+- [x] `synapse-core/storage/layout`: filesystem layout for `~/.synapse/models/`
+- [x] `synapse-core/hardware/detect`: GPU detection (CUDA via NVML, ROCm, CPU fallback)
 
 ### Phase 2: Model Pulling
 - [ ] `synapse-core/registry/huggingface`: HuggingFace Hub API — search, resolve GGUF files
