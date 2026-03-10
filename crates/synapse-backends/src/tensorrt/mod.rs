@@ -7,14 +7,14 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
+use synapse_types::SynapseError;
 use synapse_types::backend::{AcceleratorType, BackendCapabilities, BackendId, DeviceConfig};
 use synapse_types::error::Result;
 use synapse_types::inference::{
     FinishReason, InferenceRequest, InferenceResponse, StreamChunk, TokenUsage,
 };
 use synapse_types::model::{ModelFormat, ModelManifest};
-use synapse_types::SynapseError;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tracing::{info, warn};
 
 use crate::traits::{InferenceBackend, ModelHandle};
@@ -75,7 +75,10 @@ impl InferenceBackend for TensorRtBackend {
         let handle_id = format!("tensorrt-{}", model_name.replace('/', "-"));
         info!(handle = %handle_id, model = %model_name, "Registered model with TensorRT backend");
 
-        self.loaded.write().await.insert(handle_id.clone(), model_name.to_string());
+        self.loaded
+            .write()
+            .await
+            .insert(handle_id.clone(), model_name.to_string());
         Ok(ModelHandle(handle_id))
     }
 
@@ -119,7 +122,9 @@ impl InferenceBackend for TensorRtBackend {
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(SynapseError::BackendError(format!("TensorRT error: {text}")));
+            return Err(SynapseError::BackendError(format!(
+                "TensorRT error: {text}"
+            )));
         }
 
         let json: serde_json::Value = resp
@@ -199,8 +204,7 @@ impl InferenceBackend for TensorRtBackend {
                     let line = buffer[..line_end].trim().to_string();
                     buffer = buffer[line_end + 1..].to_string();
 
-                    if line.starts_with("data: ") {
-                        let data = &line[6..];
+                    if let Some(data) = line.strip_prefix("data: ") {
                         if data == "[DONE]" {
                             let _ = tx
                                 .send(StreamChunk {
@@ -273,7 +277,10 @@ mod tests {
     #[test]
     fn cuda_only() {
         let backend = TensorRtBackend::new(None);
-        assert_eq!(backend.capabilities().accelerators, vec![AcceleratorType::Cuda]);
+        assert_eq!(
+            backend.capabilities().accelerators,
+            vec![AcceleratorType::Cuda]
+        );
     }
 
     #[test]

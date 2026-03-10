@@ -1,6 +1,6 @@
 pub mod docker;
-pub mod subprocess;
 pub mod native;
+pub mod subprocess;
 
 use async_trait::async_trait;
 use synapse_types::error::Result;

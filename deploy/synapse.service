@@ -1,16 +1,47 @@
 [Unit]
 Description=Synapse LLM Controller
+Documentation=https://github.com/MacCracken/synapse
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=notify
-ExecStart=/usr/local/bin/synapse-server
+ExecStart=/usr/local/bin/synapse serve
 Environment=SYNAPSE_CONFIG=/etc/synapse/synapse.toml
+Environment=RUST_LOG=info
+
+# Run as dedicated service user
+User=synapse
+Group=synapse
+
+# Restart policy
 Restart=on-failure
 RestartSec=5
 WatchdogSec=30
+
+# Resource limits
 LimitNOFILE=65536
+LimitMEMLOCK=infinity
+
+# Security hardening
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ReadWritePaths=/var/lib/synapse
+ReadOnlyPaths=/etc/synapse
+
+# GPU access — NVIDIA devices and DRI for AMD ROCm
+DeviceAllow=/dev/nvidia* rwm
+DeviceAllow=/dev/nvidiactl rwm
+DeviceAllow=/dev/nvidia-uvm rwm
+DeviceAllow=/dev/nvidia-uvm-tools rwm
+DeviceAllow=/dev/dri/* rwm
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=synapse
 
 [Install]
 WantedBy=multi-user.target

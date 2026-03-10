@@ -7,8 +7,8 @@
 
 use reqwest::Client;
 use serde::Deserialize;
-use synapse_types::error::Result;
 use synapse_types::SynapseError;
+use synapse_types::error::Result;
 
 const HF_API_BASE: &str = "https://huggingface.co/api";
 
@@ -37,10 +37,7 @@ impl HfFile {
 
     /// File size, preferring LFS size over top-level.
     pub fn file_size(&self) -> Option<u64> {
-        self.lfs
-            .as_ref()
-            .and_then(|l| l.size)
-            .or(self.size)
+        self.lfs.as_ref().and_then(|l| l.size).or(self.size)
     }
 
     /// True if this file is a GGUF model file.
@@ -117,11 +114,7 @@ impl HfClient {
     /// Find the best GGUF file matching a quantization substring (e.g. "Q4_K_M").
     ///
     /// Matching is case-insensitive on the filename.
-    pub async fn resolve_gguf(
-        &self,
-        repo_id: &str,
-        quant_filter: Option<&str>,
-    ) -> Result<HfFile> {
+    pub async fn resolve_gguf(&self, repo_id: &str, quant_filter: Option<&str>) -> Result<HfFile> {
         let files = self.list_gguf_files(repo_id).await?;
 
         if files.is_empty() {
@@ -179,6 +172,5 @@ pub async fn search(client: &Client, query: &str, limit: usize) -> Result<Vec<Hf
 
 /// Minimal percent-encoding for query params.
 fn urlencoded(s: &str) -> String {
-    s.replace(' ', "%20")
-        .replace('/', "%2F")
+    s.replace(' ', "%20").replace('/', "%2F")
 }

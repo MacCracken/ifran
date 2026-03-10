@@ -74,3 +74,53 @@ impl BridgeServer {
         *self.state.write().await = ConnectionState::Degraded;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_server() -> BridgeServer {
+        BridgeServer::new("test-instance".into(), ProtocolConfig::default())
+    }
+
+    #[tokio::test]
+    async fn starts_disconnected() {
+        let server = test_server();
+        assert_eq!(server.connection_state().await, ConnectionState::Disconnected);
+    }
+
+    #[tokio::test]
+    async fn start_transitions_to_connected() {
+        let server = test_server();
+        server.start("127.0.0.1:0").await.unwrap();
+        assert_eq!(server.connection_state().await, ConnectionState::Connected);
+    }
+
+    #[tokio::test]
+    async fn enter_degraded_sets_state() {
+        let server = test_server();
+        server.start("127.0.0.1:0").await.unwrap();
+        server.enter_degraded().await;
+        assert_eq!(server.connection_state().await, ConnectionState::Degraded);
+    }
+
+    #[test]
+    fn build_heartbeat_includes_instance_id() {
+        let server = test_server();
+        let hb = server.build_heartbeat(5, 4096, 2);
+        assert_eq!(hb.instance_id, "test-instance");
+        assert_eq!(hb.loaded_models, 5);
+        assert_eq!(hb.gpu_memory_free_mb, 4096);
+        assert_eq!(hb.active_training_jobs, 2);
+        assert!(hb.timestamp > 0);
+    }
+
+    #[test]
+    fn heartbeat_interval_from_config() {
+        let server = test_server();
+        assert_eq!(
+            server.heartbeat_interval(),
+            std::time::Duration::from_secs(10)
+        );
+    }
+}

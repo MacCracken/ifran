@@ -2,33 +2,32 @@
 
 > Versioning: CalVer `YYYY.M.D` / `YYYY.M.D-N` for patches
 
-## Completed
-
-- **MVP (Phases 1–4)** ✓ — Project scaffold, model pulling, llama.cpp inference, REST API
-- **Phase 5: Additional Backends** ✓ — Ollama, vLLM, TensorRT (full HTTP); Candle, GGUF, ONNX (trait impl, inference pending native deps); smart router
-- **Phase 6: Training** ✓ — Job manager, Docker/subprocess executors, dataset loading/validation, LoRA/QLoRA/DPO/RLHF/distillation, checkpoints, training API endpoints, Python scripts in Docker image
-- **Phase 7: SY Bridge (Synapse side)** ✓ — gRPC server/client, protocol state machine, endpoint discovery
-- **Phase 8: Desktop Application** ✓ — Tauri v2 + SvelteKit with models, chat, training, settings pages
-- **Phase 10: Polish & Release** ✓ — Integration tests, API docs, Docker multi-arch, CI/CD, auth middleware, CHANGELOG
-
----
-
 ## Remaining — External / Collaborative
 
-### Phase 7: SecureYeoman Bridge (SY side)
+### SecureYeoman Bridge (SY side)
 > Pushed to SecureYeoman roadmap
 
 - [ ] SY-side integration (SY receives Synapse capability announcements, delegates jobs)
 - [ ] Bidirectional job delegation (collaborative: SecureYeoman + Synapse)
 
-### Phase 9: Agnosticos Integration
-> Pushed to Agnosticos roadmap
+### Test Coverage → 80%
 
-- [ ] systemd service unit (`synapse.service`)
-- [ ] Agnosticos package spec (`synapse.pkg.toml`)
-- [ ] Agent-runtime registration as capability provider
-- [ ] `/etc/synapse/synapse.toml` system-level config
-- [ ] Model storage at `/var/lib/synapse/models/`
+Current: **~45%** across 132 tests. CI threshold: 45%.
+
+Raise by 5% per milestone. Priority by coverage gap:
+
+| Crate | Current | Priority targets |
+|---|---|---|
+| synapse-backends | ~10% | `llamacpp`, `ollama`, `vllm` — need mock HTTP servers |
+| synapse-cli | 0% | All commands — extract testable logic or integration harness |
+| synapse-api | ~64% | `rest/inference.rs`, `rest/openai_compat.rs` |
+| synapse-train | ~50% | `executor/docker.rs`, `executor/subprocess.rs` |
+
+Milestones:
+- [ ] **50%** — Mock HTTP server tests for backends (wiremock/mockito), downloader tests
+- [ ] **60%** — API integration tests for inference/streaming, training lifecycle, openai compat
+- [ ] **70%** — Bridge client/server with tonic mock, CLI command logic extraction + unit tests
+- [ ] **80%** — Edge cases, error paths, concurrent access patterns
 
 ---
 

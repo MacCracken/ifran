@@ -1,21 +1,32 @@
+# Synapse system configuration
+# Installed to: /etc/synapse/synapse.toml
+#
+# For user-level config, use: ~/.synapse/synapse.toml
+# Environment override: SYNAPSE_CONFIG=/path/to/synapse.toml
+
 [server]
 bind = "0.0.0.0:8420"
 grpc_bind = "0.0.0.0:8421"
 
 [storage]
+# System-level paths (when running as systemd service)
 models_dir = "/var/lib/synapse/models"
 database = "/var/lib/synapse/synapse.db"
 cache_dir = "/var/lib/synapse/cache"
 
 [backends]
 default = "llamacpp"
-enabled = ["llamacpp", "candle", "ollama"]
+enabled = ["llamacpp", "candle", "ollama", "vllm", "gguf", "onnx", "tensorrt"]
 
-[backends.ollama]
-endpoint = "http://localhost:11434"
-
-[backends.vllm]
-endpoint = "http://localhost:8000"
+# Backend-specific configuration (optional)
+# [backends.ollama]
+# endpoint = "http://localhost:11434"
+#
+# [backends.vllm]
+# endpoint = "http://localhost:8000"
+#
+# [backends.tensorrt]
+# endpoint = "http://localhost:8000"
 
 [training]
 executor = "docker"
@@ -24,9 +35,11 @@ max_concurrent_jobs = 2
 checkpoints_dir = "/var/lib/synapse/checkpoints"
 
 [bridge]
-sy_endpoint = "http://localhost:9000"
-enabled = true
+# SecureYeoman bridge (disabled by default)
+# sy_endpoint = "http://localhost:9420"
+enabled = false
 heartbeat_interval_secs = 10
 
 [hardware]
+# Reserve VRAM (MB) for system use when loading models
 gpu_memory_reserve_mb = 512

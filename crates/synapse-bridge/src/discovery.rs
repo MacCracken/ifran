@@ -24,23 +24,23 @@ pub enum DiscoveryMethod {
 /// Priority: explicit config → `SY_ENDPOINT` env → localhost:9420.
 pub fn discover(config_endpoint: Option<&str>) -> Result<SyEndpoint> {
     // 1. Explicit config
-    if let Some(ep) = config_endpoint {
-        if !ep.is_empty() {
-            return Ok(SyEndpoint {
-                address: ep.to_string(),
-                discovered_via: DiscoveryMethod::Config,
-            });
-        }
+    if let Some(ep) = config_endpoint
+        && !ep.is_empty()
+    {
+        return Ok(SyEndpoint {
+            address: ep.to_string(),
+            discovered_via: DiscoveryMethod::Config,
+        });
     }
 
     // 2. Environment variable
-    if let Ok(ep) = std::env::var("SY_ENDPOINT") {
-        if !ep.is_empty() {
-            return Ok(SyEndpoint {
-                address: ep,
-                discovered_via: DiscoveryMethod::Environment,
-            });
-        }
+    if let Ok(ep) = std::env::var("SY_ENDPOINT")
+        && !ep.is_empty()
+    {
+        return Ok(SyEndpoint {
+            address: ep,
+            discovered_via: DiscoveryMethod::Environment,
+        });
     }
 
     // 3. Well-known local address

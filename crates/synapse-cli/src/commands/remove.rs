@@ -1,13 +1,12 @@
 /// Remove a locally stored model.
-
 use synapse_core::config::SynapseConfig;
 use synapse_core::storage::db::ModelDatabase;
 use synapse_core::storage::layout::StorageLayout;
-use synapse_types::error::Result;
 use synapse_types::SynapseError;
+use synapse_types::error::Result;
 
 pub async fn execute(model: &str, skip_confirm: bool) -> Result<()> {
-    let config = SynapseConfig::default();
+    let config = SynapseConfig::discover();
     let db = ModelDatabase::open(&config.storage.database)?;
 
     // Try to find by name first, then by UUID
@@ -27,7 +26,8 @@ pub async fn execute(model: &str, skip_confirm: bool) -> Result<()> {
         eprint!("Confirm [y/N]: ");
 
         let mut input = String::new();
-        std::io::stdin().read_line(&mut input)
+        std::io::stdin()
+            .read_line(&mut input)
             .map_err(|e| SynapseError::Other(e.to_string()))?;
 
         if !input.trim().eq_ignore_ascii_case("y") {
@@ -40,7 +40,13 @@ pub async fn execute(model: &str, skip_confirm: bool) -> Result<()> {
     let local_path = std::path::Path::new(&model_info.local_path);
     if let Some(model_dir) = local_path.parent() {
         // Only remove the directory if it's inside our models dir
-        let layout = StorageLayout::new(&config.storage.models_dir.parent().unwrap_or(&config.storage.models_dir));
+        let layout = StorageLayout::new(
+            config
+                .storage
+                .models_dir
+                .parent()
+                .unwrap_or(&config.storage.models_dir),
+        );
         if model_dir.starts_with(layout.models_dir()) {
             if model_dir.exists() {
                 std::fs::remove_dir_all(model_dir)?;

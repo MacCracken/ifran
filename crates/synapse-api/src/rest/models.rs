@@ -1,12 +1,14 @@
 //! REST handlers for model management (list, get, remove).
 
+use crate::state::AppState;
+use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::Json;
-use crate::state::AppState;
 
 /// GET /models — list all models in the catalog.
-pub async fn list_models(State(state): State<AppState>) -> Result<Json<serde_json::Value>, StatusCode> {
+pub async fn list_models(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
     let db = state.db.lock().await;
     let models = db.list().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -76,13 +78,14 @@ pub async fn delete_model(
 
     // Remove files
     let local_path = std::path::Path::new(&model.local_path);
-    if let Some(model_dir) = local_path.parent() {
-        if model_dir.exists() {
-            let _ = std::fs::remove_dir_all(model_dir);
-        }
+    if let Some(model_dir) = local_path.parent()
+        && model_dir.exists()
+    {
+        let _ = std::fs::remove_dir_all(model_dir);
     }
 
-    db.delete(model.id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.delete(model.id)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(StatusCode::NO_CONTENT)
 }

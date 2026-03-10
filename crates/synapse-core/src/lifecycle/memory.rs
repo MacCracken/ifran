@@ -4,8 +4,8 @@
 //! sufficient GPU/system memory is available before loading.
 
 use crate::hardware::detect::SystemHardware;
-use synapse_types::error::Result;
 use synapse_types::SynapseError;
+use synapse_types::error::Result;
 
 /// Estimated memory requirements for a model.
 #[derive(Debug, Clone)]
@@ -20,7 +20,11 @@ pub struct MemoryEstimate {
 ///
 /// Rough heuristic: file size on disk is close to the VRAM needed,
 /// plus ~20% overhead for KV cache and runtime buffers.
-pub fn estimate_gguf(file_size_bytes: u64, gpu_layers: Option<u32>, total_layers: u32) -> MemoryEstimate {
+pub fn estimate_gguf(
+    file_size_bytes: u64,
+    gpu_layers: Option<u32>,
+    total_layers: u32,
+) -> MemoryEstimate {
     let file_mb = file_size_bytes / (1024 * 1024);
     let overhead = file_mb / 5; // ~20% for KV cache + buffers
 
@@ -128,30 +132,48 @@ mod tests {
     #[test]
     fn budget_ok() {
         let hw = mock_hardware(16000, 32000);
-        let est = MemoryEstimate { vram_mb: 6000, ram_mb: 0 };
+        let est = MemoryEstimate {
+            vram_mb: 6000,
+            ram_mb: 0,
+        };
         check_budget(&hw, &est, 512).unwrap();
     }
 
     #[test]
     fn budget_insufficient_vram() {
         let hw = mock_hardware(4000, 32000);
-        let est = MemoryEstimate { vram_mb: 6000, ram_mb: 0 };
+        let est = MemoryEstimate {
+            vram_mb: 6000,
+            ram_mb: 0,
+        };
         let result = check_budget(&hw, &est, 512);
-        assert!(matches!(result, Err(SynapseError::InsufficientMemory { .. })));
+        assert!(matches!(
+            result,
+            Err(SynapseError::InsufficientMemory { .. })
+        ));
     }
 
     #[test]
     fn budget_cpu_fallback() {
         let hw = mock_hardware(0, 32000);
-        let est = MemoryEstimate { vram_mb: 6000, ram_mb: 0 };
+        let est = MemoryEstimate {
+            vram_mb: 6000,
+            ram_mb: 0,
+        };
         check_budget(&hw, &est, 512).unwrap(); // Falls back to RAM
     }
 
     #[test]
     fn budget_cpu_fallback_insufficient() {
         let hw = mock_hardware(0, 4000);
-        let est = MemoryEstimate { vram_mb: 6000, ram_mb: 0 };
+        let est = MemoryEstimate {
+            vram_mb: 6000,
+            ram_mb: 0,
+        };
         let result = check_budget(&hw, &est, 512);
-        assert!(matches!(result, Err(SynapseError::InsufficientMemory { .. })));
+        assert!(matches!(
+            result,
+            Err(SynapseError::InsufficientMemory { .. })
+        ));
     }
 }

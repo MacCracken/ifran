@@ -7,14 +7,14 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
+use synapse_types::SynapseError;
 use synapse_types::backend::{AcceleratorType, BackendCapabilities, BackendId, DeviceConfig};
 use synapse_types::error::Result;
 use synapse_types::inference::{
     FinishReason, InferenceRequest, InferenceResponse, StreamChunk, TokenUsage,
 };
 use synapse_types::model::{ModelFormat, ModelManifest};
-use synapse_types::SynapseError;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tracing::{info, warn};
 
 use crate::traits::{InferenceBackend, ModelHandle};
@@ -73,12 +73,10 @@ impl InferenceBackend for VllmBackend {
             .unwrap_or(&manifest.info.name);
 
         let url = format!("{}/v1/models", self.base_url);
-        let resp = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| SynapseError::BackendError(format!("Cannot reach vLLM server: {e}")))?;
+        let resp =
+            self.client.get(&url).send().await.map_err(|e| {
+                SynapseError::BackendError(format!("Cannot reach vLLM server: {e}"))
+            })?;
 
         if !resp.status().is_success() {
             return Err(SynapseError::BackendError(
@@ -89,7 +87,10 @@ impl InferenceBackend for VllmBackend {
         let handle_id = format!("vllm-{}", model_name.replace('/', "-"));
         info!(handle = %handle_id, model = %model_name, "Registered model with vLLM backend");
 
-        self.loaded.write().await.insert(handle_id.clone(), model_name.to_string());
+        self.loaded
+            .write()
+            .await
+            .insert(handle_id.clone(), model_name.to_string());
         Ok(ModelHandle(handle_id))
     }
 
@@ -196,8 +197,7 @@ impl InferenceBackend for VllmBackend {
                     let line = buffer[..line_end].trim().to_string();
                     buffer = buffer[line_end + 1..].to_string();
 
-                    if line.starts_with("data: ") {
-                        let data = &line[6..];
+                    if let Some(data) = line.strip_prefix("data: ") {
                         if data == "[DONE]" {
                             let _ = tx
                                 .send(StreamChunk {
@@ -301,6 +301,10 @@ mod tests {
     #[test]
     fn supports_safetensors() {
         let backend = VllmBackend::new(None);
-        assert!(backend.supported_formats().contains(&ModelFormat::SafeTensors));
+        assert!(
+            backend
+                .supported_formats()
+                .contains(&ModelFormat::SafeTensors)
+        );
     }
 }

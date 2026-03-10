@@ -89,7 +89,10 @@ mod tests {
     #[test]
     fn detect_formats() {
         assert_eq!(detect_format("model.gguf"), Some(ModelFormat::Gguf));
-        assert_eq!(detect_format("model.safetensors"), Some(ModelFormat::SafeTensors));
+        assert_eq!(
+            detect_format("model.safetensors"),
+            Some(ModelFormat::SafeTensors)
+        );
         assert_eq!(detect_format("model.onnx"), Some(ModelFormat::Onnx));
         assert_eq!(detect_format("model.pt"), Some(ModelFormat::PyTorch));
         assert_eq!(detect_format("model.bin"), Some(ModelFormat::Bin));

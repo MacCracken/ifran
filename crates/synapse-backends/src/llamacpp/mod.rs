@@ -10,15 +10,15 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
+use synapse_types::SynapseError;
 use synapse_types::backend::{AcceleratorType, BackendCapabilities, BackendId, DeviceConfig};
 use synapse_types::error::Result;
 use synapse_types::inference::{
     FinishReason, InferenceRequest, InferenceResponse, StreamChunk, TokenUsage,
 };
 use synapse_types::model::{ModelFormat, ModelManifest};
-use synapse_types::SynapseError;
 use tokio::process::{Child, Command};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tracing::{info, warn};
 
 use crate::traits::{InferenceBackend, ModelHandle};
@@ -69,10 +69,10 @@ impl LlamaCppBackend {
     async fn wait_for_ready(&self, port: u16) -> Result<()> {
         let url = format!("http://127.0.0.1:{port}/health");
         for _ in 0..60 {
-            if let Ok(resp) = self.client.get(&url).send().await {
-                if resp.status().is_success() {
-                    return Ok(());
-                }
+            if let Ok(resp) = self.client.get(&url).send().await
+                && resp.status().is_success()
+            {
+                return Ok(());
             }
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
@@ -90,7 +90,11 @@ impl InferenceBackend for LlamaCppBackend {
 
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
-            accelerators: vec![AcceleratorType::Cpu, AcceleratorType::Cuda, AcceleratorType::Rocm],
+            accelerators: vec![
+                AcceleratorType::Cpu,
+                AcceleratorType::Cuda,
+                AcceleratorType::Rocm,
+            ],
             max_context_length: Some(131072),
             supports_streaming: true,
             supports_embeddings: false,
@@ -111,9 +115,12 @@ impl InferenceBackend for LlamaCppBackend {
         let model_path = &manifest.info.local_path;
 
         let mut cmd = Command::new(&self.server_bin);
-        cmd.arg("--model").arg(model_path)
-            .arg("--port").arg(port.to_string())
-            .arg("--host").arg("127.0.0.1");
+        cmd.arg("--model")
+            .arg(model_path)
+            .arg("--port")
+            .arg(port.to_string())
+            .arg("--host")
+            .arg("127.0.0.1");
 
         // GPU layers
         if device.accelerator != AcceleratorType::Cpu {
@@ -149,7 +156,10 @@ impl InferenceBackend for LlamaCppBackend {
             model_path: model_path.clone(),
         };
 
-        self.instances.write().await.insert(handle_id.clone(), instance);
+        self.instances
+            .write()
+            .await
+            .insert(handle_id.clone(), instance);
         Ok(ModelHandle(handle_id))
     }
 
@@ -260,8 +270,7 @@ impl InferenceBackend for LlamaCppBackend {
                     let line = buffer[..line_end].trim().to_string();
                     buffer = buffer[line_end + 1..].to_string();
 
-                    if line.starts_with("data: ") {
-                        let data = &line[6..];
+                    if let Some(data) = line.strip_prefix("data: ") {
                         if data == "[DONE]" {
                             let _ = tx
                                 .send(StreamChunk {
@@ -299,7 +308,11 @@ impl InferenceBackend for LlamaCppBackend {
 
     async fn health_check(&self) -> Result<bool> {
         // Check if llama-server binary exists
-        match Command::new(&self.server_bin).arg("--version").output().await {
+        match Command::new(&self.server_bin)
+            .arg("--version")
+            .output()
+            .await
+        {
             Ok(output) => Ok(output.status.success()),
             Err(_) => Ok(false),
         }

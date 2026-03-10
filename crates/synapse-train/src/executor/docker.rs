@@ -6,9 +6,9 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
+use synapse_types::SynapseError;
 use synapse_types::error::Result;
 use synapse_types::training::{TrainingJobConfig, TrainingJobId, TrainingMethod};
-use synapse_types::SynapseError;
 use tokio::process::Command;
 use tokio::sync::RwLock;
 use tracing::info;
@@ -50,12 +50,17 @@ impl TrainingExecutor for DockerExecutor {
         let output = Command::new("docker")
             .args([
                 "run",
-                "--name", &container_name,
-                "--gpus", "all",
+                "--name",
+                &container_name,
+                "--gpus",
+                "all",
                 "--rm",
-                "-e", &format!("TRAINING_CONFIG={config_json}"),
-                "-e", &format!("JOB_ID={job_id}"),
-                "-v", &format!("{}:/workspace/datasets/data", config.dataset.path),
+                "-e",
+                &format!("TRAINING_CONFIG={config_json}"),
+                "-e",
+                &format!("JOB_ID={job_id}"),
+                "-v",
+                &format!("{}:/workspace/datasets/data", config.dataset.path),
                 &self.image,
                 script,
             ])
@@ -64,7 +69,10 @@ impl TrainingExecutor for DockerExecutor {
             .map_err(|e| SynapseError::TrainingError(format!("Failed to start Docker: {e}")))?;
 
         // Track container for cancellation
-        self.containers.write().await.insert(job_id, container_name.clone());
+        self.containers
+            .write()
+            .await
+            .insert(job_id, container_name.clone());
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -82,10 +90,7 @@ impl TrainingExecutor for DockerExecutor {
     async fn cancel(&self, job_id: TrainingJobId) -> Result<()> {
         let containers = self.containers.read().await;
         if let Some(name) = containers.get(&job_id) {
-            let _ = Command::new("docker")
-                .args(["stop", name])
-                .output()
-                .await;
+            let _ = Command::new("docker").args(["stop", name]).output().await;
             info!(job_id = %job_id, "Stopped training container");
         }
         Ok(())

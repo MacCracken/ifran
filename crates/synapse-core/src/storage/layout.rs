@@ -17,8 +17,8 @@
 //! ```
 
 use std::path::{Path, PathBuf};
-use synapse_types::error::Result;
 use synapse_types::SynapseError;
+use synapse_types::error::Result;
 
 /// Manages the Synapse directory layout on the filesystem.
 pub struct StorageLayout {
@@ -103,10 +103,7 @@ impl StorageLayout {
     /// - `("meta-llama/Llama-3.1-8B-Instruct", "q4_k_m")` → `"llama-3.1-8b-instruct-q4km"`
     /// - `("mistral-7b", "f16")` → `"mistral-7b-f16"`
     pub fn slugify(name: &str, quant: &str) -> String {
-        let base = name
-            .rsplit('/')
-            .next()
-            .unwrap_or(name);
+        let base = name.rsplit('/').next().unwrap_or(name);
 
         let mut slug = String::with_capacity(base.len() + quant.len() + 1);
         for ch in base.chars() {
@@ -174,25 +171,25 @@ mod tests {
 
     #[test]
     fn slugify_no_quant() {
-        assert_eq!(
-            StorageLayout::slugify("mistral-7b", "none"),
-            "mistral-7b"
-        );
+        assert_eq!(StorageLayout::slugify("mistral-7b", "none"), "mistral-7b");
     }
 
     #[test]
     fn slugify_simple() {
-        assert_eq!(
-            StorageLayout::slugify("my_model", "f16"),
-            "my-model-f16"
-        );
+        assert_eq!(StorageLayout::slugify("my_model", "f16"), "my-model-f16");
     }
 
     #[test]
     fn paths_are_correct() {
         let layout = StorageLayout::new("/tmp/synapse-test-layout");
-        assert_eq!(layout.database_path(), PathBuf::from("/tmp/synapse-test-layout/synapse.db"));
-        assert_eq!(layout.models_dir(), PathBuf::from("/tmp/synapse-test-layout/models"));
+        assert_eq!(
+            layout.database_path(),
+            PathBuf::from("/tmp/synapse-test-layout/synapse.db")
+        );
+        assert_eq!(
+            layout.models_dir(),
+            PathBuf::from("/tmp/synapse-test-layout/models")
+        );
         assert_eq!(
             layout.model_dir("llama-8b-q4km"),
             PathBuf::from("/tmp/synapse-test-layout/models/llama-8b-q4km")

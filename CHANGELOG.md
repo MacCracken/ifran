@@ -11,7 +11,7 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 
 #### Core
 - `synapse-types`: Core data structures — models, backends, inference, training, errors
-- `synapse-core/config`: TOML config loading with defaults (`~/.synapse/synapse.toml`)
+- `synapse-core/config`: TOML config loading with auto-discovery (`SYNAPSE_CONFIG` → `~/.synapse/` → `/etc/synapse/` → defaults)
 - `synapse-core/storage/db`: SQLite model catalog with full CRUD, schema migrations, and indexes
 - `synapse-core/storage/layout`: Filesystem layout for `~/.synapse/models/` with slug generation
 - `synapse-core/hardware/detect`: GPU detection (NVIDIA via nvidia-smi, AMD via sysfs, CPU from /proc)
@@ -84,11 +84,19 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - Settings page: server status, hardware info, config guidance
 - 10 Tauri commands bridging frontend to Synapse REST API
 
+#### Agnosticos Integration
+- `deploy/synapse.service`: systemd unit with security hardening (ProtectSystem, PrivateTmp, NoNewPrivileges, GPU device access)
+- `deploy/agnosticos/synapse.pkg.toml`: Package spec with user creation hooks, capability registration, systemd setup
+- `deploy/synapse.toml.example`: System-level config template with all backends documented
+- Config auto-discovery chain: `SYNAPSE_CONFIG` env → `~/.synapse/synapse.toml` → `/etc/synapse/synapse.toml` → defaults
+- Agent-runtime capability provider registration with Agnosticos
+
 #### Infrastructure
 - 8-crate Cargo workspace: types, core, backends, train, api, bridge, cli, desktop
-- CI/CD (GitHub Actions): build, quality, security, test/coverage, benchmarks, docs, container, license
+- CI/CD (GitHub Actions): build (x86_64 + aarch64), quality, security, per-package tests, coverage, docs, container, license
 - Release pipeline: multi-arch binaries (amd64 + arm64), SBOM, GitHub Release
 - Docker: server, dev, trainer, release containers with multi-arch support
+- rustls-tls for cross-compilation without OpenSSL headers
 - Dependency update automation (weekly cargo update PRs)
 - Governance: CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, SUPPORT
-- 82 tests across all modules
+- 132 tests across all modules (~45% coverage)

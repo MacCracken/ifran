@@ -34,30 +34,36 @@ pub struct CreateJobRequest {
     pub auto_start: bool,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 /// POST /training/jobs — create (and optionally start) a training job.
 pub async fn create_job(
     State(state): State<AppState>,
     Json(req): Json<CreateJobRequest>,
 ) -> Result<(StatusCode, Json<JobResponse>), (StatusCode, String)> {
-    let id = state.job_manager.create_job(req.config).await
+    let id = state
+        .job_manager
+        .create_job(req.config)
+        .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
     if req.auto_start {
         let _ = state.job_manager.start_job(id).await;
     }
 
-    let job = state.job_manager.get_job(id).await
+    let job = state
+        .job_manager
+        .get_job(id)
+        .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok((StatusCode::CREATED, Json(job_to_response(&job))))
 }
 
 /// GET /training/jobs — list all training jobs.
-pub async fn list_jobs(
-    State(state): State<AppState>,
-) -> Json<Vec<JobResponse>> {
+pub async fn list_jobs(State(state): State<AppState>) -> Json<Vec<JobResponse>> {
     let jobs = state.job_manager.list_jobs(None).await;
     Json(jobs.iter().map(job_to_response).collect())
 }
@@ -67,7 +73,10 @@ pub async fn get_job(
     State(state): State<AppState>,
     Path(id): Path<TrainingJobId>,
 ) -> Result<Json<JobResponse>, (StatusCode, String)> {
-    let job = state.job_manager.get_job(id).await
+    let job = state
+        .job_manager
+        .get_job(id)
+        .await
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
     Ok(Json(job_to_response(&job)))
 }
@@ -77,10 +86,16 @@ pub async fn cancel_job(
     State(state): State<AppState>,
     Path(id): Path<TrainingJobId>,
 ) -> Result<Json<JobResponse>, (StatusCode, String)> {
-    state.job_manager.cancel_job(id).await
+    state
+        .job_manager
+        .cancel_job(id)
+        .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
-    let job = state.job_manager.get_job(id).await
+    let job = state
+        .job_manager
+        .get_job(id)
+        .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(job_to_response(&job)))
 }

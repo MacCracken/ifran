@@ -1,5 +1,4 @@
 /// Binary entrypoint for the synapse-server.
-
 use synapse_api::state::AppState;
 use synapse_core::config::SynapseConfig;
 
@@ -7,7 +6,7 @@ use synapse_core::config::SynapseConfig;
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let config = SynapseConfig::default();
+    let config = SynapseConfig::discover();
     let bind_addr = config.server.bind.clone();
 
     let state = AppState::new(config).expect("Failed to initialize application state");
@@ -19,7 +18,5 @@ async fn main() {
         .await
         .expect("Failed to bind address");
 
-    axum::serve(listener, app)
-        .await
-        .expect("Server error");
+    axum::serve(listener, app).await.expect("Server error");
 }

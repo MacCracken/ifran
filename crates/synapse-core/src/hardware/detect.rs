@@ -61,9 +61,17 @@ impl SystemHardware {
     /// Best available accelerator kind, or None for CPU-only.
     pub fn best_accelerator(&self) -> Option<AcceleratorKind> {
         // Prefer CUDA over ROCm
-        if self.gpus.iter().any(|g| g.accelerator == AcceleratorKind::Cuda) {
+        if self
+            .gpus
+            .iter()
+            .any(|g| g.accelerator == AcceleratorKind::Cuda)
+        {
             Some(AcceleratorKind::Cuda)
-        } else if self.gpus.iter().any(|g| g.accelerator == AcceleratorKind::Rocm) {
+        } else if self
+            .gpus
+            .iter()
+            .any(|g| g.accelerator == AcceleratorKind::Rocm)
+        {
             Some(AcceleratorKind::Rocm)
         } else {
             None
@@ -117,10 +125,10 @@ fn read_physical_cores() -> Option<usize> {
     let content = std::fs::read_to_string("/proc/cpuinfo").ok()?;
     let mut core_ids = std::collections::HashSet::new();
     for line in content.lines() {
-        if line.starts_with("core id") {
-            if let Some(id) = line.split(':').nth(1) {
-                core_ids.insert(id.trim().to_string());
-            }
+        if line.starts_with("core id")
+            && let Some(id) = line.split(':').nth(1)
+        {
+            core_ids.insert(id.trim().to_string());
         }
     }
     if core_ids.is_empty() {
@@ -259,7 +267,9 @@ fn detect_rocm() -> Result<Vec<GpuDevice>> {
 }
 
 fn read_sysfs_string(path: &Path) -> Option<String> {
-    std::fs::read_to_string(path).ok().map(|s| s.trim().to_string())
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_string())
 }
 
 fn read_sysfs_u64(path: &Path) -> Option<u64> {
@@ -268,7 +278,9 @@ fn read_sysfs_u64(path: &Path) -> Option<u64> {
 
 impl std::fmt::Display for SystemHardware {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "CPU: {} ({} cores, {} threads, {} MB RAM)",
+        writeln!(
+            f,
+            "CPU: {} ({} cores, {} threads, {} MB RAM)",
             self.cpu.model_name,
             self.cpu.physical_cores,
             self.cpu.logical_cores,
@@ -278,7 +290,9 @@ impl std::fmt::Display for SystemHardware {
             writeln!(f, "GPU: none detected (CPU-only mode)")?;
         } else {
             for gpu in &self.gpus {
-                writeln!(f, "GPU {}: {} [{:?}] — {} MB total, {} MB free{}",
+                writeln!(
+                    f,
+                    "GPU {}: {} [{:?}] — {} MB total, {} MB free{}",
                     gpu.index,
                     gpu.name,
                     gpu.accelerator,

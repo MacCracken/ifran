@@ -1,12 +1,11 @@
 /// Shared application state accessible across all API handlers.
-
 use std::sync::Arc;
 use synapse_backends::BackendRouter;
 use synapse_core::config::SynapseConfig;
 use synapse_core::lifecycle::manager::ModelManager;
 use synapse_core::storage::db::ModelDatabase;
-use synapse_train::job::manager::JobManager;
 use synapse_train::executor::ExecutorKind;
+use synapse_train::job::manager::JobManager;
 use tokio::sync::Mutex;
 
 /// Application state shared across all handlers via Axum's State extractor.

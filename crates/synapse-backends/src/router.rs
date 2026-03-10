@@ -53,7 +53,10 @@ impl BackendRouter {
 
     /// List all registered backend identifiers.
     pub fn list_backends(&self) -> Vec<BackendId> {
-        self.backends.iter().map(|entry| entry.key().clone()).collect()
+        self.backends
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect()
     }
 
     /// Select the best backend for a given model format.
@@ -77,12 +80,11 @@ impl BackendRouter {
         }
 
         // 2. Configured default, if it supports the format
-        if let Some(ref default_id) = self.default_backend {
-            if let Some(b) = self.get(default_id) {
-                if b.supported_formats().contains(&format) {
-                    return Some(b);
-                }
-            }
+        if let Some(ref default_id) = self.default_backend
+            && let Some(b) = self.get(default_id)
+            && b.supported_formats().contains(&format)
+        {
+            return Some(b);
         }
 
         // 3. First backend that supports the format
@@ -102,8 +104,7 @@ impl BackendRouter {
         format: ModelFormat,
         preferred: Option<&str>,
     ) -> Option<(BackendId, Arc<dyn InferenceBackend>)> {
-        self.select(format, preferred)
-            .map(|b| (b.id(), b))
+        self.select(format, preferred).map(|b| (b.id(), b))
     }
 
     /// Check if any backend supports a given format.
@@ -143,7 +144,9 @@ mod tests {
 
     #[async_trait]
     impl InferenceBackend for MockBackend {
-        fn id(&self) -> BackendId { BackendId(self.name.into()) }
+        fn id(&self) -> BackendId {
+            BackendId(self.name.into())
+        }
         fn capabilities(&self) -> BackendCapabilities {
             BackendCapabilities {
                 accelerators: vec![AcceleratorType::Cpu],
@@ -153,25 +156,58 @@ mod tests {
                 supports_vision: false,
             }
         }
-        fn supported_formats(&self) -> &[ModelFormat] { &self.formats }
-        async fn load_model(&self, _: &ModelManifest, _: &DeviceConfig) -> synapse_types::error::Result<crate::ModelHandle> {
+        fn supported_formats(&self) -> &[ModelFormat] {
+            &self.formats
+        }
+        async fn load_model(
+            &self,
+            _: &ModelManifest,
+            _: &DeviceConfig,
+        ) -> synapse_types::error::Result<crate::ModelHandle> {
             Ok(crate::ModelHandle("mock".into()))
         }
-        async fn unload_model(&self, _: crate::ModelHandle) -> synapse_types::error::Result<()> { Ok(()) }
-        async fn infer(&self, _: &crate::ModelHandle, _: &InferenceRequest) -> synapse_types::error::Result<InferenceResponse> {
-            Ok(InferenceResponse { text: "mock".into(), usage: TokenUsage { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, finish_reason: FinishReason::Stop })
+        async fn unload_model(&self, _: crate::ModelHandle) -> synapse_types::error::Result<()> {
+            Ok(())
         }
-        async fn infer_stream(&self, _: &crate::ModelHandle, _: InferenceRequest) -> synapse_types::error::Result<mpsc::Receiver<StreamChunk>> {
-            let (_, rx) = mpsc::channel(1); Ok(rx)
+        async fn infer(
+            &self,
+            _: &crate::ModelHandle,
+            _: &InferenceRequest,
+        ) -> synapse_types::error::Result<InferenceResponse> {
+            Ok(InferenceResponse {
+                text: "mock".into(),
+                usage: TokenUsage {
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    total_tokens: 0,
+                },
+                finish_reason: FinishReason::Stop,
+            })
         }
-        async fn health_check(&self) -> synapse_types::error::Result<bool> { Ok(true) }
+        async fn infer_stream(
+            &self,
+            _: &crate::ModelHandle,
+            _: InferenceRequest,
+        ) -> synapse_types::error::Result<mpsc::Receiver<StreamChunk>> {
+            let (_, rx) = mpsc::channel(1);
+            Ok(rx)
+        }
+        async fn health_check(&self) -> synapse_types::error::Result<bool> {
+            Ok(true)
+        }
     }
 
     #[test]
     fn select_by_format() {
         let router = BackendRouter::new();
-        router.register(Arc::new(MockBackend { name: "gguf-be", formats: vec![ModelFormat::Gguf] }));
-        router.register(Arc::new(MockBackend { name: "st-be", formats: vec![ModelFormat::SafeTensors] }));
+        router.register(Arc::new(MockBackend {
+            name: "gguf-be",
+            formats: vec![ModelFormat::Gguf],
+        }));
+        router.register(Arc::new(MockBackend {
+            name: "st-be",
+            formats: vec![ModelFormat::SafeTensors],
+        }));
 
         let selected = router.select(ModelFormat::Gguf, None).unwrap();
         assert_eq!(selected.id().0, "gguf-be");
@@ -183,8 +219,14 @@ mod tests {
     #[test]
     fn select_explicit_preference() {
         let router = BackendRouter::new();
-        router.register(Arc::new(MockBackend { name: "a", formats: vec![ModelFormat::Gguf] }));
-        router.register(Arc::new(MockBackend { name: "b", formats: vec![ModelFormat::Gguf] }));
+        router.register(Arc::new(MockBackend {
+            name: "a",
+            formats: vec![ModelFormat::Gguf],
+        }));
+        router.register(Arc::new(MockBackend {
+            name: "b",
+            formats: vec![ModelFormat::Gguf],
+        }));
 
         let selected = router.select(ModelFormat::Gguf, Some("b")).unwrap();
         assert_eq!(selected.id().0, "b");
@@ -193,8 +235,14 @@ mod tests {
     #[test]
     fn select_default_backend() {
         let router = BackendRouter::with_default("preferred");
-        router.register(Arc::new(MockBackend { name: "other", formats: vec![ModelFormat::Gguf] }));
-        router.register(Arc::new(MockBackend { name: "preferred", formats: vec![ModelFormat::Gguf] }));
+        router.register(Arc::new(MockBackend {
+            name: "other",
+            formats: vec![ModelFormat::Gguf],
+        }));
+        router.register(Arc::new(MockBackend {
+            name: "preferred",
+            formats: vec![ModelFormat::Gguf],
+        }));
 
         let selected = router.select(ModelFormat::Gguf, None).unwrap();
         assert_eq!(selected.id().0, "preferred");
@@ -203,7 +251,10 @@ mod tests {
     #[test]
     fn supports_format_check() {
         let router = BackendRouter::new();
-        router.register(Arc::new(MockBackend { name: "a", formats: vec![ModelFormat::Gguf] }));
+        router.register(Arc::new(MockBackend {
+            name: "a",
+            formats: vec![ModelFormat::Gguf],
+        }));
         assert!(router.supports_format(ModelFormat::Gguf));
         assert!(!router.supports_format(ModelFormat::Onnx));
     }

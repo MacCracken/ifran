@@ -7,14 +7,14 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
+use synapse_types::SynapseError;
 use synapse_types::backend::{AcceleratorType, BackendCapabilities, BackendId, DeviceConfig};
 use synapse_types::error::Result;
 use synapse_types::inference::{
     FinishReason, InferenceRequest, InferenceResponse, StreamChunk, TokenUsage,
 };
 use synapse_types::model::{ModelFormat, ModelManifest};
-use synapse_types::SynapseError;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tracing::info;
 
 use crate::traits::{InferenceBackend, ModelHandle};
@@ -47,7 +47,11 @@ impl InferenceBackend for OllamaBackend {
 
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
-            accelerators: vec![AcceleratorType::Cpu, AcceleratorType::Cuda, AcceleratorType::Rocm],
+            accelerators: vec![
+                AcceleratorType::Cpu,
+                AcceleratorType::Cuda,
+                AcceleratorType::Rocm,
+            ],
             max_context_length: Some(131072),
             supports_streaming: true,
             supports_embeddings: true,
@@ -84,12 +88,17 @@ impl InferenceBackend for OllamaBackend {
             .json(&body)
             .send()
             .await
-            .map_err(|e| SynapseError::BackendError(format!("Failed to load model in Ollama: {e}")))?;
+            .map_err(|e| {
+                SynapseError::BackendError(format!("Failed to load model in Ollama: {e}"))
+            })?;
 
         let handle_id = format!("ollama-{}", model_name.replace('/', "-"));
         info!(handle = %handle_id, model = %model_name, "Loaded model in Ollama");
 
-        self.loaded.write().await.insert(handle_id.clone(), model_name.to_string());
+        self.loaded
+            .write()
+            .await
+            .insert(handle_id.clone(), model_name.to_string());
         Ok(ModelHandle(handle_id))
     }
 

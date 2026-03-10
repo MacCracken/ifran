@@ -1,18 +1,17 @@
 /// Run interactive inference on a specified model.
-
 use std::io::{self, BufRead, Write};
-use synapse_backends::llamacpp::LlamaCppBackend;
 use synapse_backends::InferenceBackend;
+use synapse_backends::llamacpp::LlamaCppBackend;
 use synapse_core::config::SynapseConfig;
 use synapse_core::lifecycle::manager::ModelManager;
 use synapse_core::storage::db::ModelDatabase;
+use synapse_types::SynapseError;
 use synapse_types::error::Result;
 use synapse_types::inference::InferenceRequest;
 use synapse_types::model::ModelManifest;
-use synapse_types::SynapseError;
 
 pub async fn execute(model: &str) -> Result<()> {
-    let config = SynapseConfig::default();
+    let config = SynapseConfig::discover();
     let db = ModelDatabase::open(&config.storage.database)?;
 
     let model_info = db.get_by_name(model).or_else(|_| {

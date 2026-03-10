@@ -4,11 +4,11 @@
 //! maps to a [`ModelInfo`] and tracks where the model files live on disk.
 
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::path::Path;
+use synapse_types::SynapseError;
 use synapse_types::error::Result;
 use synapse_types::model::{ModelFormat, ModelId, ModelInfo, QuantLevel};
-use synapse_types::SynapseError;
 use uuid::Uuid;
 
 /// Handle to the SQLite model catalog.
@@ -22,8 +22,7 @@ impl ModelDatabase {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let conn = Connection::open(path)
-            .map_err(|e| SynapseError::StorageError(e.to_string()))?;
+        let conn = Connection::open(path).map_err(|e| SynapseError::StorageError(e.to_string()))?;
         let db = Self { conn };
         db.migrate()?;
         Ok(db)
@@ -32,8 +31,8 @@ impl ModelDatabase {
     /// Open an in-memory database (useful for tests).
     #[cfg(test)]
     pub fn open_memory() -> Result<Self> {
-        let conn = Connection::open_in_memory()
-            .map_err(|e| SynapseError::StorageError(e.to_string()))?;
+        let conn =
+            Connection::open_in_memory().map_err(|e| SynapseError::StorageError(e.to_string()))?;
         let db = Self { conn };
         db.migrate()?;
         Ok(db)
@@ -75,8 +74,12 @@ impl ModelDatabase {
                     model.id.to_string(),
                     model.name,
                     model.repo_id,
-                    serde_json::to_string(&model.format).unwrap().trim_matches('"'),
-                    serde_json::to_string(&model.quant).unwrap().trim_matches('"'),
+                    serde_json::to_string(&model.format)
+                        .unwrap()
+                        .trim_matches('"'),
+                    serde_json::to_string(&model.quant)
+                        .unwrap()
+                        .trim_matches('"'),
                     model.size_bytes as i64,
                     model.parameter_count.map(|v| v as i64),
                     model.architecture,
@@ -93,13 +96,13 @@ impl ModelDatabase {
     /// Get a model by its UUID.
     pub fn get(&self, id: ModelId) -> Result<ModelInfo> {
         self.conn
-            .query_row("SELECT * FROM models WHERE id = ?1", params![id.to_string()], |row| {
-                row_to_model(row)
-            })
+            .query_row(
+                "SELECT * FROM models WHERE id = ?1",
+                params![id.to_string()],
+                row_to_model,
+            )
             .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => {
-                    SynapseError::ModelNotFound(id.to_string())
-                }
+                rusqlite::Error::QueryReturnedNoRows => SynapseError::ModelNotFound(id.to_string()),
                 other => SynapseError::StorageError(other.to_string()),
             })
     }
@@ -107,9 +110,11 @@ impl ModelDatabase {
     /// Find a model by name (exact match).
     pub fn get_by_name(&self, name: &str) -> Result<ModelInfo> {
         self.conn
-            .query_row("SELECT * FROM models WHERE name = ?1", params![name], |row| {
-                row_to_model(row)
-            })
+            .query_row(
+                "SELECT * FROM models WHERE name = ?1",
+                params![name],
+                row_to_model,
+            )
             .map_err(|e| match e {
                 rusqlite::Error::QueryReturnedNoRows => {
                     SynapseError::ModelNotFound(name.to_string())
@@ -126,7 +131,7 @@ impl ModelDatabase {
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
 
         let models = stmt
-            .query_map([], |row| row_to_model(row))
+            .query_map([], row_to_model)
             .map_err(|e| SynapseError::StorageError(e.to_string()))?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
@@ -147,8 +152,12 @@ impl ModelDatabase {
                     model.id.to_string(),
                     model.name,
                     model.repo_id,
-                    serde_json::to_string(&model.format).unwrap().trim_matches('"'),
-                    serde_json::to_string(&model.quant).unwrap().trim_matches('"'),
+                    serde_json::to_string(&model.format)
+                        .unwrap()
+                        .trim_matches('"'),
+                    serde_json::to_string(&model.quant)
+                        .unwrap()
+                        .trim_matches('"'),
                     model.size_bytes as i64,
                     model.parameter_count.map(|v| v as i64),
                     model.architecture,
@@ -197,18 +206,23 @@ fn row_to_model(row: &rusqlite::Row) -> rusqlite::Result<ModelInfo> {
     let quant_str: String = row.get(4)?;
     let pulled_str: String = row.get(11)?;
 
-    let id = Uuid::parse_str(&id_str)
-        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e)))?;
+    let id = Uuid::parse_str(&id_str).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+    })?;
 
-    let format: ModelFormat = serde_json::from_str(&format!("\"{format_str}\""))
-        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e)))?;
+    let format: ModelFormat = serde_json::from_str(&format!("\"{format_str}\"")).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e))
+    })?;
 
-    let quant: QuantLevel = serde_json::from_str(&format!("\"{quant_str}\""))
-        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, Box::new(e)))?;
+    let quant: QuantLevel = serde_json::from_str(&format!("\"{quant_str}\"")).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, Box::new(e))
+    })?;
 
     let pulled_at: DateTime<Utc> = DateTime::parse_from_rfc3339(&pulled_str)
         .map(|dt| dt.with_timezone(&Utc))
-        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(11, rusqlite::types::Type::Text, Box::new(e)))?;
+        .map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(11, rusqlite::types::Type::Text, Box::new(e))
+        })?;
 
     Ok(ModelInfo {
         id,

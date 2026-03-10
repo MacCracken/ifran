@@ -1,11 +1,10 @@
 /// List all locally available models.
-
 use synapse_core::config::SynapseConfig;
 use synapse_core::storage::db::ModelDatabase;
 use synapse_types::error::Result;
 
 pub async fn execute() -> Result<()> {
-    let config = SynapseConfig::default();
+    let config = SynapseConfig::discover();
     let db = ModelDatabase::open(&config.storage.database)?;
     let models = db.list()?;
 
@@ -16,8 +15,8 @@ pub async fn execute() -> Result<()> {
 
     // Header
     println!(
-        "{:<40} {:<12} {:<8} {:<12} {}",
-        "NAME", "FORMAT", "QUANT", "SIZE", "PULLED"
+        "{:<40} {:<12} {:<8} {:<12} PULLED",
+        "NAME", "FORMAT", "QUANT", "SIZE"
     );
     println!("{}", "-".repeat(90));
 

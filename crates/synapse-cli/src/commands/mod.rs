@@ -1,7 +1,7 @@
-pub mod pull;
 pub mod list;
+pub mod pull;
+pub mod remove;
 pub mod run;
 pub mod serve;
-pub mod train;
 pub mod status;
-pub mod remove;
+pub mod train;

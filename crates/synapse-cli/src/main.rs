@@ -1,5 +1,4 @@
 /// Synapse CLI - command-line interface for managing models and inference.
-
 use clap::{Parser, Subcommand};
 
 mod commands;
@@ -69,9 +68,11 @@ async fn main() {
         Commands::List => commands::list::execute().await,
         Commands::Run { model } => commands::run::execute(&model).await,
         Commands::Serve { bind } => commands::serve::execute(bind.as_deref()).await,
-        Commands::Train { base_model, dataset, method } => {
-            commands::train::execute(&base_model, &dataset, &method).await
-        }
+        Commands::Train {
+            base_model,
+            dataset,
+            method,
+        } => commands::train::execute(&base_model, &dataset, &method).await,
         Commands::Status => commands::status::execute().await,
         Commands::Remove { model, yes } => commands::remove::execute(&model, yes).await,
     };

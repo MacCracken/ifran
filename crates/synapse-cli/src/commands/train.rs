@@ -1,18 +1,13 @@
 /// Start or manage model training jobs.
-
 use synapse_types::error::Result;
 
-pub async fn execute(
-    base_model: &str,
-    dataset: &str,
-    method: &str,
-) -> Result<()> {
+pub async fn execute(base_model: &str, dataset: &str, method: &str) -> Result<()> {
     use synapse_core::config::SynapseConfig;
     use synapse_train::executor::ExecutorKind;
     use synapse_train::job::manager::JobManager;
     use synapse_types::training::*;
 
-    let config = SynapseConfig::default();
+    let config = SynapseConfig::discover();
 
     let executor_kind = match config.training.executor.as_str() {
         "docker" => ExecutorKind::Docker,
@@ -33,20 +28,26 @@ pub async fn execute(
         "rlhf" => TrainingMethod::Rlhf,
         "distillation" => TrainingMethod::Distillation,
         _ => {
-            eprintln!("Unknown method '{method}'. Options: lora, qlora, full, dpo, rlhf, distillation");
+            eprintln!(
+                "Unknown method '{method}'. Options: lora, qlora, full, dpo, rlhf, distillation"
+            );
             return Ok(());
         }
     };
 
     let hyperparams = match training_method {
-        TrainingMethod::Lora | TrainingMethod::Qlora => synapse_train::methods::lora::default_hyperparams(),
+        TrainingMethod::Lora | TrainingMethod::Qlora => {
+            synapse_train::methods::lora::default_hyperparams()
+        }
         TrainingMethod::FullFineTune => synapse_train::methods::full::default_hyperparams(),
         TrainingMethod::Dpo => synapse_train::methods::dpo::default_hyperparams(),
         _ => synapse_train::methods::lora::default_hyperparams(),
     };
 
     let lora_config = match training_method {
-        TrainingMethod::Lora | TrainingMethod::Qlora => Some(synapse_train::methods::lora::default_lora_config()),
+        TrainingMethod::Lora | TrainingMethod::Qlora => {
+            Some(synapse_train::methods::lora::default_lora_config())
+        }
         _ => None,
     };
 

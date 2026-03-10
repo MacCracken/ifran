@@ -9,12 +9,12 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
+use synapse_types::SynapseError;
 use synapse_types::backend::{AcceleratorType, BackendCapabilities, BackendId, DeviceConfig};
 use synapse_types::error::Result;
 use synapse_types::inference::{InferenceRequest, InferenceResponse, StreamChunk};
 use synapse_types::model::{ModelFormat, ModelManifest};
-use synapse_types::SynapseError;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tracing::info;
 
 use crate::traits::{InferenceBackend, ModelHandle};

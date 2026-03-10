@@ -4,24 +4,23 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
+use synapse_types::SynapseError;
 use synapse_types::error::Result;
 use synapse_types::training::{TrainingJobConfig, TrainingJobId, TrainingMethod};
-use synapse_types::SynapseError;
 use tokio::process::{Child, Command};
 use tokio::sync::RwLock;
 use tracing::info;
 
 use super::TrainingExecutor;
 
+#[derive(Default)]
 pub struct SubprocessExecutor {
     processes: Arc<RwLock<HashMap<TrainingJobId, Child>>>,
 }
 
 impl SubprocessExecutor {
     pub fn new() -> Self {
-        Self {
-            processes: Arc::new(RwLock::new(HashMap::new())),
-        }
+        Self::default()
     }
 }
 
@@ -55,7 +54,9 @@ impl TrainingExecutor for SubprocessExecutor {
         let status = {
             let mut procs = self.processes.write().await;
             if let Some(child) = procs.get_mut(&job_id) {
-                child.wait().await
+                child
+                    .wait()
+                    .await
                     .map_err(|e| SynapseError::TrainingError(e.to_string()))?
             } else {
                 return Err(SynapseError::TrainingError("Process disappeared".into()));

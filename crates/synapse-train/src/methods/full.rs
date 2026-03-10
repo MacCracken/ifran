@@ -16,11 +16,50 @@ pub fn default_hyperparams() -> HyperParams {
 
 pub fn build_args(config: &TrainingJobConfig) -> Vec<String> {
     vec![
-        "--base-model".into(), config.base_model.clone(),
-        "--dataset".into(), config.dataset.path.clone(),
-        "--method".into(), "full".into(),
-        "--lr".into(), config.hyperparams.learning_rate.to_string(),
-        "--epochs".into(), config.hyperparams.epochs.to_string(),
-        "--batch-size".into(), config.hyperparams.batch_size.to_string(),
+        "--base-model".into(),
+        config.base_model.clone(),
+        "--dataset".into(),
+        config.dataset.path.clone(),
+        "--method".into(),
+        "full".into(),
+        "--lr".into(),
+        config.hyperparams.learning_rate.to_string(),
+        "--epochs".into(),
+        config.hyperparams.epochs.to_string(),
+        "--batch-size".into(),
+        config.hyperparams.batch_size.to_string(),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use synapse_types::training::*;
+
+    #[test]
+    fn full_hyperparams() {
+        let hp = default_hyperparams();
+        assert_eq!(hp.epochs, 3);
+        assert_eq!(hp.gradient_accumulation_steps, 8);
+    }
+
+    #[test]
+    fn full_build_args() {
+        let cfg = TrainingJobConfig {
+            base_model: "model".into(),
+            dataset: DatasetConfig {
+                path: "/data.jsonl".into(),
+                format: DatasetFormat::Jsonl,
+                split: None,
+                max_samples: None,
+            },
+            method: TrainingMethod::FullFineTune,
+            hyperparams: default_hyperparams(),
+            output_name: None,
+            lora: None,
+        };
+        let args = build_args(&cfg);
+        assert!(args.contains(&"full".to_string()));
+        assert!(args.contains(&"--base-model".to_string()));
+    }
 }

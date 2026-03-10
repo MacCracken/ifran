@@ -5,8 +5,8 @@
 
 use sha2::{Digest, Sha256};
 use std::path::Path;
-use synapse_types::error::Result;
 use synapse_types::SynapseError;
+use synapse_types::error::Result;
 
 /// Hash algorithm used for verification.
 #[derive(Debug, Clone, Copy)]

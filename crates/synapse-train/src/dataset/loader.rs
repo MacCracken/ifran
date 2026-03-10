@@ -1,9 +1,9 @@
 //! Dataset loader for reading training data from various sources and formats.
 
 use std::path::Path;
+use synapse_types::SynapseError;
 use synapse_types::error::Result;
 use synapse_types::training::{DatasetConfig, DatasetFormat};
-use synapse_types::SynapseError;
 
 /// A loaded dataset ready for training.
 #[derive(Debug)]
@@ -18,7 +18,8 @@ pub fn load(config: &DatasetConfig) -> Result<LoadedDataset> {
     let path = Path::new(&config.path);
     if !path.exists() {
         return Err(SynapseError::TrainingError(format!(
-            "Dataset not found: {}", config.path
+            "Dataset not found: {}",
+            config.path
         )));
     }
 
@@ -46,7 +47,11 @@ fn count_samples(path: &Path, format: DatasetFormat) -> Result<usize> {
         DatasetFormat::Csv => {
             let content = std::fs::read_to_string(path)?;
             // Subtract header row
-            Ok(content.lines().filter(|l| !l.trim().is_empty()).count().saturating_sub(1))
+            Ok(content
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .count()
+                .saturating_sub(1))
         }
         DatasetFormat::Parquet => {
             // Parquet needs a specialized reader — return file-based estimate

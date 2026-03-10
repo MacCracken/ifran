@@ -47,3 +47,49 @@ impl Default for JobScheduler {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn enqueue_dequeue_fifo() {
+        let mut sched = JobScheduler::new();
+        let id1 = uuid::Uuid::new_v4();
+        let id2 = uuid::Uuid::new_v4();
+        sched.enqueue(id1);
+        sched.enqueue(id2);
+        assert_eq!(sched.pending_count(), 2);
+        assert_eq!(sched.dequeue(), Some(id1));
+        assert_eq!(sched.dequeue(), Some(id2));
+        assert_eq!(sched.dequeue(), None);
+    }
+
+    #[test]
+    fn peek_does_not_remove() {
+        let mut sched = JobScheduler::new();
+        let id = uuid::Uuid::new_v4();
+        sched.enqueue(id);
+        assert_eq!(sched.peek(), Some(&id));
+        assert_eq!(sched.pending_count(), 1);
+    }
+
+    #[test]
+    fn remove_from_queue() {
+        let mut sched = JobScheduler::new();
+        let id1 = uuid::Uuid::new_v4();
+        let id2 = uuid::Uuid::new_v4();
+        sched.enqueue(id1);
+        sched.enqueue(id2);
+        sched.remove(&id1);
+        assert_eq!(sched.pending_count(), 1);
+        assert_eq!(sched.dequeue(), Some(id2));
+    }
+
+    #[test]
+    fn default_is_empty() {
+        let sched = JobScheduler::default();
+        assert_eq!(sched.pending_count(), 0);
+        assert_eq!(sched.peek(), None);
+    }
+}

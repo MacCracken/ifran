@@ -1,9 +1,9 @@
 //! Dataset validator for verifying data integrity and format compliance.
 
 use std::path::Path;
+use synapse_types::SynapseError;
 use synapse_types::error::Result;
 use synapse_types::training::DatasetFormat;
-use synapse_types::SynapseError;
 
 /// Validation result.
 #[derive(Debug)]
@@ -18,7 +18,8 @@ pub struct ValidationResult {
 pub fn validate(path: &Path, format: DatasetFormat) -> Result<ValidationResult> {
     if !path.exists() {
         return Err(SynapseError::TrainingError(format!(
-            "Dataset not found: {}", path.display()
+            "Dataset not found: {}",
+            path.display()
         )));
     }
 
@@ -88,7 +89,10 @@ fn validate_csv(path: &Path) -> Result<ValidationResult> {
         if cols != header_cols {
             invalid += 1;
             if errors.len() < 10 {
-                errors.push(format!("Row {}: expected {header_cols} columns, got {cols}", i + 2));
+                errors.push(format!(
+                    "Row {}: expected {header_cols} columns, got {cols}",
+                    i + 2
+                ));
             }
         }
     }

@@ -53,7 +53,11 @@ impl BridgeClient {
 
         *count += 1;
         let delay = self.config.reconnect_delay * (*count).min(6);
-        info!(attempt = *count, delay_secs = delay.as_secs(), "Reconnecting to SY");
+        info!(
+            attempt = *count,
+            delay_secs = delay.as_secs(),
+            "Reconnecting to SY"
+        );
         drop(count);
 
         tokio::time::sleep(delay).await;
@@ -77,7 +81,11 @@ impl BridgeClient {
     }
 
     /// Request GPU allocation from SY.
-    pub async fn request_gpu(&self, memory_mb: u64, count: u32) -> synapse_types::error::Result<Vec<u32>> {
+    pub async fn request_gpu(
+        &self,
+        memory_mb: u64,
+        count: u32,
+    ) -> synapse_types::error::Result<Vec<u32>> {
         info!(memory_mb, count, "Requesting GPU allocation from SY");
         // TODO: Call YeomanBridge.RequestGpuAllocation.
         // For now, return empty (local-only mode).
@@ -95,5 +103,74 @@ impl BridgeClient {
         // TODO: Call YeomanBridge.ReportProgress streaming RPC.
         tracing::debug!(job_id, status, step, loss, "Reporting progress to SY");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_client() -> BridgeClient {
+        BridgeClient::new("http://127.0.0.1:9420".into(), ProtocolConfig::default())
+    }
+
+    #[tokio::test]
+    async fn starts_disconnected() {
+        let client = test_client();
+        assert_eq!(
+            client.connection_state().await,
+            ConnectionState::Disconnected
+        );
+    }
+
+    #[tokio::test]
+    async fn connect_transitions_to_connected() {
+        let client = test_client();
+        client.connect().await.unwrap();
+        assert_eq!(client.connection_state().await, ConnectionState::Connected);
+    }
+
+    #[tokio::test]
+    async fn reconnect_exceeds_max_attempts() {
+        let config = ProtocolConfig {
+            max_reconnect_attempts: 0,
+            reconnect_delay: std::time::Duration::from_millis(1),
+            ..ProtocolConfig::default()
+        };
+        let client = BridgeClient::new("http://127.0.0.1:9420".into(), config);
+        let result = client.reconnect().await;
+        assert!(result.is_err());
+        assert_eq!(client.connection_state().await, ConnectionState::Degraded);
+    }
+
+    #[tokio::test]
+    async fn announce_succeeds() {
+        let client = test_client();
+        client.connect().await.unwrap();
+        let caps = Capabilities {
+            instance_id: "test".into(),
+            version: "1.0".into(),
+            gpu_count: 1,
+            total_gpu_memory_mb: 8192,
+            supported_methods: vec!["lora".into()],
+        };
+        client.announce(caps).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn request_gpu_returns_empty() {
+        let client = test_client();
+        client.connect().await.unwrap();
+        let gpus = client.request_gpu(4096, 1).await.unwrap();
+        assert!(gpus.is_empty());
+    }
+
+    #[tokio::test]
+    async fn report_progress_succeeds() {
+        let client = test_client();
+        client
+            .report_progress("job-1", "running", 100, 0.5)
+            .await
+            .unwrap();
     }
 }

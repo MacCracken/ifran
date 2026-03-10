@@ -1,8 +1,8 @@
 //! REST handlers for system endpoints (health, version, GPU status).
 
-use axum::extract::State;
-use axum::Json;
 use crate::state::AppState;
+use axum::Json;
+use axum::extract::State;
 
 /// GET /health — simple liveness probe.
 pub async fn health() -> &'static str {

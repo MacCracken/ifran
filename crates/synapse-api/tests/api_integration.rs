@@ -274,11 +274,7 @@ async fn training_list_jobs_empty() {
     let (app, _tmp) = test_app();
 
     let resp = app
-        .oneshot(
-            Request::get("/training/jobs")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::get("/training/jobs").body(Body::empty()).unwrap())
         .await
         .unwrap();
 
@@ -352,11 +348,7 @@ async fn unknown_route_returns_404() {
     let (app, _tmp) = test_app();
 
     let resp = app
-        .oneshot(
-            Request::get("/nonexistent")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::get("/nonexistent").body(Body::empty()).unwrap())
         .await
         .unwrap();
 

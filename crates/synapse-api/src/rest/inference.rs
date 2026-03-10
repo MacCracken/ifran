@@ -1,10 +1,10 @@
 //! REST handlers for inference requests (generate with optional streaming).
 
+use crate::state::AppState;
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
-use axum::Json;
-use crate::state::AppState;
 use serde::Deserialize;
 use synapse_types::inference::InferenceRequest;
 
@@ -33,15 +33,18 @@ pub async fn inference(
     Json(body): Json<InferenceBody>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let loaded = state.model_manager.list_loaded().await;
-    let loaded_model = loaded
-        .iter()
-        .find(|m| m.backend_id == "llamacpp")
-        .ok_or((StatusCode::BAD_REQUEST, "No model loaded. Load a model first.".into()))?;
+    let loaded_model = loaded.iter().find(|m| m.backend_id == "llamacpp").ok_or((
+        StatusCode::BAD_REQUEST,
+        "No model loaded. Load a model first.".into(),
+    ))?;
 
     let backend = state
         .backends
         .get(&synapse_types::backend::BackendId("llamacpp".into()))
-        .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "Backend not available".into()))?;
+        .ok_or((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Backend not available".into(),
+        ))?;
 
     let handle = synapse_backends::ModelHandle(loaded_model.handle.clone());
     let req = InferenceRequest {
@@ -74,7 +77,10 @@ pub async fn inference(
 pub async fn inference_stream(
     State(state): State<AppState>,
     Json(body): Json<InferenceBody>,
-) -> Result<Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>>, (StatusCode, String)> {
+) -> Result<
+    Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>>,
+    (StatusCode, String),
+> {
     let loaded = state.model_manager.list_loaded().await;
     let loaded_model = loaded
         .iter()
@@ -84,7 +90,10 @@ pub async fn inference_stream(
     let backend = state
         .backends
         .get(&synapse_types::backend::BackendId("llamacpp".into()))
-        .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "Backend not available".into()))?;
+        .ok_or((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Backend not available".into(),
+        ))?;
 
     let handle = synapse_backends::ModelHandle(loaded_model.handle.clone());
     let req = InferenceRequest {

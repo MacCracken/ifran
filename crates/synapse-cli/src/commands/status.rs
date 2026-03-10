@@ -1,12 +1,11 @@
 /// Show status of running models, jobs, and hardware.
-
 use synapse_core::config::SynapseConfig;
 use synapse_core::hardware::detect;
 use synapse_core::storage::db::ModelDatabase;
 use synapse_types::error::Result;
 
 pub async fn execute() -> Result<()> {
-    let config = SynapseConfig::default();
+    let config = SynapseConfig::discover();
 
     // Hardware
     if let Ok(hw) = detect::detect() {

@@ -4,9 +4,9 @@ use crate::executor::{ExecutorKind, TrainingExecutor};
 use crate::job::status::JobState;
 use std::collections::HashMap;
 use std::sync::Arc;
+use synapse_types::SynapseError;
 use synapse_types::error::Result;
 use synapse_types::training::{TrainingJobConfig, TrainingJobId, TrainingStatus};
-use synapse_types::SynapseError;
 use tokio::sync::RwLock;
 use tracing::info;
 
@@ -18,12 +18,18 @@ pub struct JobManager {
 }
 
 impl JobManager {
-    pub fn new(executor_kind: ExecutorKind, trainer_image: Option<String>, max_concurrent: usize) -> Self {
+    pub fn new(
+        executor_kind: ExecutorKind,
+        trainer_image: Option<String>,
+        max_concurrent: usize,
+    ) -> Self {
         let executor: Arc<dyn TrainingExecutor> = match executor_kind {
             ExecutorKind::Docker => Arc::new(crate::executor::docker::DockerExecutor::new(
                 trainer_image.unwrap_or_else(|| "ghcr.io/maccracken/synapse-trainer:latest".into()),
             )),
-            ExecutorKind::Subprocess => Arc::new(crate::executor::subprocess::SubprocessExecutor::new()),
+            ExecutorKind::Subprocess => {
+                Arc::new(crate::executor::subprocess::SubprocessExecutor::new())
+            }
         };
 
         Self {
@@ -49,17 +55,20 @@ impl JobManager {
         let running_count = self.running_count().await;
         if running_count >= self.max_concurrent {
             return Err(SynapseError::TrainingError(format!(
-                "Max concurrent jobs ({}) reached", self.max_concurrent
+                "Max concurrent jobs ({}) reached",
+                self.max_concurrent
             )));
         }
 
         let mut jobs = self.jobs.write().await;
-        let state = jobs.get_mut(&id)
+        let state = jobs
+            .get_mut(&id)
             .ok_or_else(|| SynapseError::TrainingError(format!("Job {id} not found")))?;
 
         if state.status != TrainingStatus::Queued {
             return Err(SynapseError::TrainingError(format!(
-                "Job {id} is {:?}, not Queued", state.status
+                "Job {id} is {:?}, not Queued",
+                state.status
             )));
         }
 
@@ -87,12 +96,14 @@ impl JobManager {
     /// Cancel a running or queued job.
     pub async fn cancel_job(&self, id: TrainingJobId) -> Result<()> {
         let mut jobs = self.jobs.write().await;
-        let state = jobs.get_mut(&id)
+        let state = jobs
+            .get_mut(&id)
             .ok_or_else(|| SynapseError::TrainingError(format!("Job {id} not found")))?;
 
         if state.is_terminal() {
             return Err(SynapseError::TrainingError(format!(
-                "Job {id} already in terminal state {:?}", state.status
+                "Job {id} already in terminal state {:?}",
+                state.status
             )));
         }
 
@@ -104,7 +115,9 @@ impl JobManager {
 
     /// Get a job's current state.
     pub async fn get_job(&self, id: TrainingJobId) -> Result<JobState> {
-        self.jobs.read().await
+        self.jobs
+            .read()
+            .await
             .get(&id)
             .cloned()
             .ok_or_else(|| SynapseError::TrainingError(format!("Job {id} not found")))
@@ -121,7 +134,9 @@ impl JobManager {
 
     /// Count of currently running jobs.
     pub async fn running_count(&self) -> usize {
-        self.jobs.read().await
+        self.jobs
+            .read()
+            .await
             .values()
             .filter(|j| j.status == TrainingStatus::Running)
             .count()

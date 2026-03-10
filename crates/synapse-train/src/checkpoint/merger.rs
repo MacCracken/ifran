@@ -3,8 +3,8 @@
 //! Merging is done by spawning a Python script that uses the PEFT library
 //! to merge adapter weights into the base model and export the result.
 
-use synapse_types::error::Result;
 use synapse_types::SynapseError;
+use synapse_types::error::Result;
 use tokio::process::Command;
 use tracing::info;
 
@@ -13,11 +13,7 @@ use tracing::info;
 /// - `base_model`: path or HuggingFace repo ID of the base model
 /// - `adapter_path`: path to the LoRA adapter checkpoint directory
 /// - `output_path`: where to write the merged model
-pub async fn merge_lora(
-    base_model: &str,
-    adapter_path: &str,
-    output_path: &str,
-) -> Result<()> {
+pub async fn merge_lora(base_model: &str, adapter_path: &str, output_path: &str) -> Result<()> {
     info!(base = %base_model, adapter = %adapter_path, output = %output_path, "Merging LoRA adapter");
 
     let output = Command::new("python3")
@@ -45,7 +41,9 @@ print("Merge complete")
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(SynapseError::TrainingError(format!("Merge failed: {stderr}")));
+        return Err(SynapseError::TrainingError(format!(
+            "Merge failed: {stderr}"
+        )));
     }
 
     info!("LoRA merge complete: {output_path}");

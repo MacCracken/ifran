@@ -37,12 +37,11 @@ impl CheckpointStore {
         for entry in std::fs::read_dir(&dir)?.flatten() {
             let path = entry.path();
             let meta_path = path.join("checkpoint_meta.json");
-            if meta_path.exists() {
-                if let Ok(content) = std::fs::read_to_string(&meta_path) {
-                    if let Ok(info) = serde_json::from_str::<CheckpointInfo>(&content) {
-                        checkpoints.push(info);
-                    }
-                }
+            if meta_path.exists()
+                && let Ok(content) = std::fs::read_to_string(&meta_path)
+                && let Ok(info) = serde_json::from_str::<CheckpointInfo>(&content)
+            {
+                checkpoints.push(info);
             }
         }
 
@@ -74,5 +73,130 @@ impl CheckpointStore {
         }
 
         Ok(removed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use synapse_types::training::CheckpointInfo;
+
+    #[test]
+    fn job_dir_uses_id() {
+        let store = CheckpointStore::new("/tmp/checkpoints");
+        let id = uuid::Uuid::new_v4();
+        let dir = store.job_dir(id);
+        assert_eq!(dir, PathBuf::from(format!("/tmp/checkpoints/{id}")));
+    }
+
+    #[test]
+    fn ensure_dir_creates_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = CheckpointStore::new(tmp.path());
+        let id = uuid::Uuid::new_v4();
+        let dir = store.ensure_dir(id).unwrap();
+        assert!(dir.exists());
+    }
+
+    #[test]
+    fn list_empty_for_nonexistent_job() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = CheckpointStore::new(tmp.path());
+        let id = uuid::Uuid::new_v4();
+        let cps = store.list(id).unwrap();
+        assert!(cps.is_empty());
+    }
+
+    #[test]
+    fn list_reads_checkpoint_meta() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = CheckpointStore::new(tmp.path());
+        let job_id = uuid::Uuid::new_v4();
+        let job_dir = store.ensure_dir(job_id).unwrap();
+
+        // Create a checkpoint directory with metadata
+        let cp_dir = job_dir.join("step-100");
+        std::fs::create_dir(&cp_dir).unwrap();
+        let info = CheckpointInfo {
+            step: 100,
+            epoch: 1.0,
+            loss: 0.5,
+            path: cp_dir.to_string_lossy().to_string(),
+            timestamp: chrono::Utc::now(),
+        };
+        let meta = serde_json::to_string(&info).unwrap();
+        std::fs::write(cp_dir.join("checkpoint_meta.json"), meta).unwrap();
+
+        let cps = store.list(job_id).unwrap();
+        assert_eq!(cps.len(), 1);
+        assert_eq!(cps[0].step, 100);
+    }
+
+    #[test]
+    fn latest_returns_highest_step() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = CheckpointStore::new(tmp.path());
+        let job_id = uuid::Uuid::new_v4();
+        let job_dir = store.ensure_dir(job_id).unwrap();
+
+        for step in [50, 200, 100] {
+            let cp_dir = job_dir.join(format!("step-{step}"));
+            std::fs::create_dir(&cp_dir).unwrap();
+            let info = CheckpointInfo {
+                step,
+                epoch: 1.0,
+                loss: 0.5,
+                path: cp_dir.to_string_lossy().to_string(),
+                timestamp: chrono::Utc::now(),
+            };
+            std::fs::write(
+                cp_dir.join("checkpoint_meta.json"),
+                serde_json::to_string(&info).unwrap(),
+            )
+            .unwrap();
+        }
+
+        let latest = store.latest(job_id).unwrap().unwrap();
+        assert_eq!(latest.step, 200);
+    }
+
+    #[test]
+    fn prune_keeps_n_most_recent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = CheckpointStore::new(tmp.path());
+        let job_id = uuid::Uuid::new_v4();
+        let job_dir = store.ensure_dir(job_id).unwrap();
+
+        for step in [100, 200, 300] {
+            let cp_dir = job_dir.join(format!("step-{step}"));
+            std::fs::create_dir(&cp_dir).unwrap();
+            let info = CheckpointInfo {
+                step,
+                epoch: 1.0,
+                loss: 0.5,
+                path: cp_dir.to_string_lossy().to_string(),
+                timestamp: chrono::Utc::now(),
+            };
+            std::fs::write(
+                cp_dir.join("checkpoint_meta.json"),
+                serde_json::to_string(&info).unwrap(),
+            )
+            .unwrap();
+        }
+
+        let removed = store.prune(job_id, 1).unwrap();
+        assert_eq!(removed, 2);
+        let remaining = store.list(job_id).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].step, 300);
+    }
+
+    #[test]
+    fn prune_noop_when_under_limit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = CheckpointStore::new(tmp.path());
+        let job_id = uuid::Uuid::new_v4();
+        let removed = store.prune(job_id, 5).unwrap();
+        assert_eq!(removed, 0);
     }
 }

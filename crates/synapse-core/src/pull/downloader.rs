@@ -8,9 +8,9 @@
 use crate::pull::progress::{ProgressEvent, ProgressTracker};
 use reqwest::Client;
 use std::path::PathBuf;
+use synapse_types::SynapseError;
 use synapse_types::error::Result;
 use synapse_types::registry::DownloadState;
-use synapse_types::SynapseError;
 use tokio::io::AsyncWriteExt;
 
 /// Configuration for a download.

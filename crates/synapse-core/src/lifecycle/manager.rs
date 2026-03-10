@@ -45,18 +45,12 @@ impl ModelManager {
     /// This performs the budget check but does NOT call backend.load_model() —
     /// that's the caller's responsibility. This separation allows the manager
     /// to be backend-agnostic.
-    pub async fn prepare_load(
-        &self,
-        manifest: &ModelManifest,
-    ) -> Result<DeviceConfig> {
+    pub async fn prepare_load(&self, manifest: &ModelManifest) -> Result<DeviceConfig> {
         let hardware = detect::detect()?;
 
         let total_layers = 32; // TODO: read from GGUF metadata
-        let estimate = memory::estimate_gguf(
-            manifest.info.size_bytes,
-            manifest.gpu_layers,
-            total_layers,
-        );
+        let estimate =
+            memory::estimate_gguf(manifest.info.size_bytes, manifest.gpu_layers, total_layers);
 
         memory::check_budget(&hardware, &estimate, self.gpu_reserve_mb)?;
 

@@ -21,7 +21,6 @@ Synapse is a Rust-based LLM controller that provides a unified interface for man
 
 - **Rust** (stable toolchain) -- install via [rustup](https://rustup.rs/)
 - **protoc** (Protocol Buffers compiler) -- required for gRPC code generation
-- **pkg-config** and **libssl-dev** (or equivalent for your distro)
 - **cmake** -- required by some native dependencies
 - **Docker** (optional) -- needed for containerized training jobs and integration tests
 - **CUDA toolkit** (optional) -- needed only if building GPU-accelerated backends
@@ -138,18 +137,19 @@ cargo clippy --workspace --all-targets -- -D warnings
 ## Testing
 
 - **Unit tests** live alongside source code in each crate (`#[cfg(test)]` modules).
-- **Integration tests** live in the top-level `tests/` directory.
-- Coverage target: **65%** minimum.
+- **Integration tests** live alongside each crate (e.g. `crates/synapse-api/tests/`).
+- Coverage target: **45%** minimum (CI enforced, goal: 80%).
+- CI runs tests per-package in parallel.
 
 ```bash
 # Run all tests
-make test
+cargo test --workspace
 
 # Run tests for a specific crate
 cargo test -p synapse-core
 
-# Run with coverage (requires cargo-llvm-cov)
-cargo llvm-cov --workspace --lcov --output-path lcov.info
+# Run with coverage (requires cargo-tarpaulin)
+cargo tarpaulin --workspace --out html
 ```
 
 ## Documentation
@@ -191,7 +191,7 @@ When working on a specific crate, keep these responsibilities in mind:
 - **synapse-api** -- HTTP and gRPC endpoints. Delegates to core and backends. OpenAI-compatible API surface.
 - **synapse-bridge** -- Handles bidirectional communication with SY. Protocol defined in `proto/`.
 - **synapse-cli** -- Thin layer over core functionality. Keep business logic out of this crate.
-- **synapse-desktop** -- Tauri shell. Frontend lives in `desktop/src-ui/`.
+- **synapse-desktop** -- Tauri shell. Frontend lives in `crates/synapse-desktop/src/`.
 
 ---
 

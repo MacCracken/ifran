@@ -4,12 +4,12 @@
 //! - POST /v1/chat/completions
 //! - GET /v1/models
 
+use crate::state::AppState;
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::sse::{Event, Sse};
 use axum::response::IntoResponse;
-use axum::Json;
-use crate::state::AppState;
+use axum::response::sse::{Event, Sse};
 use serde::Deserialize;
 use synapse_types::inference::InferenceRequest;
 
@@ -72,8 +72,13 @@ pub async fn chat_completions(
 
     let backend = state
         .backends
-        .get(&synapse_types::backend::BackendId(loaded_model.backend_id.clone()))
-        .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "Backend not available".into()))?;
+        .get(&synapse_types::backend::BackendId(
+            loaded_model.backend_id.clone(),
+        ))
+        .ok_or((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Backend not available".into(),
+        ))?;
 
     let handle = synapse_backends::ModelHandle(loaded_model.handle.clone());
 

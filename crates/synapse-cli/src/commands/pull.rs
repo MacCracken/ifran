@@ -1,5 +1,4 @@
 /// Pull a model from a remote registry to local storage.
-
 use indicatif::{ProgressBar, ProgressStyle};
 use synapse_core::config::SynapseConfig;
 use synapse_core::pull::downloader::{self, DownloadRequest};
@@ -12,15 +11,24 @@ use synapse_types::model::{ModelFormat, ModelInfo, QuantLevel};
 use synapse_types::registry::DownloadState;
 
 pub async fn execute(model: &str, quant: Option<&str>) -> Result<()> {
-    let config = SynapseConfig::default();
-    let layout = StorageLayout::new(&config.storage.models_dir.parent().unwrap_or(&config.storage.models_dir));
+    let config = SynapseConfig::discover();
+    let layout = StorageLayout::new(
+        config
+            .storage
+            .models_dir
+            .parent()
+            .unwrap_or(&config.storage.models_dir),
+    );
     layout.ensure_dirs()?;
 
     let db = ModelDatabase::open(&config.storage.database)?;
 
     // Check if already pulled
     if let Ok(existing) = db.get_by_name(model) {
-        eprintln!("Model '{}' already exists (id: {})", existing.name, existing.id);
+        eprintln!(
+            "Model '{}' already exists (id: {})",
+            existing.name, existing.id
+        );
         eprintln!("  Path: {}", existing.local_path);
         return Ok(());
     }

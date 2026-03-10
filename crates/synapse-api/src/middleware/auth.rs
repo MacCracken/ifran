@@ -13,7 +13,9 @@ use axum::response::Response;
 ///
 /// Returns `None` if auth is disabled (no key set).
 pub fn configured_api_key() -> Option<String> {
-    std::env::var("SYNAPSE_API_KEY").ok().filter(|k| !k.is_empty())
+    std::env::var("SYNAPSE_API_KEY")
+        .ok()
+        .filter(|k| !k.is_empty())
 }
 
 /// Auth middleware — validates Bearer token if an API key is configured.
