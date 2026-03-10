@@ -1,0 +1,32 @@
+[server]
+bind = "0.0.0.0:8420"
+grpc_bind = "0.0.0.0:8421"
+
+[storage]
+models_dir = "/var/lib/synapse/models"
+database = "/var/lib/synapse/synapse.db"
+cache_dir = "/var/lib/synapse/cache"
+
+[backends]
+default = "llamacpp"
+enabled = ["llamacpp", "candle", "ollama"]
+
+[backends.ollama]
+endpoint = "http://localhost:11434"
+
+[backends.vllm]
+endpoint = "http://localhost:8000"
+
+[training]
+executor = "docker"
+trainer_image = "ghcr.io/maccracken/synapse-trainer:latest"
+max_concurrent_jobs = 2
+checkpoints_dir = "/var/lib/synapse/checkpoints"
+
+[bridge]
+sy_endpoint = "http://localhost:9000"
+enabled = true
+heartbeat_interval_secs = 10
+
+[hardware]
+gpu_memory_reserve_mb = 512

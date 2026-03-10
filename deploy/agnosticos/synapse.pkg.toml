@@ -1,0 +1,25 @@
+[package]
+name = "synapse"
+description = "LLM controller for pulling, managing, and training language models"
+license = "MIT"
+
+[build]
+type = "cargo"
+workspace_member = "synapse-api"
+
+[install]
+bin = [
+    { src = "synapse-api", dst = "/usr/local/bin/synapse-server" },
+    { src = "synapse", dst = "/usr/local/bin/synapse" },
+]
+config = [
+    { src = "deploy/synapse.toml.example", dst = "/etc/synapse/synapse.toml" },
+]
+service = [
+    { src = "deploy/synapse.service", dst = "/etc/systemd/system/synapse.service" },
+]
+dirs = [
+    "/var/lib/synapse/models",
+    "/var/lib/synapse/checkpoints",
+    "/var/lib/synapse/cache",
+]

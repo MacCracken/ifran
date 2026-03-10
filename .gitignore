@@ -1,0 +1,9 @@
+/target
+**/*.rs.bk
+*.pdb
+.env
+*.db
+*.db-journal
+/dist
+node_modules/
+.DS_Store

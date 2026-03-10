@@ -1,0 +1,16 @@
+[Unit]
+Description=Synapse LLM Controller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/synapse-server
+Environment=SYNAPSE_CONFIG=/etc/synapse/synapse.toml
+Restart=on-failure
+RestartSec=5
+WatchdogSec=30
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

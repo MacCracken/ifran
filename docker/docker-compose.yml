@@ -1,0 +1,25 @@
+services:
+  synapse-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8420:8420"
+      - "8421:8421"
+    volumes:
+      - synapse-models:/var/lib/synapse/models
+      - synapse-data:/var/lib/synapse/data
+    environment:
+      - SYNAPSE_STORAGE__MODELS_DIR=/var/lib/synapse/models
+      - SYNAPSE_STORAGE__DATABASE=/var/lib/synapse/data/synapse.db
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  synapse-models:
+  synapse-data:

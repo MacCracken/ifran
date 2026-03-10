@@ -1,0 +1,87 @@
+syntax = "proto3";
+package synapse.training;
+
+service TrainingService {
+  rpc CreateJob(CreateJobRequest) returns (CreateJobResponse);
+  rpc GetJob(GetJobRequest) returns (JobInfo);
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+  rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
+  rpc StreamJobLogs(StreamLogsRequest) returns (stream LogLine);
+}
+
+message CreateJobRequest {
+  string base_model = 1;
+  string dataset_path = 2;
+  string method = 3;
+  HyperParams hyperparams = 4;
+  LoraConfig lora_config = 5;
+  string output_name = 6;
+}
+message CreateJobResponse {
+  string job_id = 1;
+}
+
+message GetJobRequest {
+  string job_id = 1;
+}
+
+message JobInfo {
+  string job_id = 1;
+  string status = 2;
+  string base_model = 3;
+  string method = 4;
+  uint64 current_step = 5;
+  uint64 total_steps = 6;
+  double current_loss = 7;
+  float current_epoch = 8;
+  string started_at = 9;
+  repeated CheckpointInfo checkpoints = 10;
+}
+
+message ListJobsRequest {
+  string status_filter = 1;
+}
+message ListJobsResponse {
+  repeated JobInfo jobs = 1;
+}
+
+message CancelJobRequest {
+  string job_id = 1;
+}
+message CancelJobResponse {
+  bool cancelled = 1;
+}
+
+message StreamLogsRequest {
+  string job_id = 1;
+}
+message LogLine {
+  string timestamp = 1;
+  string level = 2;
+  string message = 3;
+}
+
+message HyperParams {
+  double learning_rate = 1;
+  uint32 epochs = 2;
+  uint32 batch_size = 3;
+  uint32 gradient_accumulation_steps = 4;
+  uint32 warmup_steps = 5;
+  double weight_decay = 6;
+  uint32 max_seq_length = 7;
+}
+
+message LoraConfig {
+  uint32 rank = 1;
+  float alpha = 2;
+  float dropout = 3;
+  repeated string target_modules = 4;
+}
+
+message CheckpointInfo {
+  uint64 step = 1;
+  float epoch = 2;
+  double loss = 3;
+  string path = 4;
+  string timestamp = 5;
+}
