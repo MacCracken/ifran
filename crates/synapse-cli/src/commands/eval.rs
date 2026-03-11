@@ -24,34 +24,82 @@ pub async fn execute(
     let run_id = runner.create_run(config).await?;
     runner.start_run(run_id).await?;
 
-    match kind {
-        BenchmarkKind::Custom => {
-            let dataset_path = dataset.ok_or_else(|| {
-                synapse_types::SynapseError::EvalError("Custom benchmark requires --dataset".into())
+    let dataset_path = dataset.ok_or_else(|| {
+        synapse_types::SynapseError::EvalError(
+            "Dataset path required (--dataset <path>). Provide a JSONL file with prompt/expected fields.".into(),
+        )
+    })?;
+
+    // Build inference function via HTTP to local API server
+    let http_client = synapse_core::pull::downloader::build_client()?;
+    let infer_fn = |prompt: String| {
+        let client = http_client.clone();
+        async move {
+            let resp = client
+                .post("http://127.0.0.1:8420/inference")
+                .json(&serde_json::json!({
+                    "model": "default",
+                    "prompt": prompt,
+                    "max_tokens": 256,
+                    "temperature": 0.0,
+                }))
+                .send()
+                .await
+                .map_err(|e| {
+                    synapse_types::SynapseError::EvalError(format!(
+                        "Inference request failed (is the API server running?): {e}"
+                    ))
+                })?;
+
+            if !resp.status().is_success() {
+                return Err(synapse_types::SynapseError::EvalError(format!(
+                    "Inference returned HTTP {}",
+                    resp.status()
+                )));
+            }
+
+            let body: serde_json::Value = resp.json().await.map_err(|e| {
+                synapse_types::SynapseError::EvalError(format!(
+                    "Invalid inference response: {e}"
+                ))
             })?;
 
-            // MVP: stub inference function — real implementation will connect to backend
-            let infer_fn = |_prompt: String| async {
-                Err(synapse_types::SynapseError::EvalError(
-                    "Inference not yet wired to CLI (use API instead)".into(),
-                ))
-            };
+            body["text"]
+                .as_str()
+                .map(String::from)
+                .ok_or_else(|| {
+                    synapse_types::SynapseError::EvalError(
+                        "No 'text' field in inference response".into(),
+                    )
+                })
+        }
+    };
 
-            let result = runner
-                .run_custom_benchmark(run_id, dataset_path, sample_limit, model, infer_fn)
-                .await?;
+    println!("Running {kind:?} benchmark on '{model}'...");
+    println!("Dataset: {dataset_path}");
+    if let Some(limit) = sample_limit {
+        println!("Sample limit: {limit}");
+    }
+    println!();
 
-            println!("Benchmark: custom");
-            println!("Score: {:.4}", result.score);
-            println!("Samples: {}", result.samples_evaluated);
+    match runner
+        .run_benchmark(run_id, kind, dataset_path, sample_limit, model, &infer_fn)
+        .await
+    {
+        Ok(result) => {
+            runner.complete_run(run_id).await?;
+            println!("Benchmark: {kind:?}");
+            if kind == BenchmarkKind::Perplexity {
+                println!("Perplexity: {:.2} (lower is better)", result.score);
+            } else {
+                println!("Score: {:.4} ({:.1}%)", result.score, result.score * 100.0);
+            }
+            println!("Samples evaluated: {}", result.samples_evaluated);
             println!("Duration: {:.2}s", result.duration_secs);
         }
-        other => {
-            // TODO: Wire standard benchmarks (perplexity, MMLU, etc.)
-            runner.complete_run(run_id).await?;
-            println!("Benchmark {other:?} is not yet implemented.");
-            println!("Run ID: {run_id}");
-            println!("Use the API for full eval support.");
+        Err(e) => {
+            runner.fail_run(run_id, e.to_string()).await?;
+            eprintln!("Benchmark failed: {e}");
         }
     }
 

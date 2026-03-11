@@ -205,7 +205,7 @@ jobs:
     name: Publish Container Images
     needs: [build-release]
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -215,6 +215,34 @@ jobs:
         run: |
           VERSION=$(cat VERSION | tr -d '[:space:]')
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Download release artifacts (amd64)
+        uses: actions/download-artifact@v4
+        with:
+          name: release-amd64
+          path: artifacts/amd64
+
+      - name: Download release artifacts (arm64)
+        uses: actions/download-artifact@v4
+        with:
+          name: release-arm64
+          path: artifacts/arm64
+
+      - name: Stage binaries for Docker build
+        run: |
+          mkdir -p bin/amd64 bin/arm64
+
+          # Extract amd64 binaries
+          tar xzf artifacts/amd64/synapse-*-linux-amd64.tar.gz
+          cp synapse-*-linux-amd64/synapse bin/amd64/synapse
+          cp synapse-*-linux-amd64/synapse-api bin/amd64/synapse-api
+          chmod +x bin/amd64/*
+
+          # Extract arm64 binaries
+          tar xzf artifacts/arm64/synapse-*-linux-arm64.tar.gz
+          cp synapse-*-linux-arm64/synapse bin/arm64/synapse
+          cp synapse-*-linux-arm64/synapse-api bin/arm64/synapse-api
+          chmod +x bin/arm64/*
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -243,10 +271,12 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/Dockerfile
+          file: docker/Dockerfile.release
           push: true
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

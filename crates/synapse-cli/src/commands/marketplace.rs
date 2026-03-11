@@ -78,6 +78,62 @@ pub async fn unpublish(model_name: &str) -> synapse_types::error::Result<()> {
     Ok(())
 }
 
+/// Pull a model from a remote marketplace peer.
+pub async fn pull(model_name: &str, peer_url: &str) -> synapse_types::error::Result<()> {
+    use synapse_core::marketplace::resolver::MarketplaceResolver;
+    use synapse_core::marketplace::trust::{TrustPolicy, verify_entry};
+
+    let mut resolver = MarketplaceResolver::new();
+    resolver.add_peer(peer_url.to_string());
+
+    let query = MarketplaceQuery {
+        search: Some(model_name.to_string()),
+        ..Default::default()
+    };
+
+    let results = resolver.search_remote(&query).await?;
+    let entry = results.iter().find(|e| e.model_name == model_name).ok_or(
+        synapse_types::SynapseError::MarketplaceError(format!(
+            "Model '{model_name}' not found on peer {peer_url}"
+        )),
+    )?;
+
+    // Verify against trust policy
+    let policy = TrustPolicy::default();
+    let trust_level = verify_entry(entry, &policy)?;
+    println!("Trust level: {trust_level:?}");
+
+    // Download the model
+    let config = SynapseConfig::discover();
+    let safe_name = model_name.replace('/', "__");
+    let dest = config.storage.models_dir.join(&safe_name);
+
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let client = synapse_core::pull::downloader::build_client()?;
+    let progress = synapse_core::pull::progress::ProgressTracker::new(16);
+    let download_req = synapse_core::pull::downloader::DownloadRequest {
+        url: entry.download_url.clone(),
+        dest: dest.clone(),
+        model_name: model_name.to_string(),
+        expected_sha256: entry.sha256.clone(),
+    };
+
+    println!("Downloading '{}' from {}...", model_name, peer_url);
+    synapse_core::pull::downloader::download(&client, &download_req, &progress).await?;
+
+    // Verify download integrity
+    if entry.sha256.is_some() {
+        let dl_trust = synapse_core::marketplace::trust::verify_download(&dest, entry)?;
+        println!("Download verified: {dl_trust:?}");
+    }
+
+    println!("Pulled '{}' to {}", model_name, dest.display());
+    Ok(())
+}
+
 fn format_size(bytes: u64) -> String {
     if bytes >= 1_000_000_000 {
         format!("{:.1} GB", bytes as f64 / 1_000_000_000.0)

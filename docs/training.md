@@ -51,6 +51,56 @@ Located in `crates/synapse-train/src/scripts/`:
 
 Config is passed via `--config-json`, `--config-file`, or `TRAINING_CONFIG` env var.
 
+## Distributed Training
+
+Synapse supports distributed training across multiple nodes using data parallelism.
+
+### Architecture
+
+- **Coordinator**: Manages the distributed job lifecycle, worker assignments, and aggregation
+- **Workers**: Each Synapse instance participates as a worker with a unique rank
+- **Aggregator**: Merges checkpoints from all workers after training completes
+
+### Strategies
+
+| Strategy | Description |
+|----------|-------------|
+| **Data Parallel** | Each worker trains on a shard of the dataset with the full model |
+
+### CLI Usage
+
+```bash
+# Start distributed training (local node becomes rank 0)
+synapse train --base-model meta-llama/Llama-3.1-8B --dataset data.jsonl \
+  --distributed --world-size 2 --strategy data_parallel
+```
+
+### API Workflow
+
+1. Create a distributed job: `POST /training/distributed/jobs`
+2. Assign workers (one per rank): `POST /training/distributed/jobs/:id/workers`
+3. Start the job: `POST /training/distributed/jobs/:id/start`
+4. Workers report completion: `POST /training/distributed/jobs/:id/workers/:rank/complete`
+5. Aggregate checkpoints: `POST /training/distributed/jobs/:id/aggregate`
+
+### Checkpoint Synchronization
+
+Workers save checkpoints to `<output_dir>/worker-<rank>/`. After all workers complete, the aggregator merges checkpoints using averaging or weighted averaging. The SY bridge coordinates checkpoint sync between nodes via `SyncCheckpoint` RPCs.
+
+### Federated Averaging
+
+For scenarios where workers train independently on local data, federated averaging combines model weights:
+
+```bash
+# Aggregate with equal weights (default)
+POST /training/distributed/jobs/:id/aggregate
+{"output_dir": "/output", "method": "average"}
+
+# Aggregate with custom weights per worker
+POST /training/distributed/jobs/:id/aggregate
+{"output_dir": "/output", "method": "weighted_average"}
+```
+
 ## SecureYeoman Integration
 
-SY can delegate training jobs to Synapse via the gRPC bridge. Synapse reports progress back and can request additional GPU allocation from SY when needed.
+SY can delegate training jobs to Synapse via the gRPC bridge. Synapse reports progress back and can request additional GPU allocation from SY when needed. For distributed training, SY coordinates cross-node worker assignments via `RequestWorkerAssignment` and checkpoint synchronization via `SyncCheckpoint` RPCs.

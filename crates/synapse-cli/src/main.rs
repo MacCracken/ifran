@@ -45,6 +45,15 @@ enum Commands {
         /// Training method: lora, qlora, full, dpo, rlhf, distillation
         #[arg(long, default_value = "lora")]
         method: String,
+        /// Enable distributed training
+        #[arg(long)]
+        distributed: bool,
+        /// Number of workers for distributed training
+        #[arg(long)]
+        world_size: Option<u32>,
+        /// Distributed strategy: data_parallel, model_parallel, pipeline_parallel
+        #[arg(long)]
+        strategy: Option<String>,
     },
     /// Show status of system, models, and jobs
     Status,
@@ -94,6 +103,14 @@ enum MarketplaceAction {
         /// Model name to unpublish
         model: String,
     },
+    /// Pull a model from a marketplace peer
+    Pull {
+        /// Model name to pull
+        model: String,
+        /// Peer URL to pull from (e.g. http://node-2:8420)
+        #[arg(long)]
+        peer: String,
+    },
 }
 
 #[tokio::main]
@@ -110,7 +127,23 @@ async fn main() {
             base_model,
             dataset,
             method,
-        } => commands::train::execute(&base_model, &dataset, &method).await,
+            distributed,
+            world_size,
+            strategy,
+        } => {
+            if distributed {
+                commands::train::execute_distributed(
+                    &base_model,
+                    &dataset,
+                    &method,
+                    world_size.unwrap_or(2),
+                    strategy.as_deref().unwrap_or("data_parallel"),
+                )
+                .await
+            } else {
+                commands::train::execute(&base_model, &dataset, &method).await
+            }
+        }
         Commands::Status => commands::status::execute().await,
         Commands::Remove { model, yes } => commands::remove::execute(&model, yes).await,
         Commands::Eval {
@@ -126,6 +159,9 @@ async fn main() {
             MarketplaceAction::Publish { model } => commands::marketplace::publish(&model).await,
             MarketplaceAction::Unpublish { model } => {
                 commands::marketplace::unpublish(&model).await
+            }
+            MarketplaceAction::Pull { model, peer } => {
+                commands::marketplace::pull(&model, &peer).await
             }
         },
     };

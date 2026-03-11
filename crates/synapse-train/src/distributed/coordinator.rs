@@ -132,6 +132,28 @@ impl DistributedCoordinator {
         Ok(())
     }
 
+    /// Collect checkpoint paths from all workers for synchronization.
+    pub async fn collect_checkpoint_paths(
+        &self,
+        job_id: DistributedJobId,
+        base_output_dir: &std::path::Path,
+    ) -> Result<Vec<std::path::PathBuf>> {
+        let jobs = self.jobs.read().await;
+        let state = jobs.get(&job_id).ok_or_else(|| {
+            SynapseError::DistributedError(format!("Distributed job {job_id} not found"))
+        })?;
+
+        let paths: Vec<std::path::PathBuf> = state
+            .workers
+            .iter()
+            .map(|w| {
+                super::aggregator::worker_checkpoint_dir(base_output_dir, w.rank)
+            })
+            .collect();
+
+        Ok(paths)
+    }
+
     /// Fail a distributed job.
     pub async fn fail_job(&self, job_id: DistributedJobId) -> Result<()> {
         let mut jobs = self.jobs.write().await;
@@ -290,5 +312,75 @@ mod tests {
             coord.get_job(job_id).await.unwrap().status,
             TrainingStatus::Failed
         );
+    }
+
+    #[tokio::test]
+    async fn list_jobs() {
+        let coord = DistributedCoordinator::new();
+        coord.create_job(test_config(), "node-1").await.unwrap();
+        coord.create_job(test_config(), "node-2").await.unwrap();
+        assert_eq!(coord.list_jobs().await.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn update_aggregate_loss() {
+        let coord = DistributedCoordinator::new();
+        let job_id = coord.create_job(test_config(), "node-1").await.unwrap();
+        coord.update_aggregate_loss(job_id, 0.42).await.unwrap();
+        let job = coord.get_job(job_id).await.unwrap();
+        assert_eq!(job.aggregate_loss, Some(0.42));
+    }
+
+    #[tokio::test]
+    async fn collect_checkpoint_paths() {
+        let coord = DistributedCoordinator::new();
+        let job_id = coord.create_job(test_config(), "node-1").await.unwrap();
+
+        for rank in 0..2 {
+            coord
+                .assign_worker(
+                    job_id,
+                    WorkerAssignment {
+                        rank,
+                        instance_id: format!("node-{}", rank + 1),
+                        endpoint: format!("http://node-{}:9000", rank + 1),
+                        device_ids: vec![0],
+                    },
+                )
+                .await
+                .unwrap();
+        }
+
+        let paths = coord
+            .collect_checkpoint_paths(job_id, std::path::Path::new("/output"))
+            .await
+            .unwrap();
+        assert_eq!(paths.len(), 2);
+        assert_eq!(paths[0], std::path::PathBuf::from("/output/worker-0"));
+        assert_eq!(paths[1], std::path::PathBuf::from("/output/worker-1"));
+    }
+
+    #[tokio::test]
+    async fn rank_exceeds_world_size() {
+        let coord = DistributedCoordinator::new();
+        let job_id = coord.create_job(test_config(), "node-1").await.unwrap();
+        let result = coord
+            .assign_worker(
+                job_id,
+                WorkerAssignment {
+                    rank: 5, // world_size is 2
+                    instance_id: "node-x".into(),
+                    endpoint: "http://node-x:9000".into(),
+                    device_ids: vec![0],
+                },
+            )
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn get_nonexistent_job() {
+        let coord = DistributedCoordinator::new();
+        assert!(coord.get_job(uuid::Uuid::new_v4()).await.is_err());
     }
 }

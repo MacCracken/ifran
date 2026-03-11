@@ -101,13 +101,62 @@ impl EvalRunner {
         Ok(())
     }
 
-    /// Run a custom (exact-match) benchmark against a model.
+    /// Run a benchmark of the given kind. Dispatches to the appropriate method.
     ///
-    /// This is the MVP eval path: load samples from JSONL, run inference on each,
-    /// compare output to expected, return accuracy.
-    ///
-    /// The actual inference call is provided as a closure so the runner
-    /// doesn't depend on any specific backend.
+    /// The `infer_fn` closure is called with a prompt string and returns
+    /// the model's text output, keeping the runner backend-agnostic.
+    pub async fn run_benchmark<F, Fut>(
+        &self,
+        run_id: EvalRunId,
+        kind: BenchmarkKind,
+        dataset_path: &str,
+        sample_limit: Option<usize>,
+        model_name: &str,
+        infer_fn: &F,
+    ) -> Result<EvalResult>
+    where
+        F: Fn(String) -> Fut,
+        Fut: std::future::Future<Output = Result<String>>,
+    {
+        match kind {
+            BenchmarkKind::Custom => {
+                self.run_custom_benchmark(run_id, dataset_path, sample_limit, model_name, |p| {
+                    infer_fn(p)
+                })
+                .await
+            }
+            BenchmarkKind::Mmlu => {
+                self.run_mmlu_benchmark(run_id, dataset_path, sample_limit, model_name, |p| {
+                    infer_fn(p)
+                })
+                .await
+            }
+            BenchmarkKind::HellaSwag => {
+                self.run_hellaswag_benchmark(run_id, dataset_path, sample_limit, model_name, |p| {
+                    infer_fn(p)
+                })
+                .await
+            }
+            BenchmarkKind::HumanEval => {
+                self.run_humaneval_benchmark(run_id, dataset_path, sample_limit, model_name, |p| {
+                    infer_fn(p)
+                })
+                .await
+            }
+            BenchmarkKind::Perplexity => {
+                self.run_perplexity_benchmark(
+                    run_id,
+                    dataset_path,
+                    sample_limit,
+                    model_name,
+                    |p| infer_fn(p),
+                )
+                .await
+            }
+        }
+    }
+
+    /// Run a custom (contains-match) benchmark against a model.
     pub async fn run_custom_benchmark<F, Fut>(
         &self,
         run_id: EvalRunId,
@@ -145,6 +194,213 @@ impl EvalRunner {
                 "total_samples": samples.len(),
                 "successful_inferences": predictions.len(),
                 "scoring_method": "contains_match",
+            })),
+            samples_evaluated: predictions.len() as u64,
+            duration_secs: duration,
+            evaluated_at: chrono::Utc::now(),
+        };
+
+        self.record_result(run_id, result.clone()).await?;
+        Ok(result)
+    }
+
+    /// Run an MMLU-style multiple-choice benchmark.
+    pub async fn run_mmlu_benchmark<F, Fut>(
+        &self,
+        run_id: EvalRunId,
+        dataset_path: &str,
+        sample_limit: Option<usize>,
+        model_name: &str,
+        infer_fn: F,
+    ) -> Result<EvalResult>
+    where
+        F: Fn(String) -> Fut,
+        Fut: std::future::Future<Output = Result<String>>,
+    {
+        let samples = super::benchmarks::load_samples(dataset_path, sample_limit)?;
+        let start = Instant::now();
+
+        let mut predictions = Vec::new();
+        for sample in &samples {
+            let prompt = super::benchmarks::format_mmlu_prompt(sample);
+            let expected = super::benchmarks::mmlu_expected_letter(sample);
+            match infer_fn(prompt).await {
+                Ok(output) => predictions.push((output, expected)),
+                Err(e) => {
+                    tracing::warn!(error = %e, "MMLU inference failed");
+                }
+            }
+        }
+
+        let score = super::benchmarks::score_mmlu(&predictions);
+        let duration = start.elapsed().as_secs_f64();
+
+        let result = EvalResult {
+            run_id,
+            model_name: model_name.to_string(),
+            benchmark: BenchmarkKind::Mmlu,
+            score,
+            details: Some(serde_json::json!({
+                "total_samples": samples.len(),
+                "successful_inferences": predictions.len(),
+                "scoring_method": "mmlu_letter_match",
+            })),
+            samples_evaluated: predictions.len() as u64,
+            duration_secs: duration,
+            evaluated_at: chrono::Utc::now(),
+        };
+
+        self.record_result(run_id, result.clone()).await?;
+        Ok(result)
+    }
+
+    /// Run a HellaSwag-style commonsense completion benchmark.
+    pub async fn run_hellaswag_benchmark<F, Fut>(
+        &self,
+        run_id: EvalRunId,
+        dataset_path: &str,
+        sample_limit: Option<usize>,
+        model_name: &str,
+        infer_fn: F,
+    ) -> Result<EvalResult>
+    where
+        F: Fn(String) -> Fut,
+        Fut: std::future::Future<Output = Result<String>>,
+    {
+        let samples = super::benchmarks::load_samples(dataset_path, sample_limit)?;
+        let start = Instant::now();
+
+        let mut predictions = Vec::new();
+        for sample in &samples {
+            let prompt = super::benchmarks::format_hellaswag_prompt(sample);
+            match infer_fn(prompt).await {
+                Ok(output) => predictions.push((output, sample.expected.clone())),
+                Err(e) => {
+                    tracing::warn!(error = %e, "HellaSwag inference failed");
+                }
+            }
+        }
+
+        let score = super::benchmarks::score_contains_match(&predictions);
+        let duration = start.elapsed().as_secs_f64();
+
+        let result = EvalResult {
+            run_id,
+            model_name: model_name.to_string(),
+            benchmark: BenchmarkKind::HellaSwag,
+            score,
+            details: Some(serde_json::json!({
+                "total_samples": samples.len(),
+                "successful_inferences": predictions.len(),
+                "scoring_method": "contains_match",
+            })),
+            samples_evaluated: predictions.len() as u64,
+            duration_secs: duration,
+            evaluated_at: chrono::Utc::now(),
+        };
+
+        self.record_result(run_id, result.clone()).await?;
+        Ok(result)
+    }
+
+    /// Run a HumanEval-style code generation benchmark.
+    pub async fn run_humaneval_benchmark<F, Fut>(
+        &self,
+        run_id: EvalRunId,
+        dataset_path: &str,
+        sample_limit: Option<usize>,
+        model_name: &str,
+        infer_fn: F,
+    ) -> Result<EvalResult>
+    where
+        F: Fn(String) -> Fut,
+        Fut: std::future::Future<Output = Result<String>>,
+    {
+        let samples = super::benchmarks::load_samples(dataset_path, sample_limit)?;
+        let start = Instant::now();
+
+        let mut predictions = Vec::new();
+        for sample in &samples {
+            let prompt = super::benchmarks::format_humaneval_prompt(sample);
+            match infer_fn(prompt).await {
+                Ok(output) => predictions.push((output, sample.expected.clone())),
+                Err(e) => {
+                    tracing::warn!(error = %e, "HumanEval inference failed");
+                }
+            }
+        }
+
+        let score = super::benchmarks::score_contains_match(&predictions);
+        let duration = start.elapsed().as_secs_f64();
+
+        let result = EvalResult {
+            run_id,
+            model_name: model_name.to_string(),
+            benchmark: BenchmarkKind::HumanEval,
+            score,
+            details: Some(serde_json::json!({
+                "total_samples": samples.len(),
+                "successful_inferences": predictions.len(),
+                "scoring_method": "contains_match",
+            })),
+            samples_evaluated: predictions.len() as u64,
+            duration_secs: duration,
+            evaluated_at: chrono::Utc::now(),
+        };
+
+        self.record_result(run_id, result.clone()).await?;
+        Ok(result)
+    }
+
+    /// Run a perplexity benchmark (approximate, using sliding-window prediction).
+    pub async fn run_perplexity_benchmark<F, Fut>(
+        &self,
+        run_id: EvalRunId,
+        dataset_path: &str,
+        sample_limit: Option<usize>,
+        model_name: &str,
+        infer_fn: F,
+    ) -> Result<EvalResult>
+    where
+        F: Fn(String) -> Fut,
+        Fut: std::future::Future<Output = Result<String>>,
+    {
+        let samples = super::benchmarks::load_samples(dataset_path, sample_limit)?;
+        let start = Instant::now();
+
+        let mut predictions = Vec::new();
+        for sample in &samples {
+            let prompt = super::benchmarks::format_perplexity_prompt(sample);
+            // Expected: second half of the text
+            let words: Vec<&str> = sample.expected.split_whitespace().collect();
+            let split = words.len() / 2;
+            let expected_continuation = if split < words.len() {
+                words[split..].join(" ")
+            } else {
+                sample.expected.clone()
+            };
+
+            match infer_fn(prompt).await {
+                Ok(output) => predictions.push((output, expected_continuation)),
+                Err(e) => {
+                    tracing::warn!(error = %e, "Perplexity inference failed");
+                }
+            }
+        }
+
+        let score = super::benchmarks::score_perplexity(&predictions);
+        let duration = start.elapsed().as_secs_f64();
+
+        let result = EvalResult {
+            run_id,
+            model_name: model_name.to_string(),
+            benchmark: BenchmarkKind::Perplexity,
+            score,
+            details: Some(serde_json::json!({
+                "total_samples": samples.len(),
+                "successful_inferences": predictions.len(),
+                "scoring_method": "approximate_perplexity",
+                "note": "Approximate perplexity via sliding-window contains-match. Lower is better.",
             })),
             samples_evaluated: predictions.len() as u64,
             duration_secs: duration,
@@ -230,5 +486,116 @@ mod tests {
         runner.create_run(config.clone()).await.unwrap();
         runner.create_run(config).await.unwrap();
         assert_eq!(runner.list_runs().await.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn run_custom_benchmark_with_mock() {
+        // Create a temp JSONL file
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::io::Write::write_all(
+            &mut std::io::BufWriter::new(tmp.as_file()),
+            b"{\"prompt\":\"capital of France?\",\"expected\":\"Paris\"}\n\
+              {\"prompt\":\"capital of Germany?\",\"expected\":\"Berlin\"}\n",
+        )
+        .unwrap();
+
+        let runner = EvalRunner::new();
+        let config = EvalConfig {
+            model_name: "test".into(),
+            benchmarks: vec![BenchmarkKind::Custom],
+            sample_limit: None,
+            dataset_path: Some(tmp.path().to_string_lossy().to_string()),
+        };
+        let run_id = runner.create_run(config).await.unwrap();
+        runner.start_run(run_id).await.unwrap();
+
+        let mock_infer = |_prompt: String| async { Ok("Paris is the answer".to_string()) };
+
+        let result = runner
+            .run_custom_benchmark(
+                run_id,
+                &tmp.path().to_string_lossy(),
+                None,
+                "test",
+                mock_infer,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.samples_evaluated, 2);
+        assert!(result.score > 0.0); // "Paris" matches one
+    }
+
+    #[tokio::test]
+    async fn run_mmlu_benchmark_with_mock() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::io::Write::write_all(
+            &mut std::io::BufWriter::new(tmp.as_file()),
+            b"{\"prompt\":\"What is 2+2?\",\"expected\":\"A\",\"choices\":[\"4\",\"5\",\"6\",\"7\"],\"answer_index\":0}\n",
+        )
+        .unwrap();
+
+        let runner = EvalRunner::new();
+        let config = EvalConfig {
+            model_name: "test".into(),
+            benchmarks: vec![BenchmarkKind::Mmlu],
+            sample_limit: None,
+            dataset_path: None,
+        };
+        let run_id = runner.create_run(config).await.unwrap();
+        runner.start_run(run_id).await.unwrap();
+
+        let mock_infer = |_prompt: String| async { Ok("A".to_string()) };
+
+        let result = runner
+            .run_mmlu_benchmark(
+                run_id,
+                &tmp.path().to_string_lossy(),
+                None,
+                "test",
+                mock_infer,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.samples_evaluated, 1);
+        assert!((result.score - 1.0).abs() < 1e-6);
+    }
+
+    #[tokio::test]
+    async fn run_benchmark_dispatcher() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::io::Write::write_all(
+            &mut std::io::BufWriter::new(tmp.as_file()),
+            b"{\"prompt\":\"test\",\"expected\":\"yes\"}\n",
+        )
+        .unwrap();
+
+        let runner = EvalRunner::new();
+        let config = EvalConfig {
+            model_name: "test".into(),
+            benchmarks: vec![BenchmarkKind::Custom],
+            sample_limit: None,
+            dataset_path: None,
+        };
+        let run_id = runner.create_run(config).await.unwrap();
+        runner.start_run(run_id).await.unwrap();
+
+        let mock_infer = |_prompt: String| async { Ok("yes".to_string()) };
+
+        let result = runner
+            .run_benchmark(
+                run_id,
+                BenchmarkKind::Custom,
+                &tmp.path().to_string_lossy(),
+                None,
+                "test",
+                &mock_infer,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.benchmark, BenchmarkKind::Custom);
+        assert!((result.score - 1.0).abs() < 1e-6);
     }
 }

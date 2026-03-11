@@ -1,7 +1,7 @@
 //! Benchmark implementations.
 //!
 //! Each benchmark takes inference results and computes a score.
-//! MVP: perplexity and custom (exact-match) benchmarks.
+//! Supports: perplexity, MMLU, HellaSwag, HumanEval, and custom benchmarks.
 
 use serde::Deserialize;
 use synapse_types::eval::BenchmarkKind;
@@ -52,6 +52,133 @@ pub fn score_contains_match(predictions: &[(String, String)]) -> f64 {
         .filter(|(pred, expected)| pred.to_lowercase().contains(&expected.to_lowercase()))
         .count();
     correct as f64 / predictions.len() as f64
+}
+
+/// Score MMLU-style multiple-choice: extract first letter (A/B/C/D) from
+/// model output and compare to expected answer letter.
+pub fn score_mmlu(predictions: &[(String, String)]) -> f64 {
+    if predictions.is_empty() {
+        return 0.0;
+    }
+    let correct = predictions
+        .iter()
+        .filter(|(pred, expected)| {
+            let pred_letter = extract_answer_letter(pred);
+            let expected_letter = extract_answer_letter(expected);
+            pred_letter.is_some() && pred_letter == expected_letter
+        })
+        .count();
+    correct as f64 / predictions.len() as f64
+}
+
+/// Extract the first A/B/C/D answer letter from a response.
+///
+/// Looks for patterns like "A", "A)", "(A)", "A.", or standalone letter
+/// at the beginning. Falls back to scanning for the first isolated
+/// A/B/C/D in the text.
+fn extract_answer_letter(text: &str) -> Option<char> {
+    let trimmed = text.trim();
+
+    // If the entire trimmed text is a single letter A-D
+    if trimmed.len() == 1 {
+        let ch = trimmed.chars().next()?.to_ascii_uppercase();
+        if matches!(ch, 'A' | 'B' | 'C' | 'D') {
+            return Some(ch);
+        }
+    }
+
+    // Look for patterns: "(A)", "A)", "A.", or standalone A-D at start
+    let upper = trimmed.to_uppercase();
+    for pattern in ["(A)", "(B)", "(C)", "(D)", "A)", "B)", "C)", "D)", "A.", "B.", "C.", "D."] {
+        if upper.starts_with(pattern) {
+            return pattern.chars().find(|c| matches!(c, 'A' | 'B' | 'C' | 'D'));
+        }
+    }
+
+    // Scan for first isolated A/B/C/D (preceded by space/start, followed by non-alpha)
+    let chars: Vec<char> = upper.chars().collect();
+    for (i, &ch) in chars.iter().enumerate() {
+        if !matches!(ch, 'A' | 'B' | 'C' | 'D') {
+            continue;
+        }
+        let prev_ok = i == 0 || !chars[i - 1].is_alphabetic();
+        let next_ok = i + 1 >= chars.len() || !chars[i + 1].is_alphabetic();
+        if prev_ok && next_ok {
+            return Some(ch);
+        }
+    }
+
+    None
+}
+
+/// Compute approximate perplexity from sliding-window predictions.
+///
+/// Since we don't have token-level log-probs, we approximate by checking
+/// whether the model can reproduce segments of text. Lower score = better.
+/// Returns the inverse of the average contains-match rate, bounded to [1.0, 1000.0].
+pub fn score_perplexity(predictions: &[(String, String)]) -> f64 {
+    if predictions.is_empty() {
+        return 1000.0;
+    }
+    let match_rate = score_contains_match(predictions);
+    if match_rate <= 0.001 {
+        1000.0
+    } else {
+        (1.0 / match_rate).min(1000.0)
+    }
+}
+
+/// Format an MMLU-style multiple-choice prompt.
+pub fn format_mmlu_prompt(sample: &EvalSample) -> String {
+    let mut prompt = format!("Question: {}\n", sample.prompt);
+    if let Some(ref choices) = sample.choices {
+        let labels = ['A', 'B', 'C', 'D', 'E', 'F'];
+        for (i, choice) in choices.iter().enumerate() {
+            let label = labels.get(i).copied().unwrap_or('?');
+            prompt.push_str(&format!("{label}) {choice}\n"));
+        }
+    }
+    prompt.push_str("Answer:");
+    prompt
+}
+
+/// Format a HellaSwag-style completion prompt.
+pub fn format_hellaswag_prompt(sample: &EvalSample) -> String {
+    format!("{}\nComplete the following:", sample.prompt)
+}
+
+/// Format a HumanEval-style code generation prompt.
+pub fn format_humaneval_prompt(sample: &EvalSample) -> String {
+    format!(
+        "Complete the following Python function:\n\n{}\n",
+        sample.prompt
+    )
+}
+
+/// Format a perplexity measurement prompt — ask model to continue text.
+pub fn format_perplexity_prompt(sample: &EvalSample) -> String {
+    // Use first half of expected as context, ask model to generate continuation
+    let words: Vec<&str> = sample.expected.split_whitespace().collect();
+    let split = words.len() / 2;
+    if split > 0 {
+        let context = words[..split].join(" ");
+        format!("Continue the following text:\n\n{context}")
+    } else {
+        format!("Continue the following text:\n\n{}", sample.prompt)
+    }
+}
+
+/// Get the expected answer letter for an MMLU sample.
+pub fn mmlu_expected_letter(sample: &EvalSample) -> String {
+    if let Some(idx) = sample.answer_index {
+        let labels = ['A', 'B', 'C', 'D', 'E', 'F'];
+        labels
+            .get(idx)
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| sample.expected.clone())
+    } else {
+        sample.expected.clone()
+    }
 }
 
 /// Load eval samples from a JSONL file.
@@ -108,5 +235,108 @@ mod tests {
     fn empty_predictions() {
         assert_eq!(score_exact_match(&[]), 0.0);
         assert_eq!(score_contains_match(&[]), 0.0);
+    }
+
+    #[test]
+    fn mmlu_scoring() {
+        let preds = vec![
+            ("A".into(), "A".into()),
+            ("B) Paris".into(), "B".into()),
+            ("The answer is C".into(), "C".into()),
+            ("D".into(), "A".into()), // wrong
+        ];
+        let score = score_mmlu(&preds);
+        assert!((score - 0.75).abs() < 1e-6);
+    }
+
+    #[test]
+    fn extract_answer_letter_variants() {
+        assert_eq!(extract_answer_letter("A"), Some('A'));
+        assert_eq!(extract_answer_letter("B) Paris"), Some('B'));
+        assert_eq!(extract_answer_letter("  C"), Some('C'));
+        assert_eq!(extract_answer_letter("(D)"), Some('D'));
+        assert_eq!(extract_answer_letter(""), None);
+    }
+
+    #[test]
+    fn perplexity_scoring() {
+        // Perfect prediction → perplexity ~1.0
+        let preds = vec![("hello world".into(), "hello".into())];
+        let score = score_perplexity(&preds);
+        assert!((score - 1.0).abs() < 1e-6);
+
+        // No matches → perplexity 1000
+        let preds = vec![("foo".into(), "bar".into())];
+        let score = score_perplexity(&preds);
+        assert!((score - 1000.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn format_mmlu() {
+        let sample = EvalSample {
+            prompt: "What is the capital of France?".into(),
+            expected: "A".into(),
+            choices: Some(vec![
+                "Paris".into(),
+                "London".into(),
+                "Berlin".into(),
+                "Madrid".into(),
+            ]),
+            answer_index: Some(0),
+        };
+        let prompt = format_mmlu_prompt(&sample);
+        assert!(prompt.contains("A) Paris"));
+        assert!(prompt.contains("D) Madrid"));
+        assert!(prompt.ends_with("Answer:"));
+    }
+
+    #[test]
+    fn format_hellaswag() {
+        let sample = EvalSample {
+            prompt: "The cat sat on".into(),
+            expected: "the mat".into(),
+            choices: None,
+            answer_index: None,
+        };
+        let prompt = format_hellaswag_prompt(&sample);
+        assert!(prompt.contains("The cat sat on"));
+        assert!(prompt.contains("Complete the following"));
+    }
+
+    #[test]
+    fn format_humaneval() {
+        let sample = EvalSample {
+            prompt: "def add(a, b):".into(),
+            expected: "return a + b".into(),
+            choices: None,
+            answer_index: None,
+        };
+        let prompt = format_humaneval_prompt(&sample);
+        assert!(prompt.contains("def add(a, b):"));
+        assert!(prompt.contains("Python function"));
+    }
+
+    #[test]
+    fn mmlu_expected_from_index() {
+        let sample = EvalSample {
+            prompt: "test".into(),
+            expected: "A".into(),
+            choices: Some(vec!["x".into(), "y".into()]),
+            answer_index: Some(1),
+        };
+        assert_eq!(mmlu_expected_letter(&sample), "B");
+    }
+
+    #[test]
+    fn perplexity_prompt_splits_text() {
+        let sample = EvalSample {
+            prompt: "test".into(),
+            expected: "one two three four".into(),
+            choices: None,
+            answer_index: None,
+        };
+        let prompt = format_perplexity_prompt(&sample);
+        assert!(prompt.contains("one two"));
+        assert!(prompt.contains("Continue"));
     }
 }

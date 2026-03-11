@@ -112,4 +112,35 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - rustls-tls for cross-compilation without OpenSSL headers
 - Dependency update automation (weekly cargo update PRs)
 - Governance: CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, SUPPORT
-- 164 tests across all modules (~45% coverage)
+- 236 tests across all modules (~55% coverage)
+
+#### Model Evaluation Benchmarks
+- `synapse-core/eval/benchmarks`: MMLU, HellaSwag, HumanEval, perplexity prompt formatting and scoring
+- `synapse-core/eval/runner`: `run_benchmark()` dispatcher with per-benchmark runners (MMLU, HellaSwag, HumanEval, perplexity)
+- `synapse-api/rest/eval`: Background benchmark execution wired to inference backends via closure-based `infer_fn`
+- `synapse-cli/eval`: CLI eval command wired to local API with all benchmark types
+
+#### Model Marketplace — Remote & Trust
+- `synapse-core/marketplace/resolver`: Remote peer search via `GET /marketplace/search` on each peer, deduplication
+- `synapse-core/marketplace/trust`: Trust/verification layer — `TrustLevel` (Untrusted/ChecksumVerified/TrustedPublisher), `TrustPolicy`, `verify_entry()`, `verify_download()`
+- `synapse-api/rest/marketplace`: Model download endpoint (`GET /marketplace/download/:name`), model pull endpoint (`POST /marketplace/pull`) with SHA-256 verification
+- `synapse-cli/marketplace`: `synapse marketplace pull --peer <url>` command with trust verification
+
+#### Distributed Training
+- `synapse-api/rest/distributed`: Full REST API for distributed job management (create, list, get, assign workers, start, complete, fail, aggregate)
+- `synapse-cli/train`: `--distributed`, `--world-size`, `--strategy` flags for distributed training
+- `synapse-bridge/client`: `request_worker_assignment()` and `sync_checkpoint()` RPCs for cross-node coordination
+- `synapse-train/distributed/coordinator`: `collect_checkpoint_paths()` for checkpoint synchronization
+- `synapse-train/distributed/aggregator`: `FederatedConfig`, `build_federated_command()` for federated averaging
+
+#### SY Bridge Integration
+- `synapse-api/state`: Bridge client/server initialized in AppState when `bridge.enabled = true`, with SY endpoint discovery
+- `synapse-api/rest/bridge`: REST endpoints — `GET /bridge/status`, `POST /bridge/connect`, `POST /bridge/heartbeat`
+- `synapse-api/main`: Auto-connect to SY on startup, background heartbeat task with loaded models/GPU/active jobs
+- `synapse-api/rest/system`: Bridge connection state included in `/system/status`
+- `synapse-api/rest/training`: Training job start and cancel events reported to SY via bridge client
+- `synapse-api/rest/distributed`: Worker assignments forwarded to SY via `RequestWorkerAssignment`, checkpoint sync via `SyncCheckpoint` on worker completion, job completion reported to SY
+- 243 tests across all modules (~56% coverage)
+
+### Fixed
+- CI/CD container image build timeout: switched from compiling Rust inside Docker (30+ min under QEMU for arm64) to using pre-built binaries from the build-release job via `Dockerfile.release` with `TARGETARCH`

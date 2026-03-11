@@ -1,3 +1,5 @@
+pub mod bridge;
+pub mod distributed;
 pub mod eval;
 pub mod inference;
 pub mod marketplace;

@@ -5,6 +5,7 @@ use axum::http::StatusCode;
 use axum::response::Json;
 use serde::{Deserialize, Serialize};
 use synapse_types::eval::*;
+use synapse_types::inference::InferenceRequest;
 
 use crate::state::AppState;
 
@@ -38,16 +39,16 @@ pub struct CreateEvalRequest {
     pub dataset_path: Option<String>,
 }
 
-/// POST /eval/runs — create a new eval run.
+/// POST /eval/runs — create a new eval run and execute benchmarks.
 pub async fn create_run(
     State(state): State<AppState>,
     Json(req): Json<CreateEvalRequest>,
 ) -> Result<(StatusCode, Json<EvalRunResponse>), (StatusCode, String)> {
     let config = EvalConfig {
-        model_name: req.model_name,
-        benchmarks: req.benchmarks,
+        model_name: req.model_name.clone(),
+        benchmarks: req.benchmarks.clone(),
         sample_limit: req.sample_limit,
-        dataset_path: req.dataset_path,
+        dataset_path: req.dataset_path.clone(),
     };
 
     let run_id = state
@@ -55,6 +56,95 @@ pub async fn create_run(
         .create_run(config)
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+
+    // If dataset provided, spawn background eval execution
+    if let Some(ref dataset_path) = req.dataset_path {
+        let runner = state.eval_runner.clone();
+        let backends = state.backends.clone();
+        let model_manager = state.model_manager.clone();
+        let benchmarks = req.benchmarks.clone();
+        let model_name = req.model_name.clone();
+        let sample_limit = req.sample_limit;
+        let dataset = dataset_path.clone();
+
+        tokio::spawn(async move {
+            if let Err(e) = runner.start_run(run_id).await {
+                tracing::error!(error = %e, "Failed to start eval run");
+                return;
+            }
+
+            // Build inference closure from backend
+            let infer_fn = |prompt: String| {
+                let backends = backends.clone();
+                let model_manager = model_manager.clone();
+                async move {
+                    let loaded = model_manager.list_loaded().await;
+                    let loaded_model = loaded.first().ok_or_else(|| {
+                        synapse_types::SynapseError::EvalError(
+                            "No model loaded for evaluation".into(),
+                        )
+                    })?;
+
+                    let backend_id =
+                        synapse_types::backend::BackendId(loaded_model.backend_id.clone());
+                    let backend = backends.get(&backend_id).ok_or_else(|| {
+                        synapse_types::SynapseError::EvalError(format!(
+                            "Backend '{}' not available",
+                            loaded_model.backend_id
+                        ))
+                    })?;
+
+                    let handle =
+                        synapse_backends::ModelHandle(loaded_model.handle.clone());
+                    let req = InferenceRequest {
+                        prompt,
+                        max_tokens: Some(256),
+                        temperature: Some(0.0),
+                        top_p: None,
+                        top_k: None,
+                        stop_sequences: None,
+                        system_prompt: None,
+                    };
+
+                    let resp = backend.infer(&handle, &req).await?;
+                    Ok(resp.text)
+                }
+            };
+
+            let mut all_ok = true;
+            for kind in &benchmarks {
+                match runner
+                    .run_benchmark(
+                        run_id,
+                        *kind,
+                        &dataset,
+                        sample_limit,
+                        &model_name,
+                        &infer_fn,
+                    )
+                    .await
+                {
+                    Ok(result) => {
+                        tracing::info!(
+                            benchmark = ?kind,
+                            score = result.score,
+                            "Benchmark completed"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(benchmark = ?kind, error = %e, "Benchmark failed");
+                        all_ok = false;
+                        let _ = runner.fail_run(run_id, e.to_string()).await;
+                        break;
+                    }
+                }
+            }
+
+            if all_ok {
+                let _ = runner.complete_run(run_id).await;
+            }
+        });
+    }
 
     let run = state
         .eval_runner

@@ -5,14 +5,23 @@
 ## Remaining — External / Collaborative
 
 ### SecureYeoman Bridge (SY side)
-> Pushed to SecureYeoman roadmap
+> Synapse side complete — remaining work pushed to SecureYeoman roadmap
 
+Synapse-side bridge integration is fully wired:
+- REST endpoints for bridge status/connect/heartbeat
+- Auto-connect + heartbeat on server startup
+- Training job events reported to SY (start/cancel/complete)
+- Distributed training worker coordination via SY (assign/checkpoint sync)
+- System status includes bridge state
+
+Remaining (SY side):
 - [ ] SY-side integration (SY receives Synapse capability announcements, delegates jobs)
 - [ ] Bidirectional job delegation (collaborative: SecureYeoman + Synapse)
+- [ ] Wire actual tonic gRPC transport (currently stub — framework ready, awaits SY server)
 
 ### Test Coverage → 80%
 
-Current: **~45%** across 164 tests. CI threshold: 45%.
+Current: **~55%** across 236 tests. CI threshold: 45%.
 
 Raise by 5% per milestone. Priority by coverage gap:
 
@@ -24,53 +33,10 @@ Raise by 5% per milestone. Priority by coverage gap:
 | synapse-train | ~50% | `executor/docker.rs`, `executor/subprocess.rs` |
 
 Milestones:
-- [ ] **50%** — Mock HTTP server tests for backends (wiremock/mockito), downloader tests
+- [x] **55%** — Dataset loader/validator tests, integration tests for distributed + marketplace flows
 - [ ] **60%** — API integration tests for inference/streaming, training lifecycle, openai compat
 - [ ] **70%** — Bridge client/server with tonic mock, CLI command logic extraction + unit tests
 - [ ] **80%** — Edge cases, error paths, concurrent access patterns
-
----
-
-## In Progress — New Features
-
-### Model Evaluation Benchmarks
-> Types, core runner, SQLite store, REST API, CLI stub — all wired
-
-- [x] Eval types: `EvalConfig`, `EvalResult`, `EvalStatus`, `BenchmarkKind` (Perplexity/MMLU/HellaSwag/HumanEval/Custom)
-- [x] Eval runner: create/start/complete/fail runs, `run_custom_benchmark()` with closure-based inference
-- [x] Eval store: SQLite `eval_results` table, CRUD
-- [x] Benchmarks: `load_samples()` from JSONL, `score_exact_match()`, `score_contains_match()`
-- [x] REST: `POST/GET /eval/runs`, `GET /eval/runs/:id`
-- [x] CLI: `synapse eval --benchmark <kind> --dataset <path>`
-- [ ] Wire inference backends to eval runner for real benchmarks
-- [ ] Implement perplexity calculation
-- [ ] Standard benchmark datasets (MMLU, HellaSwag, HumanEval)
-
-### Model Marketplace
-> Types, catalog, publisher, resolver, REST API, CLI — all wired
-
-- [x] Marketplace types: `MarketplaceEntry`, `MarketplaceQuery`
-- [x] SQLite catalog: publish/search/list/unpublish/count
-- [x] Publisher: `create_entry()` from `ModelInfo`
-- [x] Resolver: peer management, remote search stub
-- [x] REST: `GET /marketplace/search`, `GET/POST /marketplace/entries`, `DELETE /marketplace/entries/:name`
-- [x] CLI: `synapse marketplace search/publish/unpublish`
-- [ ] Remote peer search (query `GET /marketplace/search` on peers)
-- [ ] Model download/pull from marketplace entries
-- [ ] Trust/verification layer for remote models
-
-### Distributed Training
-> Types and core modules complete, needs API/CLI wiring and real execution
-
-- [x] Types: `DistributedTrainingConfig`, `DistributedStrategy`, `WorkerAssignment`, `DistributedJobState`
-- [x] Coordinator: job creation, worker assignment, lifecycle management
-- [x] Worker: local state, extra CLI args for distributed scripts, lifecycle
-- [x] Aggregator: `AggregationPlan`, checkpoint merging command builder
-- [ ] REST endpoints for distributed job management
-- [ ] CLI `--distributed` flag for `synapse train`
-- [ ] Wire to SY bridge for cross-node worker coordination
-- [ ] Checkpoint synchronization between workers
-- [ ] Federated averaging implementation
 
 ---
 

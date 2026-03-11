@@ -149,6 +149,11 @@ impl JobManager {
             state.update_progress(step, epoch, loss);
         }
     }
+
+    /// Maximum concurrent job limit.
+    pub fn max_concurrent(&self) -> usize {
+        self.max_concurrent
+    }
 }
 
 fn estimate_total_steps(config: &TrainingJobConfig) -> u64 {
@@ -157,4 +162,115 @@ fn estimate_total_steps(config: &TrainingJobConfig) -> u64 {
     let epochs = config.hyperparams.epochs.max(1) as u64;
     let assumed_samples = config.dataset.max_samples.unwrap_or(10000) as u64;
     (assumed_samples / batch) * epochs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use synapse_types::training::*;
+
+    fn test_config() -> TrainingJobConfig {
+        TrainingJobConfig {
+            base_model: "test-model".into(),
+            dataset: DatasetConfig {
+                path: "/tmp/data.jsonl".into(),
+                format: DatasetFormat::Jsonl,
+                split: None,
+                max_samples: Some(100),
+            },
+            method: TrainingMethod::Lora,
+            hyperparams: HyperParams {
+                learning_rate: 2e-4,
+                epochs: 1,
+                batch_size: 4,
+                gradient_accumulation_steps: 1,
+                warmup_steps: 0,
+                weight_decay: 0.0,
+                max_seq_length: 512,
+            },
+            output_name: None,
+            lora: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn create_and_get_job() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 2);
+        let id = manager.create_job(test_config()).await.unwrap();
+        let job = manager.get_job(id).await.unwrap();
+        assert_eq!(job.status, TrainingStatus::Queued);
+        assert_eq!(job.id, id);
+    }
+
+    #[tokio::test]
+    async fn list_jobs_all() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 2);
+        manager.create_job(test_config()).await.unwrap();
+        manager.create_job(test_config()).await.unwrap();
+        let all = manager.list_jobs(None).await;
+        assert_eq!(all.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn list_jobs_filtered() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 2);
+        manager.create_job(test_config()).await.unwrap();
+        let queued = manager.list_jobs(Some(TrainingStatus::Queued)).await;
+        assert_eq!(queued.len(), 1);
+        let running = manager.list_jobs(Some(TrainingStatus::Running)).await;
+        assert!(running.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_job_not_found() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 2);
+        let result = manager.get_job(uuid::Uuid::new_v4()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn running_count_starts_at_zero() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 2);
+        assert_eq!(manager.running_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn cancel_not_found() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 2);
+        let result = manager.cancel_job(uuid::Uuid::new_v4()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn update_progress() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 2);
+        let id = manager.create_job(test_config()).await.unwrap();
+        manager.update_progress(id, 50, 0.5, 0.42).await;
+        let job = manager.get_job(id).await.unwrap();
+        assert_eq!(job.current_step, 50);
+        assert_eq!(job.current_loss, Some(0.42));
+    }
+
+    #[test]
+    fn estimate_steps_calculation() {
+        let config = test_config();
+        let steps = estimate_total_steps(&config);
+        // 100 samples / 4 batch * 1 epoch = 25
+        assert_eq!(steps, 25);
+    }
+
+    #[test]
+    fn estimate_steps_no_max_samples() {
+        let mut config = test_config();
+        config.dataset.max_samples = None;
+        let steps = estimate_total_steps(&config);
+        // 10000 default / 4 batch * 1 epoch = 2500
+        assert_eq!(steps, 2500);
+    }
+
+    #[tokio::test]
+    async fn max_concurrent_getter() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 3);
+        assert_eq!(manager.max_concurrent(), 3);
+    }
 }

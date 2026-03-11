@@ -115,4 +115,74 @@ mod tests {
         };
         assert!(load(&config).is_err());
     }
+
+    #[test]
+    fn load_csv() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        writeln!(tmp, "text,label").unwrap();
+        writeln!(tmp, "hello,1").unwrap();
+        writeln!(tmp, "world,0").unwrap();
+        writeln!(tmp, "foo,1").unwrap();
+        tmp.flush().unwrap();
+
+        let config = DatasetConfig {
+            path: tmp.path().to_string_lossy().to_string(),
+            format: DatasetFormat::Csv,
+            split: None,
+            max_samples: None,
+        };
+        let dataset = load(&config).unwrap();
+        assert_eq!(dataset.sample_count, 3); // 4 lines minus header
+        assert_eq!(dataset.format, DatasetFormat::Csv);
+    }
+
+    #[test]
+    fn load_parquet() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        // Write some dummy bytes to simulate a parquet file
+        tmp.write_all(&[0u8; 5000]).unwrap();
+        tmp.flush().unwrap();
+
+        let config = DatasetConfig {
+            path: tmp.path().to_string_lossy().to_string(),
+            format: DatasetFormat::Parquet,
+            split: None,
+            max_samples: None,
+        };
+        let dataset = load(&config).unwrap();
+        assert_eq!(dataset.sample_count, 10); // 5000 / 500
+    }
+
+    #[test]
+    fn load_huggingface() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+
+        let config = DatasetConfig {
+            path: tmp.path().to_string_lossy().to_string(),
+            format: DatasetFormat::HuggingFace,
+            split: None,
+            max_samples: None,
+        };
+        let dataset = load(&config).unwrap();
+        assert_eq!(dataset.sample_count, 0); // HF returns 0
+    }
+
+    #[test]
+    fn load_csv_with_max_samples() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        writeln!(tmp, "text,label").unwrap();
+        for i in 0..50 {
+            writeln!(tmp, "sample{i},1").unwrap();
+        }
+        tmp.flush().unwrap();
+
+        let config = DatasetConfig {
+            path: tmp.path().to_string_lossy().to_string(),
+            format: DatasetFormat::Csv,
+            split: None,
+            max_samples: Some(5),
+        };
+        let dataset = load(&config).unwrap();
+        assert_eq!(dataset.sample_count, 5);
+    }
 }

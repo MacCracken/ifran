@@ -145,6 +145,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_loaded() {
+        let manager = ModelManager::new(512);
+        let id = uuid::Uuid::new_v4();
+        manager
+            .register_loaded(id, "handle-1".into(), "llamacpp".into(), 4000)
+            .await;
+
+        let loaded = manager.get_loaded(&id).await;
+        assert!(loaded.is_some());
+        let model = loaded.unwrap();
+        assert_eq!(model.handle, "handle-1");
+        assert_eq!(model.backend_id, "llamacpp");
+        assert_eq!(model.vram_used_mb, 4000);
+    }
+
+    #[tokio::test]
+    async fn get_loaded_not_found() {
+        let manager = ModelManager::new(512);
+        assert!(manager.get_loaded(&uuid::Uuid::new_v4()).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn multiple_models() {
+        let manager = ModelManager::new(512);
+        let id1 = uuid::Uuid::new_v4();
+        let id2 = uuid::Uuid::new_v4();
+        manager
+            .register_loaded(id1, "h1".into(), "llamacpp".into(), 2000)
+            .await;
+        manager
+            .register_loaded(id2, "h2".into(), "ollama".into(), 3000)
+            .await;
+
+        assert_eq!(manager.list_loaded().await.len(), 2);
+        assert_eq!(manager.total_vram_used().await, 5000);
+        assert!(manager.is_loaded(&id1).await);
+        assert!(manager.is_loaded(&id2).await);
+    }
+
+    #[tokio::test]
     async fn unregister() {
         let manager = ModelManager::new(512);
         let id = uuid::Uuid::new_v4();

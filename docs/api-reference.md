@@ -118,6 +118,113 @@ Streaming responses use SSE with `data: {...}` lines followed by `data: [DONE]`.
 }
 ```
 
+### Evaluation
+- `POST /eval/runs` — create an evaluation run
+- `GET /eval/runs` — list all evaluation runs
+- `GET /eval/runs/:id` — get evaluation run status and results
+
+#### POST /eval/runs request body
+```json
+{
+  "model_name": "meta-llama/Llama-3.1-8B-Instruct",
+  "benchmarks": ["mmlu", "hellaswag", "perplexity", "humaneval", "custom"],
+  "sample_limit": 100
+}
+```
+
+Supported benchmarks: `mmlu` (multiple-choice), `hellaswag` (sentence completion), `humaneval` (code generation), `perplexity` (loss-based), `custom` (exact/contains match). Each benchmark requires a JSONL dataset with format-specific fields.
+
+### Marketplace
+- `GET /marketplace/search?q=<query>` — search published models (local + remote peers)
+- `GET /marketplace/entries` — list all locally published models
+- `POST /marketplace/publish` — publish a local model to the marketplace
+- `DELETE /marketplace/entries/:name` — unpublish a model
+- `GET /marketplace/download/:name` — download a published model file
+- `POST /marketplace/pull` — pull a model from a remote peer
+
+#### POST /marketplace/publish request body
+```json
+{
+  "model_name": "my-fine-tuned-model"
+}
+```
+
+#### POST /marketplace/pull request body
+```json
+{
+  "model_name": "remote-model",
+  "peer_url": "http://peer-node:8420",
+  "sha256": "optional-checksum-for-verification"
+}
+```
+
+### Distributed Training
+- `POST /training/distributed/jobs` — create a distributed training job
+- `GET /training/distributed/jobs` — list all distributed jobs
+- `GET /training/distributed/jobs/:id` — get distributed job status
+- `POST /training/distributed/jobs/:id/workers` — assign a worker
+- `POST /training/distributed/jobs/:id/start` — start the job (all workers must be assigned)
+- `POST /training/distributed/jobs/:id/workers/:rank/complete` — mark a worker as completed
+- `POST /training/distributed/jobs/:id/fail` — fail the job
+- `POST /training/distributed/jobs/:id/aggregate` — trigger checkpoint aggregation
+
+#### POST /training/distributed/jobs request body
+```json
+{
+  "base_model": "meta-llama/Llama-3.1-8B-Instruct",
+  "dataset": {
+    "path": "./my-dataset.jsonl",
+    "format": "jsonl"
+  },
+  "method": "lora",
+  "hyperparams": {
+    "learning_rate": 2e-4,
+    "epochs": 3,
+    "batch_size": 4,
+    "gradient_accumulation_steps": 4,
+    "warmup_steps": 100,
+    "weight_decay": 0.01,
+    "max_seq_length": 2048
+  },
+  "world_size": 2,
+  "strategy": "data_parallel"
+}
+```
+
+#### POST /training/distributed/jobs/:id/workers request body
+```json
+{
+  "rank": 0,
+  "instance_id": "node-1",
+  "endpoint": "http://node-1:9000",
+  "device_ids": [0, 1]
+}
+```
+
+#### POST /training/distributed/jobs/:id/aggregate request body
+```json
+{
+  "output_dir": "/path/to/output",
+  "method": "average"
+}
+```
+
+Supported aggregation methods: `average`, `weighted_average`.
+
+### Bridge (SY Integration)
+- `GET /bridge/status` — bridge connection status (enabled, client/server state, SY endpoint)
+- `POST /bridge/connect` — manually connect to SY and announce capabilities
+- `POST /bridge/heartbeat` — send a one-off heartbeat to SY (debugging)
+
+Bridge status is also included in `GET /system/status` under the `bridge` key.
+
+When `bridge.enabled = true` in config, the server automatically:
+1. Connects to SY on startup (with reconnect on failure)
+2. Starts the bridge gRPC server for incoming SY commands
+3. Spawns a background heartbeat task at the configured interval
+4. Reports training job progress and completions to SY
+5. Coordinates distributed training worker assignments via SY
+
 ## gRPC Services
 
 See proto files in `proto/` for full message definitions:

@@ -44,6 +44,36 @@ SY endpoint is resolved in order:
 2. `SY_ENDPOINT` environment variable
 3. `http://127.0.0.1:9420` (well-known local address)
 
+## REST API
+
+Bridge status and management is exposed via REST endpoints for monitoring and manual control:
+
+- `GET /bridge/status` — connection state, endpoint, heartbeat config
+- `POST /bridge/connect` — manually trigger SY connection + capability announcement
+- `POST /bridge/heartbeat` — send a one-off heartbeat (debugging)
+
+Bridge status is also included in the `/system/status` response.
+
+## Auto-Initialization
+
+When `bridge.enabled = true` in config, synapse-server automatically:
+
+1. Discovers the SY endpoint (config → env → well-known)
+2. Connects the bridge client to SY
+3. Starts the bridge gRPC server on the configured `grpc_bind` address
+4. Spawns a background heartbeat task
+5. Reports training job lifecycle events (start, progress, cancel, completion) to SY
+6. Coordinates distributed training worker assignments and checkpoint sync via SY
+
+## Training Integration
+
+The bridge is wired into the training and distributed training handlers:
+
+- **Job start**: Reports `running` status to SY via `ReportProgress`
+- **Job cancel**: Reports `cancelled` status to SY
+- **Worker assignment**: Calls `RequestWorkerAssignment` on SY for cross-node coordination
+- **Worker completion**: Calls `SyncCheckpoint` for checkpoint transfer, reports `completed` when all workers finish
+
 ## Proto Definitions
 
 The shared contract lives in `proto/bridge.proto`. SY generates its TypeScript client from the same proto files.

@@ -73,6 +73,80 @@ impl AggregationPlan {
     }
 }
 
+/// Configuration for federated averaging across multiple rounds.
+#[derive(Debug, Clone)]
+pub struct FederatedConfig {
+    /// Number of federated averaging rounds.
+    pub rounds: u32,
+    /// Minimum workers required per round.
+    pub min_workers: u32,
+    /// Aggregation method per round.
+    pub aggregation_method: AggregationMethod,
+}
+
+impl FederatedConfig {
+    pub fn new(rounds: u32, min_workers: u32) -> Self {
+        Self {
+            rounds,
+            min_workers,
+            aggregation_method: AggregationMethod::Average,
+        }
+    }
+}
+
+/// Build a federated averaging command for a specific round.
+///
+/// Returns the shell command arguments for the aggregation script,
+/// including round-specific metadata.
+pub fn build_federated_command(
+    worker_dirs: &[PathBuf],
+    output_dir: &Path,
+    round: u32,
+    weights: Option<&[f64]>,
+) -> Result<Vec<String>> {
+    if worker_dirs.is_empty() {
+        return Err(SynapseError::DistributedError(
+            "No worker checkpoints to aggregate".into(),
+        ));
+    }
+
+    let method = if weights.is_some() {
+        AggregationMethod::WeightedAverage
+    } else {
+        AggregationMethod::Average
+    };
+
+    let round_output = output_dir.join(format!("round-{round}"));
+    let mut cmd = vec![
+        "python3".into(),
+        "-m".into(),
+        "synapse_scripts.aggregate_checkpoints".into(),
+        "--method".into(),
+        match method {
+            AggregationMethod::Average => "average".into(),
+            AggregationMethod::WeightedAverage => "weighted_average".into(),
+        },
+        "--output-dir".into(),
+        round_output.to_string_lossy().into_owned(),
+        "--round".into(),
+        round.to_string(),
+    ];
+
+    for dir in worker_dirs {
+        cmd.push("--checkpoint-dir".into());
+        cmd.push(dir.to_string_lossy().into_owned());
+    }
+
+    if let Some(w) = weights {
+        for weight in w {
+            cmd.push("--weight".into());
+            cmd.push(weight.to_string());
+        }
+    }
+
+    Ok(cmd)
+}
+
 /// Build the expected checkpoint path for a given worker rank.
 pub fn worker_checkpoint_dir(base_output_dir: &Path, rank: u32) -> PathBuf {
     base_output_dir.join(format!("worker-{rank}"))
@@ -112,6 +186,39 @@ mod tests {
     fn worker_checkpoint_dir_format() {
         let dir = worker_checkpoint_dir(Path::new("/output"), 3);
         assert_eq!(dir, PathBuf::from("/output/worker-3"));
+    }
+
+    #[test]
+    fn federated_command_basic() {
+        let dirs = vec![PathBuf::from("/tmp/w0"), PathBuf::from("/tmp/w1")];
+        let cmd = build_federated_command(&dirs, Path::new("/tmp/out"), 0, None).unwrap();
+        assert!(cmd.contains(&"--round".to_string()));
+        assert!(cmd.contains(&"0".to_string()));
+        assert!(cmd.contains(&"round-0".to_string()) || cmd.iter().any(|s| s.contains("round-0")));
+    }
+
+    #[test]
+    fn federated_command_with_weights() {
+        let dirs = vec![PathBuf::from("/tmp/w0"), PathBuf::from("/tmp/w1")];
+        let cmd =
+            build_federated_command(&dirs, Path::new("/tmp/out"), 1, Some(&[0.6, 0.4])).unwrap();
+        assert!(cmd.contains(&"weighted_average".to_string()));
+        assert!(cmd.contains(&"--weight".to_string()));
+        assert!(cmd.contains(&"0.6".to_string()));
+    }
+
+    #[test]
+    fn federated_command_empty_workers_fails() {
+        let result = build_federated_command(&[], Path::new("/tmp/out"), 0, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn federated_config_defaults() {
+        let config = FederatedConfig::new(5, 2);
+        assert_eq!(config.rounds, 5);
+        assert_eq!(config.min_workers, 2);
+        assert_eq!(config.aggregation_method, AggregationMethod::Average);
     }
 
     #[test]

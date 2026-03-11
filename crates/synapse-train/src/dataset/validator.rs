@@ -146,4 +146,62 @@ mod tests {
         assert!(result.valid);
         assert_eq!(result.total_rows, 2);
     }
+
+    #[test]
+    fn invalid_csv_column_mismatch() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        writeln!(tmp, "text,label").unwrap();
+        writeln!(tmp, "hello,1").unwrap();
+        writeln!(tmp, "bad_row").unwrap(); // only 1 column instead of 2
+        tmp.flush().unwrap();
+
+        let result = validate(tmp.path(), DatasetFormat::Csv).unwrap();
+        assert!(!result.valid);
+        assert_eq!(result.invalid_rows, 1);
+        assert_eq!(result.total_rows, 2);
+    }
+
+    #[test]
+    fn empty_csv() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+
+        let result = validate(tmp.path(), DatasetFormat::Csv).unwrap();
+        assert!(!result.valid);
+        assert_eq!(result.errors[0], "Empty CSV file");
+    }
+
+    #[test]
+    fn parquet_passthrough() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let result = validate(tmp.path(), DatasetFormat::Parquet).unwrap();
+        assert!(result.valid);
+        assert_eq!(result.total_rows, 0);
+    }
+
+    #[test]
+    fn huggingface_passthrough() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let result = validate(tmp.path(), DatasetFormat::HuggingFace).unwrap();
+        assert!(result.valid);
+        assert_eq!(result.total_rows, 0);
+    }
+
+    #[test]
+    fn missing_file() {
+        let result = validate(Path::new("/nonexistent/file.jsonl"), DatasetFormat::Jsonl);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn jsonl_with_blank_lines() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        writeln!(tmp, r#"{{"text": "hello"}}"#).unwrap();
+        writeln!(tmp).unwrap(); // blank line
+        writeln!(tmp, r#"{{"text": "world"}}"#).unwrap();
+        tmp.flush().unwrap();
+
+        let result = validate(tmp.path(), DatasetFormat::Jsonl).unwrap();
+        assert!(result.valid);
+        assert_eq!(result.total_rows, 2);
+    }
 }

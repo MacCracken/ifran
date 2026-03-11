@@ -34,10 +34,23 @@ pub async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
         })
         .unwrap_or(serde_json::json!({"error": "detection failed"}));
 
+    let bridge = serde_json::json!({
+        "enabled": state.config.bridge.enabled,
+        "client_state": match &state.bridge_client {
+            Some(c) => format!("{:?}", c.connection_state().await),
+            None => "disabled".into(),
+        },
+        "server_state": match &state.bridge_server {
+            Some(s) => format!("{:?}", s.connection_state().await),
+            None => "disabled".into(),
+        },
+    });
+
     Json(serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"),
         "loaded_models": loaded_models.len(),
         "registered_backends": backends.iter().map(|b| &b.0).collect::<Vec<_>>(),
         "hardware": hardware,
+        "bridge": bridge,
     }))
 }

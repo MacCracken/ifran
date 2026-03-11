@@ -51,6 +51,13 @@ pub async fn create_job(
 
     if req.auto_start {
         let _ = state.job_manager.start_job(id).await;
+
+        // Report to SY bridge if connected
+        if let Some(client) = &state.bridge_client {
+            let _ = client
+                .report_progress(&id.to_string(), "running", 0, 0.0)
+                .await;
+        }
     }
 
     let job = state
@@ -91,6 +98,13 @@ pub async fn cancel_job(
         .cancel_job(id)
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+
+    // Report cancellation to SY bridge
+    if let Some(client) = &state.bridge_client {
+        let _ = client
+            .report_progress(&id.to_string(), "cancelled", 0, 0.0)
+            .await;
+    }
 
     let job = state
         .job_manager

@@ -1,8 +1,16 @@
 # Runtime-only container for CI/CD releases.
-# Expects pre-built binaries passed via build context.
+# Uses pre-built binaries from the build-release job instead of compiling
+# inside the container. This avoids QEMU-emulated Rust compilation for
+# cross-arch builds, reducing build time from 30+ minutes to ~1 minute.
+#
+# Expects binaries staged into bin/<arch>/ in the build context:
+#   bin/amd64/synapse, bin/amd64/synapse-api
+#   bin/arm64/synapse, bin/arm64/synapse-api
 FROM debian:bookworm-slim
 
 ARG VERSION
+ARG TARGETARCH
+
 LABEL org.opencontainers.image.title="Synapse"
 LABEL org.opencontainers.image.description="LLM controller for pulling, managing, and training language models"
 LABEL org.opencontainers.image.version="${VERSION}"
@@ -20,8 +28,9 @@ RUN groupadd -g 1000 synapse && \
 RUN mkdir -p /var/lib/synapse/models /var/lib/synapse/checkpoints /var/lib/synapse/cache && \
     chown -R synapse:synapse /var/lib/synapse
 
-COPY synapse-server /usr/local/bin/synapse-server
-COPY synapse /usr/local/bin/synapse
+# Copy arch-specific pre-built binaries
+COPY bin/${TARGETARCH}/synapse-api /usr/local/bin/synapse-server
+COPY bin/${TARGETARCH}/synapse /usr/local/bin/synapse
 
 USER synapse
 EXPOSE 8420 8421

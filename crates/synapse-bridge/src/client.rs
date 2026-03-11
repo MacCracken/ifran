@@ -104,6 +104,44 @@ impl BridgeClient {
         tracing::debug!(job_id, status, step, loss, "Reporting progress to SY");
         Ok(())
     }
+
+    /// Request SY to coordinate a remote worker assignment for distributed training.
+    pub async fn request_worker_assignment(
+        &self,
+        job_id: &str,
+        rank: u32,
+        endpoint: &str,
+        device_ids: &[u32],
+    ) -> synapse_types::error::Result<()> {
+        info!(
+            job_id,
+            rank,
+            endpoint,
+            device_count = device_ids.len(),
+            "Requesting worker assignment from SY"
+        );
+        // TODO: Call SynapseBridge.RequestWorkerAssignment RPC.
+        // SY will route this to the appropriate Synapse node.
+        Ok(())
+    }
+
+    /// Notify SY that a checkpoint is ready for synchronization.
+    pub async fn sync_checkpoint(
+        &self,
+        job_id: &str,
+        rank: u32,
+        checkpoint_path: &str,
+    ) -> synapse_types::error::Result<()> {
+        info!(
+            job_id,
+            rank,
+            checkpoint_path,
+            "Notifying SY of checkpoint ready for sync"
+        );
+        // TODO: Call SynapseBridge.SyncCheckpoint RPC.
+        // SY coordinates checkpoint transfer between nodes.
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -170,6 +208,26 @@ mod tests {
         let client = test_client();
         client
             .report_progress("job-1", "running", 100, 0.5)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn request_worker_assignment_succeeds() {
+        let client = test_client();
+        client.connect().await.unwrap();
+        client
+            .request_worker_assignment("job-1", 1, "http://node-2:9000", &[0, 1])
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn sync_checkpoint_succeeds() {
+        let client = test_client();
+        client.connect().await.unwrap();
+        client
+            .sync_checkpoint("job-1", 0, "/tmp/checkpoints/step-100")
             .await
             .unwrap();
     }
