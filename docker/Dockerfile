@@ -18,8 +18,8 @@ COPY proto/ proto/
 # Build release binaries
 RUN cargo build --release --package synapse-api --package synapse-cli
 
-# Runtime stage
-FROM debian:bookworm-slim
+# Runtime stage — AGNOS base OS (AI/ML operating system layer)
+FROM ghcr.io/maccracken/agnosticos:latest
 
 ARG VERSION
 LABEL org.opencontainers.image.title="Synapse"
@@ -27,15 +27,12 @@ LABEL org.opencontainers.image.description="LLM controller for pulling, managing
 LABEL org.opencontainers.image.version="${VERSION}"
 LABEL org.opencontainers.image.source="https://github.com/MacCracken/synapse"
 LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.base.name="ghcr.io/maccracken/agnosticos:latest"
 
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    tini \
-    && rm -rf /var/lib/apt/lists/*
-
-# Non-root user
-RUN groupadd -g 1000 synapse && \
-    useradd -u 1000 -g synapse -m -s /bin/bash synapse
+# AGNOS base includes ca-certificates and tini
+USER root
+RUN groupadd -g 1002 synapse && \
+    useradd -u 1002 -g synapse -m -s /bin/bash synapse
 
 # Create data directories
 RUN mkdir -p /var/lib/synapse/models /var/lib/synapse/checkpoints /var/lib/synapse/cache && \

@@ -6,7 +6,11 @@
 # Expects binaries staged into bin/<arch>/ in the build context:
 #   bin/amd64/synapse, bin/amd64/synapse-api
 #   bin/arm64/synapse, bin/arm64/synapse-api
-FROM debian:bookworm-slim
+#
+# Base: AGNOS (agnosticos) — our AI/ML operating system layer.
+# Provides GLIBC 2.41+ (Debian trixie), seccomp, landlock, and
+# shared runtime conventions across the ecosystem.
+FROM ghcr.io/maccracken/agnosticos:latest
 
 ARG VERSION
 ARG TARGETARCH
@@ -16,14 +20,12 @@ LABEL org.opencontainers.image.description="LLM controller for pulling, managing
 LABEL org.opencontainers.image.version="${VERSION}"
 LABEL org.opencontainers.image.source="https://github.com/MacCracken/synapse"
 LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.base.name="ghcr.io/maccracken/agnosticos:latest"
 
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    tini \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN groupadd -g 1000 synapse && \
-    useradd -u 1000 -g synapse -m -s /bin/bash synapse
+# AGNOS base includes ca-certificates and tini; just create the synapse user/dirs
+USER root
+RUN groupadd -g 1002 synapse && \
+    useradd -u 1002 -g synapse -m -s /bin/bash synapse
 
 RUN mkdir -p /var/lib/synapse/models /var/lib/synapse/checkpoints /var/lib/synapse/cache && \
     chown -R synapse:synapse /var/lib/synapse
