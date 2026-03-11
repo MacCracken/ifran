@@ -171,3 +171,262 @@ async fn main() {
         std::process::exit(1);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn cli_pull_basic() {
+        let cli = Cli::try_parse_from(["synapse", "pull", "meta-llama/Llama-3.1-8B"]).unwrap();
+        match cli.command {
+            Commands::Pull { model, quant } => {
+                assert_eq!(model, "meta-llama/Llama-3.1-8B");
+                assert!(quant.is_none());
+            }
+            _ => panic!("expected Pull command"),
+        }
+    }
+
+    #[test]
+    fn cli_pull_with_quant() {
+        let cli = Cli::try_parse_from([
+            "synapse",
+            "pull",
+            "meta-llama/Llama-3.1-8B",
+            "--quant",
+            "q4_k_m",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Pull { quant, .. } => {
+                assert_eq!(quant.unwrap(), "q4_k_m");
+            }
+            _ => panic!("expected Pull command"),
+        }
+    }
+
+    #[test]
+    fn cli_list() {
+        let cli = Cli::try_parse_from(["synapse", "list"]).unwrap();
+        assert!(matches!(cli.command, Commands::List));
+    }
+
+    #[test]
+    fn cli_run() {
+        let cli = Cli::try_parse_from(["synapse", "run", "llama-7b"]).unwrap();
+        match cli.command {
+            Commands::Run { model } => assert_eq!(model, "llama-7b"),
+            _ => panic!("expected Run command"),
+        }
+    }
+
+    #[test]
+    fn cli_serve_default() {
+        let cli = Cli::try_parse_from(["synapse", "serve"]).unwrap();
+        match cli.command {
+            Commands::Serve { bind } => assert!(bind.is_none()),
+            _ => panic!("expected Serve command"),
+        }
+    }
+
+    #[test]
+    fn cli_serve_with_bind() {
+        let cli = Cli::try_parse_from(["synapse", "serve", "--bind", "0.0.0.0:9000"]).unwrap();
+        match cli.command {
+            Commands::Serve { bind } => assert_eq!(bind.unwrap(), "0.0.0.0:9000"),
+            _ => panic!("expected Serve command"),
+        }
+    }
+
+    #[test]
+    fn cli_train_default_method() {
+        let cli = Cli::try_parse_from([
+            "synapse",
+            "train",
+            "--base-model",
+            "llama-7b",
+            "--dataset",
+            "/data/train.jsonl",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Train {
+                base_model,
+                dataset,
+                method,
+                distributed,
+                ..
+            } => {
+                assert_eq!(base_model, "llama-7b");
+                assert_eq!(dataset, "/data/train.jsonl");
+                assert_eq!(method, "lora");
+                assert!(!distributed);
+            }
+            _ => panic!("expected Train command"),
+        }
+    }
+
+    #[test]
+    fn cli_train_distributed() {
+        let cli = Cli::try_parse_from([
+            "synapse",
+            "train",
+            "--base-model",
+            "llama-7b",
+            "--dataset",
+            "/data/train.jsonl",
+            "--distributed",
+            "--world-size",
+            "4",
+            "--strategy",
+            "model_parallel",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Train {
+                distributed,
+                world_size,
+                strategy,
+                ..
+            } => {
+                assert!(distributed);
+                assert_eq!(world_size, Some(4));
+                assert_eq!(strategy.unwrap(), "model_parallel");
+            }
+            _ => panic!("expected Train command"),
+        }
+    }
+
+    #[test]
+    fn cli_status() {
+        let cli = Cli::try_parse_from(["synapse", "status"]).unwrap();
+        assert!(matches!(cli.command, Commands::Status));
+    }
+
+    #[test]
+    fn cli_remove() {
+        let cli = Cli::try_parse_from(["synapse", "remove", "llama-7b"]).unwrap();
+        match cli.command {
+            Commands::Remove { model, yes } => {
+                assert_eq!(model, "llama-7b");
+                assert!(!yes);
+            }
+            _ => panic!("expected Remove command"),
+        }
+    }
+
+    #[test]
+    fn cli_remove_with_yes() {
+        let cli = Cli::try_parse_from(["synapse", "remove", "llama-7b", "-y"]).unwrap();
+        match cli.command {
+            Commands::Remove { yes, .. } => assert!(yes),
+            _ => panic!("expected Remove command"),
+        }
+    }
+
+    #[test]
+    fn cli_eval_defaults() {
+        let cli = Cli::try_parse_from(["synapse", "eval", "llama-7b"]).unwrap();
+        match cli.command {
+            Commands::Eval {
+                model,
+                benchmark,
+                dataset,
+                sample_limit,
+            } => {
+                assert_eq!(model, "llama-7b");
+                assert_eq!(benchmark, "perplexity");
+                assert!(dataset.is_none());
+                assert!(sample_limit.is_none());
+            }
+            _ => panic!("expected Eval command"),
+        }
+    }
+
+    #[test]
+    fn cli_eval_custom() {
+        let cli = Cli::try_parse_from([
+            "synapse",
+            "eval",
+            "llama-7b",
+            "--benchmark",
+            "custom",
+            "--dataset",
+            "/data/eval.jsonl",
+            "--sample-limit",
+            "100",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Eval {
+                benchmark,
+                dataset,
+                sample_limit,
+                ..
+            } => {
+                assert_eq!(benchmark, "custom");
+                assert_eq!(dataset.unwrap(), "/data/eval.jsonl");
+                assert_eq!(sample_limit, Some(100));
+            }
+            _ => panic!("expected Eval command"),
+        }
+    }
+
+    #[test]
+    fn cli_marketplace_search() {
+        let cli =
+            Cli::try_parse_from(["synapse", "marketplace", "search", "llama"]).unwrap();
+        match cli.command {
+            Commands::Marketplace {
+                action: MarketplaceAction::Search { query },
+            } => assert_eq!(query.unwrap(), "llama"),
+            _ => panic!("expected Marketplace Search"),
+        }
+    }
+
+    #[test]
+    fn cli_marketplace_publish() {
+        let cli =
+            Cli::try_parse_from(["synapse", "marketplace", "publish", "my-model"]).unwrap();
+        match cli.command {
+            Commands::Marketplace {
+                action: MarketplaceAction::Publish { model },
+            } => assert_eq!(model, "my-model"),
+            _ => panic!("expected Marketplace Publish"),
+        }
+    }
+
+    #[test]
+    fn cli_marketplace_pull() {
+        let cli = Cli::try_parse_from([
+            "synapse",
+            "marketplace",
+            "pull",
+            "model-x",
+            "--peer",
+            "http://node-2:8420",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Marketplace {
+                action: MarketplaceAction::Pull { model, peer },
+            } => {
+                assert_eq!(model, "model-x");
+                assert_eq!(peer, "http://node-2:8420");
+            }
+            _ => panic!("expected Marketplace Pull"),
+        }
+    }
+
+    #[test]
+    fn cli_no_args_fails() {
+        assert!(Cli::try_parse_from(["synapse"]).is_err());
+    }
+
+    #[test]
+    fn cli_unknown_command_fails() {
+        assert!(Cli::try_parse_from(["synapse", "nonexistent"]).is_err());
+    }
+}

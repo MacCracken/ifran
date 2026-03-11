@@ -57,3 +57,117 @@ pub struct DistributedJobState {
     /// Number of workers that have completed.
     pub completed_workers: u32,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::training::{DatasetConfig, DatasetFormat, HyperParams, TrainingJobConfig, TrainingMethod};
+
+    #[test]
+    fn distributed_strategy_serde_roundtrip() {
+        let strategies = [
+            DistributedStrategy::DataParallel,
+            DistributedStrategy::ModelParallel,
+            DistributedStrategy::PipelineParallel,
+        ];
+        for s in &strategies {
+            let json = serde_json::to_string(s).unwrap();
+            let back: DistributedStrategy = serde_json::from_str(&json).unwrap();
+            assert_eq!(*s, back);
+        }
+    }
+
+    #[test]
+    fn distributed_strategy_json_values() {
+        assert_eq!(
+            serde_json::to_string(&DistributedStrategy::DataParallel).unwrap(),
+            "\"data_parallel\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DistributedStrategy::ModelParallel).unwrap(),
+            "\"model_parallel\""
+        );
+    }
+
+    #[test]
+    fn worker_assignment_serde() {
+        let w = WorkerAssignment {
+            rank: 0,
+            instance_id: "node-1".into(),
+            endpoint: "http://node-1:50051".into(),
+            device_ids: vec![0, 1],
+        };
+        let json = serde_json::to_string(&w).unwrap();
+        let back: WorkerAssignment = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.rank, 0);
+        assert_eq!(back.device_ids, vec![0, 1]);
+    }
+
+    fn make_test_config() -> DistributedTrainingConfig {
+        DistributedTrainingConfig {
+            base_config: TrainingJobConfig {
+                base_model: "llama-7b".into(),
+                dataset: DatasetConfig {
+                    path: "/data/train.jsonl".into(),
+                    format: DatasetFormat::Jsonl,
+                    split: None,
+                    max_samples: None,
+                },
+                method: TrainingMethod::Lora,
+                hyperparams: HyperParams {
+                    learning_rate: 2e-4,
+                    epochs: 3,
+                    batch_size: 8,
+                    gradient_accumulation_steps: 4,
+                    warmup_steps: 100,
+                    weight_decay: 0.01,
+                    max_seq_length: 2048,
+                },
+                output_name: None,
+                lora: None,
+            },
+            world_size: 4,
+            strategy: DistributedStrategy::DataParallel,
+        }
+    }
+
+    #[test]
+    fn distributed_training_config_serde() {
+        let config = make_test_config();
+        let json = serde_json::to_string(&config).unwrap();
+        let back: DistributedTrainingConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.world_size, 4);
+        assert_eq!(back.strategy, DistributedStrategy::DataParallel);
+    }
+
+    #[test]
+    fn distributed_job_state_serde() {
+        let state = DistributedJobState {
+            job_id: Uuid::new_v4(),
+            config: make_test_config(),
+            coordinator: "node-1".into(),
+            workers: vec![
+                WorkerAssignment {
+                    rank: 0,
+                    instance_id: "node-1".into(),
+                    endpoint: "http://node-1:50051".into(),
+                    device_ids: vec![0],
+                },
+                WorkerAssignment {
+                    rank: 1,
+                    instance_id: "node-2".into(),
+                    endpoint: "http://node-2:50051".into(),
+                    device_ids: vec![0],
+                },
+            ],
+            status: TrainingStatus::Running,
+            aggregate_loss: Some(0.5),
+            completed_workers: 0,
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        let back: DistributedJobState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.workers.len(), 2);
+        assert_eq!(back.status, TrainingStatus::Running);
+        assert_eq!(back.aggregate_loss, Some(0.5));
+    }
+}

@@ -57,3 +57,72 @@ pub enum EvalStatus {
     Completed,
     Failed,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn benchmark_kind_serde_roundtrip() {
+        let kinds = [
+            BenchmarkKind::Perplexity,
+            BenchmarkKind::Mmlu,
+            BenchmarkKind::HellaSwag,
+            BenchmarkKind::HumanEval,
+            BenchmarkKind::Custom,
+        ];
+        for k in &kinds {
+            let json = serde_json::to_string(k).unwrap();
+            let back: BenchmarkKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(*k, back);
+        }
+    }
+
+    #[test]
+    fn eval_status_serde_roundtrip() {
+        let statuses = [
+            EvalStatus::Queued,
+            EvalStatus::Running,
+            EvalStatus::Completed,
+            EvalStatus::Failed,
+        ];
+        for s in &statuses {
+            let json = serde_json::to_string(s).unwrap();
+            let back: EvalStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(*s, back);
+        }
+    }
+
+    #[test]
+    fn eval_config_serde() {
+        let config = EvalConfig {
+            model_name: "llama-7b".into(),
+            benchmarks: vec![BenchmarkKind::Mmlu, BenchmarkKind::Perplexity],
+            sample_limit: Some(100),
+            dataset_path: None,
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let back: EvalConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.benchmarks.len(), 2);
+        assert_eq!(back.sample_limit, Some(100));
+    }
+
+    #[test]
+    fn eval_result_serde() {
+        let result = EvalResult {
+            run_id: Uuid::new_v4(),
+            model_name: "test".into(),
+            benchmark: BenchmarkKind::Mmlu,
+            score: 0.85,
+            details: Some(serde_json::json!({"category": "stem", "accuracy": 0.9})),
+            samples_evaluated: 500,
+            duration_secs: 120.5,
+            evaluated_at: Utc::now(),
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        let back: EvalResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.model_name, "test");
+        assert!((back.score - 0.85).abs() < f64::EPSILON);
+        assert!(back.details.is_some());
+    }
+}

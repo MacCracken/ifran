@@ -21,22 +21,72 @@ Remaining (SY side):
 
 ### Test Coverage → 80%
 
-Current: **~55%** across 236 tests. CI threshold: 45%.
+Current: **327 tests** across 7 crates. CI threshold: 30%.
 
-Raise by 5% per milestone. Priority by coverage gap:
+#### Coverage by Crate
 
-| Crate | Current | Priority targets |
-|---|---|---|
-| synapse-backends | ~10% | `llamacpp`, `ollama`, `vllm` — need mock HTTP servers |
-| synapse-cli | 0% | All commands — extract testable logic or integration harness |
-| synapse-api | ~64% | `rest/inference.rs`, `rest/openai_compat.rs` |
-| synapse-train | ~50% | `executor/docker.rs`, `executor/subprocess.rs` |
+| Crate | Tests | Status | Next targets |
+|---|---|---|---|
+| synapse-types | 49 | Serde roundtrips, error Display, all enums | Proto-generated code tests |
+| synapse-core | 83 | Registry, storage, lifecycle, eval, marketplace | `pull/downloader.rs`, `registry/huggingface.rs` |
+| synapse-backends | 39 | Router, all backend stubs, llamacpp helpers | Mock HTTP server for backend integration |
+| synapse-train | 80 | Job scheduling, training methods, distributed | `executor/docker.rs`, `executor/subprocess.rs` |
+| synapse-api | 39 | Integration tests, middleware auth | REST handler unit tests, OpenAI compat |
+| synapse-bridge | 19 | Protocol, discovery, client/server | Tonic mock for gRPC integration |
+| synapse-cli | 18 | Clap arg parsing for all commands | Command logic extraction + unit tests |
 
-Milestones:
-- [x] **55%** — Dataset loader/validator tests, integration tests for distributed + marketplace flows
-- [ ] **60%** — API integration tests for inference/streaming, training lifecycle, openai compat
-- [ ] **70%** — Bridge client/server with tonic mock, CLI command logic extraction + unit tests
-- [ ] **80%** — Edge cases, error paths, concurrent access patterns
+#### Staged Backlog
+
+##### Milestone 1: 30% — Foundation (current)
+- [x] All type serde roundtrips and enum coverage (`synapse-types`)
+- [x] Error variant Display strings and `From` conversions
+- [x] CLI arg parsing verification for all commands
+- [x] Backend helper functions (`build_messages`, `parse_completion_response`)
+- [x] Backend trait type tests (`ModelHandle`)
+- [x] `LlamaCppBackend` construction, capabilities, port allocation
+- [x] CI threshold set to 30%
+
+##### Milestone 2: 40% — Core Logic
+- [ ] `synapse-core/pull/downloader.rs` — chunked download with resume (mock HTTP)
+- [ ] `synapse-core/pull/verifier.rs` — SHA256 verification
+- [ ] `synapse-core/registry/huggingface.rs` — HF API resolution (mock HTTP)
+- [ ] `synapse-core/registry/scanner.rs` — filesystem model scanning
+- [ ] `synapse-api/state.rs` — AppState construction
+- [ ] `synapse-api/rest/system.rs` — health/status endpoints
+- [ ] CI threshold → 40%
+
+##### Milestone 3: 50% — Backend Integration
+- [ ] Mock HTTP server test harness (shared utility)
+- [ ] `synapse-backends/ollama` — Ollama API integration tests
+- [ ] `synapse-backends/vllm` — vLLM API integration tests
+- [ ] `synapse-backends/llamacpp` — full load/infer cycle with mock server
+- [ ] `synapse-api/rest/models.rs` — model CRUD endpoint tests
+- [ ] CI threshold → 50%
+
+##### Milestone 4: 60% — API & Training
+- [ ] `synapse-api/rest/inference.rs` — inference endpoint with mock backend
+- [ ] `synapse-api/rest/openai_compat.rs` — OpenAI-compatible API tests
+- [ ] `synapse-api/rest/training.rs` — training lifecycle endpoints
+- [ ] `synapse-train/executor/docker.rs` — Docker executor (mock subprocess)
+- [ ] `synapse-train/executor/subprocess.rs` — subprocess executor tests
+- [ ] CI threshold → 60%
+
+##### Milestone 5: 70% — Bridge & CLI
+- [ ] `synapse-bridge` — tonic mock for gRPC client/server integration
+- [ ] `synapse-cli` — extract command logic into testable functions
+- [ ] `synapse-cli` — command output formatting tests
+- [ ] `synapse-api/rest/distributed.rs` — distributed training endpoint tests
+- [ ] `synapse-api/rest/marketplace.rs` — marketplace endpoint tests
+- [ ] CI threshold → 70%
+
+##### Milestone 6: 80% — Hardening
+- [ ] Error paths and edge cases across all crates
+- [ ] Concurrent access patterns (DashMap, RwLock contention)
+- [ ] Streaming inference end-to-end tests
+- [ ] `synapse-api/rest/eval.rs` — evaluation endpoint tests
+- [ ] `synapse-api/rest/bridge.rs` — bridge REST endpoint tests
+- [ ] Property-based tests for type invariants
+- [ ] CI threshold → 80%
 
 ---
 

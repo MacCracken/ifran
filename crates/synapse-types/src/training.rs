@@ -88,3 +88,135 @@ pub struct CheckpointInfo {
     pub path: String,
     pub timestamp: chrono::DateTime<chrono::Utc>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn training_method_serde_roundtrip() {
+        let methods = [
+            TrainingMethod::FullFineTune,
+            TrainingMethod::Lora,
+            TrainingMethod::Qlora,
+            TrainingMethod::Dpo,
+            TrainingMethod::Rlhf,
+            TrainingMethod::Distillation,
+        ];
+        for m in &methods {
+            let json = serde_json::to_string(m).unwrap();
+            let back: TrainingMethod = serde_json::from_str(&json).unwrap();
+            assert_eq!(*m, back);
+        }
+    }
+
+    #[test]
+    fn training_method_json_values() {
+        assert_eq!(
+            serde_json::to_string(&TrainingMethod::FullFineTune).unwrap(),
+            "\"full_fine_tune\""
+        );
+        assert_eq!(serde_json::to_string(&TrainingMethod::Lora).unwrap(), "\"lora\"");
+        assert_eq!(serde_json::to_string(&TrainingMethod::Qlora).unwrap(), "\"qlora\"");
+    }
+
+    #[test]
+    fn dataset_format_serde_roundtrip() {
+        let formats = [
+            DatasetFormat::Jsonl,
+            DatasetFormat::Parquet,
+            DatasetFormat::Csv,
+            DatasetFormat::HuggingFace,
+        ];
+        for f in &formats {
+            let json = serde_json::to_string(f).unwrap();
+            let back: DatasetFormat = serde_json::from_str(&json).unwrap();
+            assert_eq!(*f, back);
+        }
+    }
+
+    #[test]
+    fn training_status_serde_roundtrip() {
+        let statuses = [
+            TrainingStatus::Queued,
+            TrainingStatus::Preparing,
+            TrainingStatus::Running,
+            TrainingStatus::Paused,
+            TrainingStatus::Completed,
+            TrainingStatus::Failed,
+            TrainingStatus::Cancelled,
+        ];
+        for s in &statuses {
+            let json = serde_json::to_string(s).unwrap();
+            let back: TrainingStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(*s, back);
+        }
+    }
+
+    #[test]
+    fn training_job_config_serde() {
+        let config = TrainingJobConfig {
+            base_model: "llama-7b".into(),
+            dataset: DatasetConfig {
+                path: "/data/train.jsonl".into(),
+                format: DatasetFormat::Jsonl,
+                split: Some("train".into()),
+                max_samples: Some(1000),
+            },
+            method: TrainingMethod::Lora,
+            hyperparams: HyperParams {
+                learning_rate: 2e-4,
+                epochs: 3,
+                batch_size: 8,
+                gradient_accumulation_steps: 4,
+                warmup_steps: 100,
+                weight_decay: 0.01,
+                max_seq_length: 2048,
+            },
+            output_name: Some("my-finetune".into()),
+            lora: Some(LoraConfig {
+                rank: 16,
+                alpha: 32.0,
+                dropout: 0.05,
+                target_modules: vec!["q_proj".into(), "v_proj".into()],
+            }),
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let back: TrainingJobConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.base_model, "llama-7b");
+        assert_eq!(back.method, TrainingMethod::Lora);
+        assert_eq!(back.hyperparams.epochs, 3);
+        assert_eq!(back.lora.unwrap().rank, 16);
+    }
+
+    #[test]
+    fn checkpoint_info_serde() {
+        let cp = CheckpointInfo {
+            step: 500,
+            epoch: 1.5,
+            loss: 0.42,
+            path: "/checkpoints/step-500".into(),
+            timestamp: chrono::Utc::now(),
+        };
+        let json = serde_json::to_string(&cp).unwrap();
+        let back: CheckpointInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.step, 500);
+        assert!((back.loss - 0.42).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn hyperparams_serde() {
+        let hp = HyperParams {
+            learning_rate: 1e-5,
+            epochs: 1,
+            batch_size: 1,
+            gradient_accumulation_steps: 1,
+            warmup_steps: 0,
+            weight_decay: 0.0,
+            max_seq_length: 512,
+        };
+        let json = serde_json::to_string(&hp).unwrap();
+        let back: HyperParams = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.max_seq_length, 512);
+    }
+}

@@ -52,3 +52,81 @@ pub enum SynapseError {
 }
 
 pub type Result<T> = std::result::Result<T, SynapseError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_display_model_not_found() {
+        let e = SynapseError::ModelNotFound("llama-7b".into());
+        assert_eq!(e.to_string(), "Model not found: llama-7b");
+    }
+
+    #[test]
+    fn error_display_backend_not_found() {
+        let e = SynapseError::BackendNotFound("vllm".into());
+        assert_eq!(e.to_string(), "Backend not found: vllm");
+    }
+
+    #[test]
+    fn error_display_integrity() {
+        let e = SynapseError::IntegrityError {
+            expected: "abc".into(),
+            actual: "def".into(),
+        };
+        assert_eq!(
+            e.to_string(),
+            "Integrity check failed: expected abc, got def"
+        );
+    }
+
+    #[test]
+    fn error_display_insufficient_memory() {
+        let e = SynapseError::InsufficientMemory {
+            required_mb: 8000,
+            available_mb: 4000,
+        };
+        assert_eq!(
+            e.to_string(),
+            "Insufficient memory: need 8000MB, available 4000MB"
+        );
+    }
+
+    #[test]
+    fn error_from_io() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");
+        let e: SynapseError = io_err.into();
+        assert!(e.to_string().contains("file missing"));
+    }
+
+    #[test]
+    fn all_error_variants_display() {
+        let errors: Vec<SynapseError> = vec![
+            SynapseError::ModelNotFound("x".into()),
+            SynapseError::BackendNotFound("x".into()),
+            SynapseError::BackendError("x".into()),
+            SynapseError::DownloadError("x".into()),
+            SynapseError::IntegrityError {
+                expected: "a".into(),
+                actual: "b".into(),
+            },
+            SynapseError::InsufficientMemory {
+                required_mb: 1,
+                available_mb: 0,
+            },
+            SynapseError::TrainingError("x".into()),
+            SynapseError::BridgeError("x".into()),
+            SynapseError::ConfigError("x".into()),
+            SynapseError::StorageError("x".into()),
+            SynapseError::HardwareError("x".into()),
+            SynapseError::EvalError("x".into()),
+            SynapseError::MarketplaceError("x".into()),
+            SynapseError::DistributedError("x".into()),
+            SynapseError::Other("x".into()),
+        ];
+        for e in errors {
+            assert!(!e.to_string().is_empty());
+        }
+    }
+}

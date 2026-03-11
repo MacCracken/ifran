@@ -360,3 +360,159 @@ fn parse_completion_response(json: &serde_json::Value) -> Result<InferenceRespon
         finish_reason,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::traits::InferenceBackend;
+
+    #[test]
+    fn new_default_server_bin() {
+        let backend = LlamaCppBackend::new(None);
+        assert_eq!(backend.server_bin, "llama-server");
+    }
+
+    #[test]
+    fn new_custom_server_bin() {
+        let backend = LlamaCppBackend::new(Some("/usr/local/bin/llama-server".into()));
+        assert_eq!(backend.server_bin, "/usr/local/bin/llama-server");
+    }
+
+    #[test]
+    fn backend_id() {
+        let backend = LlamaCppBackend::new(None);
+        assert_eq!(backend.id().0, "llamacpp");
+    }
+
+    #[test]
+    fn backend_capabilities() {
+        let backend = LlamaCppBackend::new(None);
+        let caps = backend.capabilities();
+        assert!(caps.supports_streaming);
+        assert!(!caps.supports_embeddings);
+        assert!(!caps.supports_vision);
+        assert_eq!(caps.max_context_length, Some(131072));
+        assert!(caps.accelerators.contains(&AcceleratorType::Cpu));
+        assert!(caps.accelerators.contains(&AcceleratorType::Cuda));
+    }
+
+    #[test]
+    fn supported_formats_is_gguf() {
+        let backend = LlamaCppBackend::new(None);
+        let formats = backend.supported_formats();
+        assert_eq!(formats, &[ModelFormat::Gguf]);
+    }
+
+    #[tokio::test]
+    async fn allocate_port_increments() {
+        let backend = LlamaCppBackend::new(None);
+        let p1 = backend.allocate_port().await;
+        let p2 = backend.allocate_port().await;
+        let p3 = backend.allocate_port().await;
+        assert_eq!(p1, 8430);
+        assert_eq!(p2, 8431);
+        assert_eq!(p3, 8432);
+    }
+
+    #[test]
+    fn build_messages_user_only() {
+        let req = InferenceRequest {
+            prompt: "Hello".into(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: None,
+        };
+        let msgs = build_messages(&req);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["role"], "user");
+        assert_eq!(msgs[0]["content"], "Hello");
+    }
+
+    #[test]
+    fn build_messages_with_system() {
+        let req = InferenceRequest {
+            prompt: "Hello".into(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: Some("Be helpful.".into()),
+        };
+        let msgs = build_messages(&req);
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0]["role"], "system");
+        assert_eq!(msgs[0]["content"], "Be helpful.");
+        assert_eq!(msgs[1]["role"], "user");
+    }
+
+    #[test]
+    fn parse_completion_response_stop() {
+        let json = serde_json::json!({
+            "choices": [{
+                "message": {"content": "Hello there!"},
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": 5,
+                "completion_tokens": 3,
+                "total_tokens": 8
+            }
+        });
+        let resp = parse_completion_response(&json).unwrap();
+        assert_eq!(resp.text, "Hello there!");
+        assert_eq!(resp.usage.prompt_tokens, 5);
+        assert_eq!(resp.usage.completion_tokens, 3);
+        assert_eq!(resp.usage.total_tokens, 8);
+        assert!(matches!(resp.finish_reason, FinishReason::Stop));
+    }
+
+    #[test]
+    fn parse_completion_response_length() {
+        let json = serde_json::json!({
+            "choices": [{
+                "message": {"content": "truncated"},
+                "finish_reason": "length"
+            }],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 512,
+                "total_tokens": 522
+            }
+        });
+        let resp = parse_completion_response(&json).unwrap();
+        assert!(matches!(resp.finish_reason, FinishReason::MaxTokens));
+    }
+
+    #[test]
+    fn parse_completion_response_missing_fields() {
+        let json = serde_json::json!({
+            "choices": [{"message": {}}],
+            "usage": {}
+        });
+        let resp = parse_completion_response(&json).unwrap();
+        assert_eq!(resp.text, "");
+        assert_eq!(resp.usage.prompt_tokens, 0);
+        assert!(matches!(resp.finish_reason, FinishReason::Stop));
+    }
+
+    #[test]
+    fn parse_completion_response_empty_json() {
+        let json = serde_json::json!({});
+        let resp = parse_completion_response(&json).unwrap();
+        assert_eq!(resp.text, "");
+        assert_eq!(resp.usage.total_tokens, 0);
+    }
+
+    #[tokio::test]
+    async fn unload_nonexistent_model_errors() {
+        let backend = LlamaCppBackend::new(None);
+        let result = backend
+            .unload_model(ModelHandle("nonexistent".into()))
+            .await;
+        assert!(result.is_err());
+    }
+}

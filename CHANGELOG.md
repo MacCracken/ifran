@@ -9,6 +9,15 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 
 ### Added
 
+#### Testing
+- `synapse-types`: Comprehensive serde roundtrip tests for all type modules (model, backend, inference, training, eval, registry, marketplace, distributed)
+- `synapse-types`: Error Display and `From<io::Error>` conversion tests for all `SynapseError` variants
+- `synapse-cli`: Clap arg parsing tests for all commands (pull, list, run, serve, train, status, remove, eval, marketplace)
+- `synapse-backends`: Unit tests for `build_messages`, `parse_completion_response`, `LlamaCppBackend` construction/capabilities/port allocation
+- `synapse-backends`: `ModelHandle` equality, hashing, and Debug tests
+- Test coverage roadmap with 6 staged milestones (30% → 80%)
+- CI coverage threshold set to 30% as baseline
+
 #### Core
 - `synapse-types`: Core data structures — models, backends, inference, training, eval, marketplace, distributed, errors
 - `synapse-core/config`: TOML config loading with auto-discovery (`SYNAPSE_CONFIG` → `~/.synapse/` → `/etc/synapse/` → defaults)

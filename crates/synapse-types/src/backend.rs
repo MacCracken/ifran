@@ -38,3 +38,79 @@ pub struct DeviceConfig {
     pub device_ids: Vec<u32>,
     pub memory_limit_mb: Option<u64>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backend_id_display() {
+        let id = BackendId("llamacpp".into());
+        assert_eq!(id.to_string(), "llamacpp");
+    }
+
+    #[test]
+    fn backend_id_equality() {
+        let a = BackendId("ollama".into());
+        let b = BackendId("ollama".into());
+        let c = BackendId("vllm".into());
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn backend_id_hash() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(BackendId("a".into()));
+        set.insert(BackendId("a".into()));
+        assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn accelerator_type_serde_roundtrip() {
+        let types = [
+            AcceleratorType::Cuda,
+            AcceleratorType::Rocm,
+            AcceleratorType::Metal,
+            AcceleratorType::Vulkan,
+            AcceleratorType::Cpu,
+        ];
+        for t in &types {
+            let json = serde_json::to_string(t).unwrap();
+            let back: AcceleratorType = serde_json::from_str(&json).unwrap();
+            assert_eq!(*t, back);
+        }
+    }
+
+    #[test]
+    fn backend_capabilities_serde() {
+        let caps = BackendCapabilities {
+            accelerators: vec![AcceleratorType::Cuda, AcceleratorType::Cpu],
+            max_context_length: Some(8192),
+            supports_streaming: true,
+            supports_embeddings: false,
+            supports_vision: true,
+        };
+        let json = serde_json::to_string(&caps).unwrap();
+        let back: BackendCapabilities = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.accelerators.len(), 2);
+        assert_eq!(back.max_context_length, Some(8192));
+        assert!(back.supports_streaming);
+        assert!(!back.supports_embeddings);
+        assert!(back.supports_vision);
+    }
+
+    #[test]
+    fn device_config_serde() {
+        let cfg = DeviceConfig {
+            accelerator: AcceleratorType::Cuda,
+            device_ids: vec![0, 1],
+            memory_limit_mb: Some(16384),
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let back: DeviceConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.device_ids, vec![0, 1]);
+        assert_eq!(back.memory_limit_mb, Some(16384));
+    }
+}

@@ -12,6 +12,45 @@ use tokio::sync::mpsc;
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct ModelHandle(pub String);
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn model_handle_equality() {
+        let a = ModelHandle("llamacpp-8430".into());
+        let b = ModelHandle("llamacpp-8430".into());
+        let c = ModelHandle("llamacpp-8431".into());
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn model_handle_hash() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(ModelHandle("a".into()));
+        set.insert(ModelHandle("a".into()));
+        assert_eq!(set.len(), 1);
+        set.insert(ModelHandle("b".into()));
+        assert_eq!(set.len(), 2);
+    }
+
+    #[test]
+    fn model_handle_clone() {
+        let h = ModelHandle("test".into());
+        let h2 = h.clone();
+        assert_eq!(h, h2);
+    }
+
+    #[test]
+    fn model_handle_debug() {
+        let h = ModelHandle("test-handle".into());
+        let debug = format!("{h:?}");
+        assert!(debug.contains("test-handle"));
+    }
+}
+
 /// The core trait that all inference backends must implement.
 #[async_trait]
 pub trait InferenceBackend: Send + Sync {
