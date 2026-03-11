@@ -72,8 +72,8 @@ pub async fn connect(
         })
         .unwrap_or((0, 0));
 
-    let instance_id = std::env::var("SYNAPSE_INSTANCE_ID")
-        .unwrap_or_else(|_| state.config.server.bind.clone());
+    let instance_id =
+        std::env::var("SYNAPSE_INSTANCE_ID").unwrap_or_else(|_| state.config.server.bind.clone());
 
     let capabilities = synapse_bridge::protocol::Capabilities {
         instance_id,

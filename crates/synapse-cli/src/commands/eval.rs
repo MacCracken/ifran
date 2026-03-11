@@ -59,19 +59,14 @@ pub async fn execute(
             }
 
             let body: serde_json::Value = resp.json().await.map_err(|e| {
-                synapse_types::SynapseError::EvalError(format!(
-                    "Invalid inference response: {e}"
-                ))
+                synapse_types::SynapseError::EvalError(format!("Invalid inference response: {e}"))
             })?;
 
-            body["text"]
-                .as_str()
-                .map(String::from)
-                .ok_or_else(|| {
-                    synapse_types::SynapseError::EvalError(
-                        "No 'text' field in inference response".into(),
-                    )
-                })
+            body["text"].as_str().map(String::from).ok_or_else(|| {
+                synapse_types::SynapseError::EvalError(
+                    "No 'text' field in inference response".into(),
+                )
+            })
         }
     };
 

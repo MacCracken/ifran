@@ -228,7 +228,9 @@ pub async fn aggregate(
     Path(id): Path<DistributedJobId>,
     Json(req): Json<AggregateRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    use synapse_train::distributed::aggregator::{AggregationMethod, AggregationPlan, worker_checkpoint_dir};
+    use synapse_train::distributed::aggregator::{
+        AggregationMethod, AggregationPlan, worker_checkpoint_dir,
+    };
 
     let method = match req.method.as_str() {
         "weighted_average" => AggregationMethod::WeightedAverage,

@@ -144,13 +144,9 @@ impl EvalRunner {
                 .await
             }
             BenchmarkKind::Perplexity => {
-                self.run_perplexity_benchmark(
-                    run_id,
-                    dataset_path,
-                    sample_limit,
-                    model_name,
-                    |p| infer_fn(p),
-                )
+                self.run_perplexity_benchmark(run_id, dataset_path, sample_limit, model_name, |p| {
+                    infer_fn(p)
+                })
                 .await
             }
         }

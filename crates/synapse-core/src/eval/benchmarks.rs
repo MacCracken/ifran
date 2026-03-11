@@ -89,7 +89,9 @@ fn extract_answer_letter(text: &str) -> Option<char> {
 
     // Look for patterns: "(A)", "A)", "A.", or standalone A-D at start
     let upper = trimmed.to_uppercase();
-    for pattern in ["(A)", "(B)", "(C)", "(D)", "A)", "B)", "C)", "D)", "A.", "B.", "C.", "D."] {
+    for pattern in [
+        "(A)", "(B)", "(C)", "(D)", "A)", "B)", "C)", "D)", "A.", "B.", "C.", "D.",
+    ] {
         if upper.starts_with(pattern) {
             return pattern.chars().find(|c| matches!(c, 'A' | 'B' | 'C' | 'D'));
         }

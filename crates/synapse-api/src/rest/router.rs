@@ -1,7 +1,9 @@
 //! Top-level REST API router that mounts all route groups.
 
 use crate::middleware;
-use crate::rest::{bridge, distributed, eval, inference, marketplace, models, openai_compat, system, training};
+use crate::rest::{
+    bridge, distributed, eval, inference, marketplace, models, openai_compat, system, training,
+};
 use crate::state::AppState;
 use axum::Router;
 use axum::middleware as axum_mw;
@@ -35,10 +37,7 @@ pub fn build(state: AppState) -> Router {
             "/training/distributed/jobs",
             post(distributed::create_job).get(distributed::list_jobs),
         )
-        .route(
-            "/training/distributed/jobs/{id}",
-            get(distributed::get_job),
-        )
+        .route("/training/distributed/jobs/{id}", get(distributed::get_job))
         .route(
             "/training/distributed/jobs/{id}/workers",
             post(distributed::assign_worker),
@@ -70,10 +69,7 @@ pub fn build(state: AppState) -> Router {
             "/marketplace/entries/{name}",
             delete(marketplace::unpublish),
         )
-        .route(
-            "/marketplace/download/{name}",
-            get(marketplace::download),
-        )
+        .route("/marketplace/download/{name}", get(marketplace::download))
         .route("/marketplace/pull", post(marketplace::pull))
         // Bridge
         .route("/bridge/status", get(bridge::status))

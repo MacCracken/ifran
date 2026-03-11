@@ -141,13 +141,10 @@ pub async fn execute_distributed(
         strategy: dist_strategy,
     };
 
-    let instance_id =
-        std::env::var("SYNAPSE_INSTANCE_ID").unwrap_or_else(|_| "local".to_string());
+    let instance_id = std::env::var("SYNAPSE_INSTANCE_ID").unwrap_or_else(|_| "local".to_string());
 
     let coordinator = DistributedCoordinator::new();
-    let job_id = coordinator
-        .create_job(config, &instance_id)
-        .await?;
+    let job_id = coordinator.create_job(config, &instance_id).await?;
 
     eprintln!("Created distributed training job: {job_id}");
     eprintln!("Strategy: {strategy}");
@@ -175,9 +172,7 @@ pub async fn execute_distributed(
             "Waiting for {} more workers to be assigned via API before starting.",
             world_size - 1
         );
-        eprintln!(
-            "Assign workers: POST /training/distributed/jobs/{job_id}/workers"
-        );
+        eprintln!("Assign workers: POST /training/distributed/jobs/{job_id}/workers");
     }
 
     Ok(())

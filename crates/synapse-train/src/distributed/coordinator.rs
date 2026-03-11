@@ -146,9 +146,7 @@ impl DistributedCoordinator {
         let paths: Vec<std::path::PathBuf> = state
             .workers
             .iter()
-            .map(|w| {
-                super::aggregator::worker_checkpoint_dir(base_output_dir, w.rank)
-            })
+            .map(|w| super::aggregator::worker_checkpoint_dir(base_output_dir, w.rank))
             .collect();
 
         Ok(paths)

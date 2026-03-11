@@ -94,8 +94,7 @@ pub async fn create_run(
                         ))
                     })?;
 
-                    let handle =
-                        synapse_backends::ModelHandle(loaded_model.handle.clone());
+                    let handle = synapse_backends::ModelHandle(loaded_model.handle.clone());
                     let req = InferenceRequest {
                         prompt,
                         max_tokens: Some(256),

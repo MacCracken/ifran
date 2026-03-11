@@ -50,9 +50,8 @@ impl AppState {
 
         // Initialize bridge if enabled
         let (bridge_client, bridge_server) = if config.bridge.enabled {
-            let endpoint = synapse_bridge::discovery::discover(
-                config.bridge.sy_endpoint.as_deref(),
-            )?;
+            let endpoint =
+                synapse_bridge::discovery::discover(config.bridge.sy_endpoint.as_deref())?;
 
             let protocol_config = ProtocolConfig {
                 heartbeat_interval: std::time::Duration::from_secs(
@@ -61,8 +60,8 @@ impl AppState {
                 ..ProtocolConfig::default()
             };
 
-            let instance_id = std::env::var("SYNAPSE_INSTANCE_ID")
-                .unwrap_or_else(|_| config.server.bind.clone());
+            let instance_id =
+                std::env::var("SYNAPSE_INSTANCE_ID").unwrap_or_else(|_| config.server.bind.clone());
 
             let client = BridgeClient::new(endpoint.address, protocol_config.clone());
             let server = BridgeServer::new(instance_id, protocol_config);

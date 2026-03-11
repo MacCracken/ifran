@@ -873,11 +873,7 @@ async fn bridge_status_disabled() {
     let (app, _tmp) = test_app();
 
     let resp = app
-        .oneshot(
-            Request::get("/bridge/status")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::get("/bridge/status").body(Body::empty()).unwrap())
         .await
         .unwrap();
 
@@ -930,11 +926,7 @@ async fn bridge_status_enabled() {
     let app = synapse_api::router::build(state);
 
     let resp = app
-        .oneshot(
-            Request::get("/bridge/status")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::get("/bridge/status").body(Body::empty()).unwrap())
         .await
         .unwrap();
 
@@ -1013,11 +1005,7 @@ async fn system_status_includes_bridge() {
     let (app, _tmp) = test_app();
 
     let resp = app
-        .oneshot(
-            Request::get("/system/status")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::get("/system/status").body(Body::empty()).unwrap())
         .await
         .unwrap();
 

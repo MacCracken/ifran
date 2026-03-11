@@ -134,9 +134,7 @@ impl BridgeClient {
     ) -> synapse_types::error::Result<()> {
         info!(
             job_id,
-            rank,
-            checkpoint_path,
-            "Notifying SY of checkpoint ready for sync"
+            rank, checkpoint_path, "Notifying SY of checkpoint ready for sync"
         );
         // TODO: Call SynapseBridge.SyncCheckpoint RPC.
         // SY coordinates checkpoint transfer between nodes.

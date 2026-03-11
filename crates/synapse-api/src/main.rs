@@ -61,9 +61,7 @@ async fn main() {
                         "Heartbeat sent"
                     );
                     // Report as progress to keep SY informed
-                    let _ = client
-                        .report_progress("heartbeat", "alive", 0, 0.0)
-                        .await;
+                    let _ = client.report_progress("heartbeat", "alive", 0, 0.0).await;
                 }
             });
         }
