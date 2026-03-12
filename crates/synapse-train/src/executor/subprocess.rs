@@ -57,10 +57,22 @@ impl TrainingExecutor for SubprocessExecutor {
             }
         };
 
-        let status = child
-            .wait()
-            .await
-            .map_err(|e| SynapseError::TrainingError(e.to_string()))?;
+        // Apply time budget if configured (budget + 30s grace period)
+        let result = if let Some(budget) = config.time_budget_secs {
+            let timeout_dur = std::time::Duration::from_secs(budget + 30);
+            match tokio::time::timeout(timeout_dur, child.wait()).await {
+                Ok(wait_result) => wait_result,
+                Err(_) => {
+                    let _ = child.kill().await;
+                    info!(job_id = %job_id, budget_secs = budget, "Training subprocess timed out (expected)");
+                    return Ok(());
+                }
+            }
+        } else {
+            child.wait().await
+        };
+
+        let status = result.map_err(|e| SynapseError::TrainingError(e.to_string()))?;
 
         if !status.success() {
             return Err(SynapseError::TrainingError(format!(
@@ -158,6 +170,8 @@ mod tests {
                 },
             output_name: None,
             lora: None,
+            max_steps: None,
+            time_budget_secs: None,
         };
 
         let json = serde_json::to_string(&config).unwrap();

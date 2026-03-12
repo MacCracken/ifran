@@ -1,6 +1,7 @@
 pub mod bridge;
 pub mod distributed;
 pub mod eval;
+pub mod experiment;
 pub mod inference;
 pub mod marketplace;
 pub mod models;

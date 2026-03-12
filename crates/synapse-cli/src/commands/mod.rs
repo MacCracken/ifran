@@ -1,4 +1,5 @@
 pub mod eval;
+pub mod experiment;
 pub mod list;
 pub mod marketplace;
 pub mod pull;

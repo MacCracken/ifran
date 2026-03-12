@@ -1,4 +1,5 @@
 /// Shared application state accessible across all API handlers.
+use std::collections::HashMap;
 use std::sync::Arc;
 use synapse_backends::BackendRouter;
 use synapse_bridge::client::BridgeClient;
@@ -6,12 +7,15 @@ use synapse_bridge::protocol::ProtocolConfig;
 use synapse_bridge::server::BridgeServer;
 use synapse_core::config::SynapseConfig;
 use synapse_core::eval::runner::EvalRunner;
+use synapse_core::experiment::store::ExperimentStore;
 use synapse_core::lifecycle::manager::ModelManager;
 use synapse_core::marketplace::catalog::MarketplaceCatalog;
 use synapse_core::storage::db::ModelDatabase;
 use synapse_train::distributed::coordinator::DistributedCoordinator;
 use synapse_train::executor::ExecutorKind;
+use synapse_train::experiment::runner::ExperimentHandle;
 use synapse_train::job::manager::JobManager;
+use synapse_types::experiment::ExperimentId;
 use tokio::sync::Mutex;
 
 /// Application state shared across all handlers via Axum's State extractor.
@@ -28,6 +32,8 @@ pub struct AppState {
     pub eval_runner: Arc<EvalRunner>,
     pub marketplace_catalog: Arc<Mutex<MarketplaceCatalog>>,
     pub distributed_coordinator: Arc<DistributedCoordinator>,
+    pub experiment_store: Option<Arc<Mutex<ExperimentStore>>>,
+    pub experiment_runners: Arc<Mutex<HashMap<ExperimentId, ExperimentHandle>>>,
     pub bridge_client: Option<Arc<BridgeClient>>,
     pub bridge_server: Option<Arc<BridgeServer>>,
 }
@@ -47,6 +53,10 @@ impl AppState {
         let marketplace_db_path = config.storage.database.with_file_name("marketplace.db");
         let marketplace_catalog = MarketplaceCatalog::open(&marketplace_db_path)?;
         let distributed_coordinator = DistributedCoordinator::new();
+
+        // Initialize experiment store
+        let experiment_store_path = config.storage.database.with_file_name("experiments.db");
+        let experiment_store = ExperimentStore::open(&experiment_store_path).ok();
 
         // Initialize bridge if enabled
         let (bridge_client, bridge_server) = if config.bridge.enabled {
@@ -80,6 +90,8 @@ impl AppState {
             eval_runner: Arc::new(eval_runner),
             marketplace_catalog: Arc::new(Mutex::new(marketplace_catalog)),
             distributed_coordinator: Arc::new(distributed_coordinator),
+            experiment_store: experiment_store.map(|s| Arc::new(Mutex::new(s))),
+            experiment_runners: Arc::new(Mutex::new(HashMap::new())),
             bridge_client,
             bridge_server,
         })

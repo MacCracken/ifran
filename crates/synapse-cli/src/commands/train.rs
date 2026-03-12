@@ -63,6 +63,8 @@ pub async fn execute(base_model: &str, dataset: &str, method: &str) -> Result<()
         hyperparams,
         output_name: None,
         lora: lora_config,
+        max_steps: None,
+        time_budget_secs: None,
     };
 
     let job_id = manager.create_job(job_config).await?;
@@ -136,6 +138,8 @@ pub async fn execute_distributed(
             hyperparams,
             output_name: None,
             lora: lora_config,
+            max_steps: None,
+            time_budget_secs: None,
         },
         world_size,
         strategy: dist_strategy,

@@ -195,6 +195,8 @@ mod tests {
                 },
                 output_name: None,
                 lora: None,
+                max_steps: None,
+                time_budget_secs: None,
                 hyperparams: HyperParams {
                     learning_rate: 2e-4,
                     epochs: 1,

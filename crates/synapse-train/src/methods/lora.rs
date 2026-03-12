@@ -90,6 +90,8 @@ mod tests {
             hyperparams: default_hyperparams(),
             output_name: None,
             lora: Some(default_lora_config()),
+            max_steps: None,
+            time_budget_secs: None,
         }
     }
 

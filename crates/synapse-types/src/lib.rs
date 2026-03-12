@@ -2,6 +2,7 @@ pub mod backend;
 pub mod distributed;
 pub mod error;
 pub mod eval;
+pub mod experiment;
 pub mod inference;
 pub mod marketplace;
 pub mod model;

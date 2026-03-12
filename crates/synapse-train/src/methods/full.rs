@@ -57,6 +57,8 @@ mod tests {
             hyperparams: default_hyperparams(),
             output_name: None,
             lora: None,
+            max_steps: None,
+            time_budget_secs: None,
         };
         let args = build_args(&cfg);
         assert!(args.contains(&"full".to_string()));

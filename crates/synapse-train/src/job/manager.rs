@@ -210,6 +210,8 @@ mod tests {
             },
             output_name: None,
             lora: None,
+            max_steps: None,
+            time_budget_secs: None,
         }
     }
 

@@ -2,7 +2,8 @@
 
 use crate::middleware;
 use crate::rest::{
-    bridge, distributed, eval, inference, marketplace, models, openai_compat, system, training,
+    bridge, distributed, eval, experiment, inference, marketplace, models, openai_compat, system,
+    training,
 };
 use crate::state::AppState;
 use axum::Router;
@@ -57,6 +58,20 @@ pub fn build(state: AppState) -> Router {
         .route(
             "/training/distributed/jobs/{id}/aggregate",
             post(distributed::aggregate),
+        )
+        // Experiments
+        .route(
+            "/experiments",
+            post(experiment::create_experiment).get(experiment::list_experiments),
+        )
+        .route("/experiments/{id}", get(experiment::get_experiment))
+        .route(
+            "/experiments/{id}/leaderboard",
+            get(experiment::get_leaderboard),
+        )
+        .route(
+            "/experiments/{id}/stop",
+            post(experiment::stop_experiment),
         )
         // Eval
         .route("/eval/runs", post(eval::create_run).get(eval::list_runs))

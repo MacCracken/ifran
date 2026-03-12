@@ -84,6 +84,40 @@ enum Commands {
         #[command(subcommand)]
         action: MarketplaceAction,
     },
+    /// Run autonomous hyperparameter experiments
+    Experiment {
+        #[command(subcommand)]
+        action: ExperimentAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ExperimentAction {
+    /// Run an experiment from a TOML program file
+    Run {
+        /// Path to experiment program TOML file
+        program: String,
+    },
+    /// List all experiments
+    List,
+    /// Show experiment status
+    Status {
+        /// Experiment ID (shows latest if omitted)
+        id: Option<String>,
+    },
+    /// Show trial leaderboard for an experiment
+    Leaderboard {
+        /// Experiment ID
+        id: String,
+        /// Max results to show
+        #[arg(long, default_value = "20")]
+        limit: usize,
+    },
+    /// Stop a running experiment
+    Stop {
+        /// Experiment ID
+        id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -152,6 +186,17 @@ async fn main() {
             dataset,
             sample_limit,
         } => commands::eval::execute(&model, &benchmark, dataset.as_deref(), sample_limit).await,
+        Commands::Experiment { action } => match action {
+            ExperimentAction::Run { program } => commands::experiment::run(&program).await,
+            ExperimentAction::List => commands::experiment::list().await,
+            ExperimentAction::Status { id } => {
+                commands::experiment::status(id.as_deref()).await
+            }
+            ExperimentAction::Leaderboard { id, limit } => {
+                commands::experiment::leaderboard(&id, limit).await
+            }
+            ExperimentAction::Stop { id } => commands::experiment::stop(&id).await,
+        },
         Commands::Marketplace { action } => match action {
             MarketplaceAction::Search { query } => {
                 commands::marketplace::search(query.as_deref()).await

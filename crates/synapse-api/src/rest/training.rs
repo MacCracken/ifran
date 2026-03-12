@@ -193,6 +193,8 @@ mod tests {
             },
             output_name: Some("test-output".into()),
             lora: None,
+            max_steps: None,
+            time_budget_secs: None,
         }
     }
 

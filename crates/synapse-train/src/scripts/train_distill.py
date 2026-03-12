@@ -15,7 +15,27 @@ import torch
 import torch.nn.functional as F
 from datasets import load_dataset
 from peft import LoraConfig, TaskType, get_peft_model
-from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer
+from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer, TrainerCallback
+
+import time
+
+
+class TimeBudgetCallback(TrainerCallback):
+    """Stops training when wall-clock time budget is exceeded."""
+
+    def __init__(self, budget_secs):
+        self.budget_secs = budget_secs
+        self.start_time = None
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        self.start_time = time.monotonic()
+
+    def on_step_end(self, args, state, control, **kwargs):
+        if self.start_time is not None:
+            elapsed = time.monotonic() - self.start_time
+            if elapsed >= self.budget_secs:
+                print(f"[synapse] Time budget ({self.budget_secs}s) reached after {elapsed:.0f}s — stopping")
+                control.should_training_stop = True
 
 
 def parse_config():
@@ -162,10 +182,21 @@ def main():
     dataset = dataset.map(tokenize_fn, batched=True, remove_columns=dataset.column_names)
     dataset.set_format("torch")
 
+    # Time budget and max steps support
+    max_steps_override = config.get("max_steps")
+    time_budget_secs = config.get("time_budget_secs")
+
+    callbacks = []
+    if time_budget_secs:
+        callbacks.append(TimeBudgetCallback(time_budget_secs))
+        print(f"[synapse] Time budget: {time_budget_secs}s")
+
     # Training arguments
+    num_epochs = hp.get("epochs", 3)
     training_args = TrainingArguments(
         output_dir=output_dir,
-        num_train_epochs=hp.get("epochs", 3),
+        num_train_epochs=999 if max_steps_override else num_epochs,
+        max_steps=max_steps_override or -1,
         per_device_train_batch_size=hp.get("batch_size", 2),
         gradient_accumulation_steps=hp.get("gradient_accumulation_steps", 8),
         learning_rate=hp.get("learning_rate", 1e-4),
@@ -188,6 +219,7 @@ def main():
         tokenizer=tokenizer,
         train_dataset=dataset,
         args=training_args,
+        callbacks=callbacks if callbacks else None,
     )
 
     teacher_info = f"teacher={teacher_model_name}" if teacher_model_name else "self-distillation"

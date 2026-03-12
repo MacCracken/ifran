@@ -24,6 +24,12 @@ pub struct TrainingJobConfig {
     pub hyperparams: HyperParams,
     pub output_name: Option<String>,
     pub lora: Option<LoraConfig>,
+    /// Maximum training steps (overrides epochs when set).
+    #[serde(default)]
+    pub max_steps: Option<u64>,
+    /// Wall-clock time budget in seconds. Training stops after this duration.
+    #[serde(default)]
+    pub time_budget_secs: Option<u64>,
 }
 
 /// Dataset configuration.
@@ -207,6 +213,8 @@ mod tests {
                 dropout: 0.05,
                 target_modules: vec!["q_proj".into(), "v_proj".into()],
             }),
+            max_steps: None,
+            time_budget_secs: None,
         };
         let json = serde_json::to_string(&config).unwrap();
         let back: TrainingJobConfig = serde_json::from_str(&json).unwrap();

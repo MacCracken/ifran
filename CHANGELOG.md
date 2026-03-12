@@ -5,7 +5,28 @@ All notable changes to Synapse will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 
-## [2026.3.10] — (in progress)
+## [2026.3.11] — (in progress)
+
+### Added
+
+#### Autonomous Experiment System (AutoResearch-Inspired)
+- `synapse-types/experiment`: Experiment types — `ExperimentProgram`, `ExperimentStatus`, `TrialResult`, `Direction`, `SearchStrategy`, `ParamRange`, `ParamValues` with full serde support
+- `synapse-types/training`: `max_steps` and `time_budget_secs` fields on `TrainingJobConfig` for time-boxed training (backward-compatible via `#[serde(default)]`)
+- `synapse-core/experiment/store`: SQLite experiment store — `experiments` and `experiment_trials` tables with full CRUD, leaderboard queries with direction-aware ordering
+- `synapse-train/experiment/search`: Search space engine — grid (cartesian product) and random sampling strategies, `apply_param()` mapping to `HyperParams` fields
+- `synapse-train/experiment/runner`: Autonomous experiment loop — generates trials from search space, submits time-budgeted training jobs, polls for completion, compares scores, tracks best trial
+- `synapse-train/executor/subprocess`: Time budget enforcement via `tokio::time::timeout` (budget + 30s grace) around `child.wait()`
+- `synapse-train/executor/docker`: Time budget enforcement via `tokio::time::timeout` around `docker run`, graceful `docker stop` on timeout
+- Python training scripts: `TimeBudgetCallback` for HuggingFace Trainer (SFT, full, DPO, distillation) — stops training on wall-clock expiry; `max_steps` override support; RLHF (PPO) loop time/step checks
+- `synapse-cli/experiment`: `synapse experiment run|list|status|leaderboard|stop` commands — run experiments from TOML program files, view results
+- `synapse-api/rest/experiment`: REST endpoints — `POST /experiments`, `GET /experiments`, `GET /experiments/{id}`, `GET /experiments/{id}/leaderboard`, `POST /experiments/{id}/stop`
+- `synapse-api/state`: `experiment_store` and `experiment_runners` added to `AppState`
+- TOML experiment program format for declarative hyperparameter sweep specification
+- 31 new tests across experiment types, store, search space, and API (543 total)
+
+---
+
+## [2026.3.10]
 
 ### Added
 

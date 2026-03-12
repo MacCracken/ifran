@@ -18,6 +18,8 @@ from peft import LoraConfig, TaskType
 from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification, AutoTokenizer
 from trl import AutoModelForCausalLMWithValueHead, PPOConfig, PPOTrainer
 
+import time
+
 
 def parse_config():
     parser = argparse.ArgumentParser(description="Synapse RLHF training")
@@ -128,9 +130,17 @@ def main():
         dataset=dataset,
     )
 
+    # Time budget support
+    max_steps_override = config.get("max_steps")
+    time_budget_secs = config.get("time_budget_secs")
+    if time_budget_secs:
+        print(f"[synapse] Time budget: {time_budget_secs}s")
+
     print(f"[synapse] Job {job_id}: PPO training started — {len(dataset)} prompts")
 
     # PPO training loop
+    train_start = time.monotonic()
+    global_step = 0
     generation_kwargs = {
         "max_new_tokens": hp.get("max_seq_length", 256),
         "temperature": 0.7,
@@ -138,8 +148,19 @@ def main():
         "do_sample": True,
     }
 
+    stopped_early = False
     for epoch in range(hp.get("epochs", 1)):
         for batch_idx, batch in enumerate(trainer.dataloader):
+            # Check time budget
+            if time_budget_secs and (time.monotonic() - train_start) >= time_budget_secs:
+                print(f"[synapse] Time budget ({time_budget_secs}s) reached — stopping")
+                stopped_early = True
+                break
+            # Check max steps
+            if max_steps_override and global_step >= max_steps_override:
+                stopped_early = True
+                break
+
             query_tensors = [torch.tensor(ids) for ids in batch["input_ids"]]
 
             # Generate responses
@@ -154,10 +175,13 @@ def main():
 
             # PPO step
             stats = trainer.step(query_tensors, response_tensors, rewards)
+            global_step += 1
 
             if batch_idx % 10 == 0:
                 mean_reward = sum(r.item() for r in rewards) / len(rewards)
                 print(f"[synapse] Job {job_id}: epoch={epoch} batch={batch_idx} mean_reward={mean_reward:.4f}")
+        if stopped_early:
+            break
 
     # Save
     trainer.save_pretrained(output_dir)

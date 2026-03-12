@@ -47,7 +47,7 @@ impl TrainingExecutor for DockerExecutor {
             .await
             .insert(job_id, container_name.clone());
 
-        let output = match Command::new("docker")
+        let docker_fut = Command::new("docker")
             .args([
                 "run",
                 "--name",
@@ -64,15 +64,41 @@ impl TrainingExecutor for DockerExecutor {
                 &self.image,
                 script,
             ])
-            .output()
-            .await
-        {
-            Ok(output) => output,
-            Err(e) => {
-                self.containers.write().await.remove(&job_id);
-                return Err(SynapseError::TrainingError(format!(
-                    "Failed to start Docker: {e}"
-                )));
+            .output();
+
+        // Apply time budget if configured (budget + 30s grace period)
+        let output = if let Some(budget) = config.time_budget_secs {
+            let timeout_dur = std::time::Duration::from_secs(budget + 30);
+            match tokio::time::timeout(timeout_dur, docker_fut).await {
+                Ok(result) => match result {
+                    Ok(output) => output,
+                    Err(e) => {
+                        self.containers.write().await.remove(&job_id);
+                        return Err(SynapseError::TrainingError(format!(
+                            "Failed to start Docker: {e}"
+                        )));
+                    }
+                },
+                Err(_) => {
+                    // Timeout — stop the container gracefully
+                    let _ = Command::new("docker")
+                        .args(["stop", &container_name])
+                        .output()
+                        .await;
+                    self.containers.write().await.remove(&job_id);
+                    info!(job_id = %job_id, budget_secs = budget, "Training container timed out (expected)");
+                    return Ok(());
+                }
+            }
+        } else {
+            match docker_fut.await {
+                Ok(output) => output,
+                Err(e) => {
+                    self.containers.write().await.remove(&job_id);
+                    return Err(SynapseError::TrainingError(format!(
+                        "Failed to start Docker: {e}"
+                    )));
+                }
             }
         };
 
@@ -164,6 +190,8 @@ mod tests {
                 },
             output_name: Some("my-finetuned".into()),
             lora: None,
+            max_steps: None,
+            time_budget_secs: None,
         };
 
         let json = serde_json::to_string(&config).unwrap();

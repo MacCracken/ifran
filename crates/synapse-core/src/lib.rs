@@ -1,5 +1,6 @@
 pub mod config;
 pub mod eval;
+pub mod experiment;
 pub mod hardware;
 pub mod lifecycle;
 pub mod marketplace;

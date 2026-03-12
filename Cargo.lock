@@ -1958,13 +1958,14 @@ dependencies = [
 
 [[package]]
 name = "synapse-api"
-version = "2026.3.10"
+version = "2026.3.11"
 dependencies = [
  "async-stream",
  "axum 0.8.8",
  "chrono",
  "futures",
  "http-body-util",
+ "rusqlite",
  "serde",
  "serde_json",
  "synapse-backends",
@@ -1985,7 +1986,7 @@ dependencies = [
 
 [[package]]
 name = "synapse-backends"
-version = "2026.3.10"
+version = "2026.3.11"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2004,7 +2005,7 @@ dependencies = [
 
 [[package]]
 name = "synapse-bridge"
-version = "2026.3.10"
+version = "2026.3.11"
 dependencies = [
  "chrono",
  "prost",
@@ -2019,13 +2020,14 @@ dependencies = [
 
 [[package]]
 name = "synapse-cli"
-version = "2026.3.10"
+version = "2026.3.11"
 dependencies = [
  "axum 0.8.8",
  "chrono",
  "clap",
  "futures",
  "indicatif",
+ "rusqlite",
  "serde_json",
  "synapse-api",
  "synapse-backends",
@@ -2033,6 +2035,7 @@ dependencies = [
  "synapse-train",
  "synapse-types",
  "tokio",
+ "toml",
  "tracing",
  "tracing-subscriber",
  "uuid",
@@ -2040,7 +2043,7 @@ dependencies = [
 
 [[package]]
 name = "synapse-core"
-version = "2026.3.10"
+version = "2026.3.11"
 dependencies = [
  "anyhow",
  "blake3",
@@ -2064,10 +2067,12 @@ dependencies = [
 
 [[package]]
 name = "synapse-train"
-version = "2026.3.10"
+version = "2026.3.11"
 dependencies = [
  "async-trait",
  "chrono",
+ "rand 0.8.5",
+ "rusqlite",
  "serde",
  "serde_json",
  "synapse-core",
@@ -2075,13 +2080,14 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "toml",
  "tracing",
  "uuid",
 ]
 
 [[package]]
 name = "synapse-types"
-version = "2026.3.10"
+version = "2026.3.11"
 dependencies = [
  "chrono",
  "prost",

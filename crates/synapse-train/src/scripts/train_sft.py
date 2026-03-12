@@ -20,7 +20,28 @@ from transformers import (
     BitsAndBytesConfig,
     TrainingArguments,
 )
+from transformers import TrainerCallback
 from trl import SFTTrainer
+
+import time
+
+
+class TimeBudgetCallback(TrainerCallback):
+    """Stops training when wall-clock time budget is exceeded."""
+
+    def __init__(self, budget_secs):
+        self.budget_secs = budget_secs
+        self.start_time = None
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        self.start_time = time.monotonic()
+
+    def on_step_end(self, args, state, control, **kwargs):
+        if self.start_time is not None:
+            elapsed = time.monotonic() - self.start_time
+            if elapsed >= self.budget_secs:
+                print(f"[synapse] Time budget ({self.budget_secs}s) reached after {elapsed:.0f}s — stopping")
+                control.should_training_stop = True
 
 
 def parse_config():
@@ -139,10 +160,21 @@ def main():
     dataset = load_training_dataset(config["dataset"])
     dataset = dataset.map(format_instruction)
 
+    # Time budget and max steps support
+    max_steps_override = config.get("max_steps")
+    time_budget_secs = config.get("time_budget_secs")
+
+    callbacks = []
+    if time_budget_secs:
+        callbacks.append(TimeBudgetCallback(time_budget_secs))
+        print(f"[synapse] Time budget: {time_budget_secs}s")
+
     # Training arguments
+    num_epochs = hp.get("epochs", 3)
     training_args = TrainingArguments(
         output_dir=output_dir,
-        num_train_epochs=hp.get("epochs", 3),
+        num_train_epochs=999 if max_steps_override else num_epochs,
+        max_steps=max_steps_override or -1,
         per_device_train_batch_size=hp.get("batch_size", 4),
         gradient_accumulation_steps=hp.get("gradient_accumulation_steps", 4),
         learning_rate=hp.get("learning_rate", 2e-4),
@@ -164,6 +196,7 @@ def main():
         train_dataset=dataset,
         args=training_args,
         max_seq_length=hp.get("max_seq_length", 2048),
+        callbacks=callbacks if callbacks else None,
     )
 
     print(f"[synapse] Job {job_id}: Training started — {len(dataset)} samples, {hp.get('epochs', 3)} epochs")
