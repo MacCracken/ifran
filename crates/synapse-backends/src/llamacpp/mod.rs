@@ -559,7 +559,13 @@ mod tests {
     #[tokio::test]
     async fn infer_success_with_mock_server() {
         let mut server = mockito::Server::new_async().await;
-        let port: u16 = server.url().split(':').last().unwrap().parse().unwrap();
+        let port: u16 = server
+            .url()
+            .split(':')
+            .next_back()
+            .unwrap()
+            .parse()
+            .unwrap();
 
         let mock = server
             .mock("POST", "/v1/chat/completions")
@@ -619,7 +625,13 @@ mod tests {
     #[tokio::test]
     async fn infer_server_error() {
         let mut server = mockito::Server::new_async().await;
-        let port: u16 = server.url().split(':').last().unwrap().parse().unwrap();
+        let port: u16 = server
+            .url()
+            .split(':')
+            .next_back()
+            .unwrap()
+            .parse()
+            .unwrap();
 
         let mock = server
             .mock("POST", "/v1/chat/completions")

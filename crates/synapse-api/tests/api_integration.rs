@@ -182,7 +182,7 @@ async fn get_model_by_uuid() {
 
     let resp = app
         .oneshot(
-            Request::get(&format!("/models/{}", model.id))
+            Request::get(format!("/models/{}", model.id))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -218,7 +218,7 @@ async fn delete_model() {
 
     let resp = app
         .oneshot(
-            Request::delete(&format!("/models/{}", model.id))
+            Request::delete(format!("/models/{}", model.id))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -235,7 +235,7 @@ async fn delete_model_not_found() {
 
     let resp = app
         .oneshot(
-            Request::delete(&format!("/models/{fake_id}"))
+            Request::delete(format!("/models/{fake_id}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -331,7 +331,7 @@ async fn training_get_job_not_found() {
 
     let resp = app
         .oneshot(
-            Request::get(&format!("/training/jobs/{fake_id}"))
+            Request::get(format!("/training/jobs/{fake_id}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -393,7 +393,7 @@ async fn eval_get_run_not_found() {
 
     let resp = app
         .oneshot(
-            Request::get(&format!("/eval/runs/{fake_id}"))
+            Request::get(format!("/eval/runs/{fake_id}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -572,7 +572,7 @@ async fn distributed_get_job_not_found() {
 
     let resp = app
         .oneshot(
-            Request::get(&format!("/training/distributed/jobs/{fake_id}"))
+            Request::get(format!("/training/distributed/jobs/{fake_id}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -626,7 +626,7 @@ async fn distributed_assign_worker() {
 
     let resp = app
         .oneshot(
-            Request::post(&format!("/training/distributed/jobs/{job_id}/workers"))
+            Request::post(format!("/training/distributed/jobs/{job_id}/workers"))
                 .header("content-type", "application/json")
                 .body(Body::from(serde_json::to_string(&worker_body).unwrap()))
                 .unwrap(),
@@ -682,7 +682,7 @@ async fn distributed_full_lifecycle() {
         });
         app.clone()
             .oneshot(
-                Request::post(&format!("/training/distributed/jobs/{job_id}/workers"))
+                Request::post(format!("/training/distributed/jobs/{job_id}/workers"))
                     .header("content-type", "application/json")
                     .body(Body::from(serde_json::to_string(&worker_body).unwrap()))
                     .unwrap(),
@@ -695,7 +695,7 @@ async fn distributed_full_lifecycle() {
     let resp = app
         .clone()
         .oneshot(
-            Request::post(&format!("/training/distributed/jobs/{job_id}/start"))
+            Request::post(format!("/training/distributed/jobs/{job_id}/start"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -710,7 +710,7 @@ async fn distributed_full_lifecycle() {
     for rank in 0..2u32 {
         app.clone()
             .oneshot(
-                Request::post(&format!(
+                Request::post(format!(
                     "/training/distributed/jobs/{job_id}/workers/{rank}/complete"
                 ))
                 .body(Body::empty())
@@ -723,7 +723,7 @@ async fn distributed_full_lifecycle() {
     // Verify completed
     let resp = app
         .oneshot(
-            Request::get(&format!("/training/distributed/jobs/{job_id}"))
+            Request::get(format!("/training/distributed/jobs/{job_id}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -768,7 +768,7 @@ async fn distributed_fail_job() {
 
     let resp = app
         .oneshot(
-            Request::post(&format!("/training/distributed/jobs/{job_id}/fail"))
+            Request::post(format!("/training/distributed/jobs/{job_id}/fail"))
                 .body(Body::empty())
                 .unwrap(),
         )

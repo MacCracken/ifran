@@ -603,11 +603,11 @@ mod tests {
         store.insert_trial(&trial).unwrap();
 
         trial.status = TrialStatus::Completed;
-        trial.eval_score = Some(3.14);
+        trial.eval_score = Some(3.25);
         store.update_trial(&trial).unwrap();
 
         let trials = store.get_trials(exp_id).unwrap();
         assert_eq!(trials[0].status, TrialStatus::Completed);
-        assert_eq!(trials[0].eval_score, Some(3.14));
+        assert_eq!(trials[0].eval_score, Some(3.25));
     }
 }

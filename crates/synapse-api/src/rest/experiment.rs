@@ -229,7 +229,7 @@ mod tests {
             id: uuid::Uuid::new_v4(),
             name: "test".into(),
             status: ExperimentStatus::Running,
-            best_score: Some(3.14),
+            best_score: Some(3.25),
         };
         let json = serde_json::to_value(&item).unwrap();
         assert_eq!(json["name"], "test");

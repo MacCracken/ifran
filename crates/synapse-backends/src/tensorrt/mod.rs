@@ -388,7 +388,12 @@ mod tests {
     #[tokio::test]
     async fn unload_nonexistent_fails() {
         let backend = TensorRtBackend::new(None);
-        assert!(backend.unload_model(ModelHandle("nope".into())).await.is_err());
+        assert!(
+            backend
+                .unload_model(ModelHandle("nope".into()))
+                .await
+                .is_err()
+        );
     }
 
     #[test]

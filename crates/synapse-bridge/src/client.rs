@@ -293,10 +293,7 @@ mod tests {
             .report_progress("", "running", u64::MAX, f64::INFINITY)
             .await
             .unwrap();
-        client
-            .report_progress("job-1", "", 0, 0.0)
-            .await
-            .unwrap();
+        client.report_progress("job-1", "", 0, 0.0).await.unwrap();
     }
 
     #[tokio::test]

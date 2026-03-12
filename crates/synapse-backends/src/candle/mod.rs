@@ -253,7 +253,12 @@ mod tests {
     #[tokio::test]
     async fn unload_nonexistent_fails() {
         let backend = CandleBackend::new();
-        assert!(backend.unload_model(ModelHandle("nope".into())).await.is_err());
+        assert!(
+            backend
+                .unload_model(ModelHandle("nope".into()))
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]

@@ -241,18 +241,12 @@ mod tests {
 
     #[test]
     fn slugify_drops_special_chars() {
-        assert_eq!(
-            StorageLayout::slugify("model@v1!#$%", "none"),
-            "modelv1"
-        );
+        assert_eq!(StorageLayout::slugify("model@v1!#$%", "none"), "modelv1");
     }
 
     #[test]
     fn slugify_collapses_dashes() {
-        assert_eq!(
-            StorageLayout::slugify("a---b---c", "none"),
-            "a-b-c"
-        );
+        assert_eq!(StorageLayout::slugify("a---b---c", "none"), "a-b-c");
     }
 
     #[test]
@@ -286,10 +280,7 @@ mod tests {
     #[test]
     fn checkpoints_dir_path() {
         let layout = StorageLayout::new("/root");
-        assert_eq!(
-            layout.checkpoints_dir(),
-            PathBuf::from("/root/checkpoints")
-        );
+        assert_eq!(layout.checkpoints_dir(), PathBuf::from("/root/checkpoints"));
     }
 
     #[test]

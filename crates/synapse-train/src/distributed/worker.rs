@@ -211,9 +211,18 @@ mod tests {
 
     #[test]
     fn strategy_flag_values() {
-        assert_eq!(strategy_flag(DistributedStrategy::DataParallel), "data_parallel");
-        assert_eq!(strategy_flag(DistributedStrategy::ModelParallel), "model_parallel");
-        assert_eq!(strategy_flag(DistributedStrategy::PipelineParallel), "pipeline_parallel");
+        assert_eq!(
+            strategy_flag(DistributedStrategy::DataParallel),
+            "data_parallel"
+        );
+        assert_eq!(
+            strategy_flag(DistributedStrategy::ModelParallel),
+            "model_parallel"
+        );
+        assert_eq!(
+            strategy_flag(DistributedStrategy::PipelineParallel),
+            "pipeline_parallel"
+        );
     }
 
     #[test]

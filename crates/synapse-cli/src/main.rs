@@ -473,8 +473,7 @@ mod tests {
 
     #[test]
     fn cli_experiment_run() {
-        let cli =
-            Cli::try_parse_from(["synapse", "experiment", "run", "experiment.toml"]).unwrap();
+        let cli = Cli::try_parse_from(["synapse", "experiment", "run", "experiment.toml"]).unwrap();
         match cli.command {
             Commands::Experiment {
                 action: ExperimentAction::Run { program },
@@ -507,8 +506,7 @@ mod tests {
 
     #[test]
     fn cli_experiment_status_with_id() {
-        let cli =
-            Cli::try_parse_from(["synapse", "experiment", "status", "abc-123"]).unwrap();
+        let cli = Cli::try_parse_from(["synapse", "experiment", "status", "abc-123"]).unwrap();
         match cli.command {
             Commands::Experiment {
                 action: ExperimentAction::Status { id },
@@ -541,8 +539,7 @@ mod tests {
 
     #[test]
     fn cli_experiment_leaderboard_default_limit() {
-        let cli =
-            Cli::try_parse_from(["synapse", "experiment", "leaderboard", "exp-1"]).unwrap();
+        let cli = Cli::try_parse_from(["synapse", "experiment", "leaderboard", "exp-1"]).unwrap();
         match cli.command {
             Commands::Experiment {
                 action: ExperimentAction::Leaderboard { limit, .. },
@@ -564,8 +561,7 @@ mod tests {
 
     #[test]
     fn cli_marketplace_unpublish() {
-        let cli =
-            Cli::try_parse_from(["synapse", "marketplace", "unpublish", "my-model"]).unwrap();
+        let cli = Cli::try_parse_from(["synapse", "marketplace", "unpublish", "my-model"]).unwrap();
         match cli.command {
             Commands::Marketplace {
                 action: MarketplaceAction::Unpublish { model },

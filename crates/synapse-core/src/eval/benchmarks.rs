@@ -399,10 +399,7 @@ mod tests {
 
     #[test]
     fn score_exact_match_all_correct() {
-        let preds = vec![
-            ("A".into(), "a".into()),
-            ("B".into(), "b".into()),
-        ];
+        let preds = vec![("A".into(), "a".into()), ("B".into(), "b".into())];
         assert!((score_exact_match(&preds) - 1.0).abs() < 1e-6);
     }
 
@@ -446,16 +443,8 @@ mod tests {
     fn load_samples_from_file() {
         let mut tmp = tempfile::NamedTempFile::new().unwrap();
         use std::io::Write;
-        writeln!(
-            tmp,
-            r#"{{"prompt": "hello", "expected": "world"}}"#
-        )
-        .unwrap();
-        writeln!(
-            tmp,
-            r#"{{"prompt": "foo", "expected": "bar"}}"#
-        )
-        .unwrap();
+        writeln!(tmp, r#"{{"prompt": "hello", "expected": "world"}}"#).unwrap();
+        writeln!(tmp, r#"{{"prompt": "foo", "expected": "bar"}}"#).unwrap();
         tmp.flush().unwrap();
 
         let samples = load_samples(tmp.path().to_str().unwrap(), None).unwrap();
@@ -469,11 +458,7 @@ mod tests {
         let mut tmp = tempfile::NamedTempFile::new().unwrap();
         use std::io::Write;
         for i in 0..10 {
-            writeln!(
-                tmp,
-                r#"{{"prompt": "p{i}", "expected": "e{i}"}}"#
-            )
-            .unwrap();
+            writeln!(tmp, r#"{{"prompt": "p{i}", "expected": "e{i}"}}"#).unwrap();
         }
         tmp.flush().unwrap();
 
@@ -485,17 +470,9 @@ mod tests {
     fn load_samples_skips_blank_lines() {
         let mut tmp = tempfile::NamedTempFile::new().unwrap();
         use std::io::Write;
-        writeln!(
-            tmp,
-            r#"{{"prompt": "a", "expected": "b"}}"#
-        )
-        .unwrap();
+        writeln!(tmp, r#"{{"prompt": "a", "expected": "b"}}"#).unwrap();
         writeln!(tmp).unwrap();
-        writeln!(
-            tmp,
-            r#"{{"prompt": "c", "expected": "d"}}"#
-        )
-        .unwrap();
+        writeln!(tmp, r#"{{"prompt": "c", "expected": "d"}}"#).unwrap();
         tmp.flush().unwrap();
 
         let samples = load_samples(tmp.path().to_str().unwrap(), None).unwrap();

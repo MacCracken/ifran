@@ -279,7 +279,6 @@ mod tests {
     use super::*;
     use crate::state::AppState;
     use synapse_core::config::*;
-    use synapse_types::distributed::*;
     use synapse_types::training::*;
 
     fn test_state(tmp: &tempfile::TempDir) -> AppState {
