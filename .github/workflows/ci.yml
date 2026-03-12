@@ -116,7 +116,6 @@ jobs:
 
       - name: Run cargo deny
         run: cargo deny check
-        continue-on-error: true
 
       - name: Install cargo-outdated
         run: cargo install cargo-outdated --locked
