@@ -341,4 +341,164 @@ mod tests {
         assert!(prompt.contains("one two"));
         assert!(prompt.contains("Continue"));
     }
+
+    #[test]
+    fn perplexity_prompt_single_word() {
+        let sample = EvalSample {
+            prompt: "hello".into(),
+            expected: "world".into(),
+            choices: None,
+            answer_index: None,
+        };
+        let prompt = format_perplexity_prompt(&sample);
+        // Single word splits at 0, so falls through to prompt-based
+        assert!(prompt.contains("hello"));
+    }
+
+    #[test]
+    fn extract_answer_letter_lowercase() {
+        assert_eq!(extract_answer_letter("a"), Some('A'));
+        assert_eq!(extract_answer_letter("b)"), Some('B'));
+        assert_eq!(extract_answer_letter("(c)"), Some('C'));
+    }
+
+    #[test]
+    fn extract_answer_letter_no_match() {
+        assert_eq!(extract_answer_letter("xyz"), None);
+        assert_eq!(extract_answer_letter("123"), None);
+        assert_eq!(extract_answer_letter("E"), None);
+    }
+
+    #[test]
+    fn extract_answer_letter_embedded() {
+        // "The answer is A" → should find A
+        assert_eq!(extract_answer_letter("The answer is A"), Some('A'));
+    }
+
+    #[test]
+    fn mmlu_expected_letter_no_index() {
+        let sample = EvalSample {
+            prompt: "test".into(),
+            expected: "C".into(),
+            choices: None,
+            answer_index: None,
+        };
+        assert_eq!(mmlu_expected_letter(&sample), "C");
+    }
+
+    #[test]
+    fn mmlu_expected_letter_out_of_range() {
+        let sample = EvalSample {
+            prompt: "test".into(),
+            expected: "fallback".into(),
+            choices: Some(vec!["x".into()]),
+            answer_index: Some(99),
+        };
+        assert_eq!(mmlu_expected_letter(&sample), "fallback");
+    }
+
+    #[test]
+    fn score_exact_match_all_correct() {
+        let preds = vec![
+            ("A".into(), "a".into()),
+            ("B".into(), "b".into()),
+        ];
+        assert!((score_exact_match(&preds) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn score_exact_match_whitespace() {
+        let preds = vec![("  hello  ".into(), "hello".into())];
+        assert!((score_exact_match(&preds) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn score_contains_match_empty_expected() {
+        let preds = vec![("anything".into(), "".into())];
+        // Empty string is always contained
+        assert!((score_contains_match(&preds) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn score_mmlu_empty() {
+        assert_eq!(score_mmlu(&[]), 0.0);
+    }
+
+    #[test]
+    fn perplexity_empty_predictions() {
+        assert!((score_perplexity(&[]) - 1000.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn format_mmlu_no_choices() {
+        let sample = EvalSample {
+            prompt: "What?".into(),
+            expected: "A".into(),
+            choices: None,
+            answer_index: None,
+        };
+        let prompt = format_mmlu_prompt(&sample);
+        assert!(prompt.contains("What?"));
+        assert!(prompt.ends_with("Answer:"));
+    }
+
+    #[test]
+    fn load_samples_from_file() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        use std::io::Write;
+        writeln!(
+            tmp,
+            r#"{{"prompt": "hello", "expected": "world"}}"#
+        )
+        .unwrap();
+        writeln!(
+            tmp,
+            r#"{{"prompt": "foo", "expected": "bar"}}"#
+        )
+        .unwrap();
+        tmp.flush().unwrap();
+
+        let samples = load_samples(tmp.path().to_str().unwrap(), None).unwrap();
+        assert_eq!(samples.len(), 2);
+        assert_eq!(samples[0].prompt, "hello");
+        assert_eq!(samples[1].expected, "bar");
+    }
+
+    #[test]
+    fn load_samples_with_limit() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        use std::io::Write;
+        for i in 0..10 {
+            writeln!(
+                tmp,
+                r#"{{"prompt": "p{i}", "expected": "e{i}"}}"#
+            )
+            .unwrap();
+        }
+        tmp.flush().unwrap();
+
+        let samples = load_samples(tmp.path().to_str().unwrap(), Some(3)).unwrap();
+        assert_eq!(samples.len(), 3);
+    }
+
+    #[test]
+    fn load_samples_skips_blank_lines() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        use std::io::Write;
+        writeln!(
+            tmp,
+            r#"{{"prompt": "a", "expected": "b"}}"#
+        )
+        .unwrap();
+        writeln!(tmp).unwrap();
+        writeln!(
+            tmp,
+            r#"{{"prompt": "c", "expected": "d"}}"#
+        )
+        .unwrap();
+        tmp.flush().unwrap();
+
+        let samples = load_samples(tmp.path().to_str().unwrap(), None).unwrap();
+        assert_eq!(samples.len(), 2);
+    }
 }

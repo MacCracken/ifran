@@ -158,4 +158,80 @@ mod tests {
         worker.fail();
         assert_eq!(worker.status, TrainingStatus::Failed);
     }
+
+    #[test]
+    fn fail_from_queued() {
+        let mut worker = test_worker(0);
+        assert_eq!(worker.status, TrainingStatus::Queued);
+        worker.fail();
+        assert_eq!(worker.status, TrainingStatus::Failed);
+    }
+
+    #[test]
+    fn fail_from_running() {
+        let mut worker = test_worker(0);
+        worker.start().unwrap();
+        worker.fail();
+        assert_eq!(worker.status, TrainingStatus::Failed);
+    }
+
+    #[test]
+    fn extra_args_model_parallel() {
+        let worker = DistributedWorker::new(
+            uuid::Uuid::new_v4(),
+            WorkerAssignment {
+                rank: 0,
+                instance_id: "node-0".into(),
+                endpoint: "http://node-0:9000".into(),
+                device_ids: vec![0, 1],
+            },
+            DistributedStrategy::ModelParallel,
+        );
+        let args = worker.extra_args(2);
+        assert_eq!(args[5], "model_parallel");
+    }
+
+    #[test]
+    fn extra_args_pipeline_parallel() {
+        let worker = DistributedWorker::new(
+            uuid::Uuid::new_v4(),
+            WorkerAssignment {
+                rank: 2,
+                instance_id: "node-2".into(),
+                endpoint: "http://node-2:9000".into(),
+                device_ids: vec![0],
+            },
+            DistributedStrategy::PipelineParallel,
+        );
+        let args = worker.extra_args(4);
+        assert_eq!(args[1], "2"); // rank
+        assert_eq!(args[3], "4"); // world_size
+        assert_eq!(args[5], "pipeline_parallel");
+    }
+
+    #[test]
+    fn strategy_flag_values() {
+        assert_eq!(strategy_flag(DistributedStrategy::DataParallel), "data_parallel");
+        assert_eq!(strategy_flag(DistributedStrategy::ModelParallel), "model_parallel");
+        assert_eq!(strategy_flag(DistributedStrategy::PipelineParallel), "pipeline_parallel");
+    }
+
+    #[test]
+    fn worker_job_id_and_assignment() {
+        let job_id = uuid::Uuid::new_v4();
+        let worker = DistributedWorker::new(
+            job_id,
+            WorkerAssignment {
+                rank: 3,
+                instance_id: "node-3".into(),
+                endpoint: "http://node-3:9000".into(),
+                device_ids: vec![0, 1, 2],
+            },
+            DistributedStrategy::DataParallel,
+        );
+        assert_eq!(worker.job_id, job_id);
+        assert_eq!(worker.assignment.rank, 3);
+        assert_eq!(worker.assignment.device_ids.len(), 3);
+        assert!(!worker.is_coordinator());
+    }
 }

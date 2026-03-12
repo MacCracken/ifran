@@ -143,3 +143,26 @@ fn format_size(bytes: u64) -> String {
         format!("{} B", bytes)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_size_gb() {
+        assert_eq!(format_size(4_700_000_000), "4.7 GB");
+        assert_eq!(format_size(1_000_000_000), "1.0 GB");
+    }
+
+    #[test]
+    fn format_size_mb() {
+        assert_eq!(format_size(500_000_000), "500.0 MB");
+        assert_eq!(format_size(1_000_000), "1.0 MB");
+    }
+
+    #[test]
+    fn format_size_bytes() {
+        assert_eq!(format_size(999_999), "999999 B");
+        assert_eq!(format_size(0), "0 B");
+    }
+}

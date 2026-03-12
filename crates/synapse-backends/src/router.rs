@@ -261,4 +261,121 @@ mod tests {
         assert!(router.supports_format(ModelFormat::Gguf));
         assert!(!router.supports_format(ModelFormat::Onnx));
     }
+
+    #[test]
+    fn get_backend_by_id() {
+        let router = BackendRouter::new();
+        router.register(Arc::new(MockBackend {
+            name: "gguf-be",
+            formats: vec![ModelFormat::Gguf],
+        }));
+        let id = BackendId("gguf-be".into());
+        assert!(router.get(&id).is_some());
+        assert_eq!(router.get(&id).unwrap().id().0, "gguf-be");
+
+        let missing = BackendId("nope".into());
+        assert!(router.get(&missing).is_none());
+    }
+
+    #[test]
+    fn unregister_backend() {
+        let router = BackendRouter::new();
+        router.register(Arc::new(MockBackend {
+            name: "a",
+            formats: vec![ModelFormat::Gguf],
+        }));
+        assert_eq!(router.count(), 1);
+        router.unregister(&BackendId("a".into()));
+        assert_eq!(router.count(), 0);
+        assert!(router.get(&BackendId("a".into())).is_none());
+    }
+
+    #[test]
+    fn count_backends() {
+        let router = BackendRouter::new();
+        assert_eq!(router.count(), 0);
+        router.register(Arc::new(MockBackend {
+            name: "a",
+            formats: vec![ModelFormat::Gguf],
+        }));
+        assert_eq!(router.count(), 1);
+        router.register(Arc::new(MockBackend {
+            name: "b",
+            formats: vec![ModelFormat::Onnx],
+        }));
+        assert_eq!(router.count(), 2);
+    }
+
+    #[test]
+    fn list_backends_returns_all_ids() {
+        let router = BackendRouter::new();
+        router.register(Arc::new(MockBackend {
+            name: "alpha",
+            formats: vec![ModelFormat::Gguf],
+        }));
+        router.register(Arc::new(MockBackend {
+            name: "beta",
+            formats: vec![ModelFormat::Onnx],
+        }));
+        let mut ids: Vec<String> = router.list_backends().into_iter().map(|id| id.0).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn select_with_id_returns_both() {
+        let router = BackendRouter::new();
+        router.register(Arc::new(MockBackend {
+            name: "test-be",
+            formats: vec![ModelFormat::Gguf],
+        }));
+        let (id, backend) = router.select_with_id(ModelFormat::Gguf, None).unwrap();
+        assert_eq!(id.0, "test-be");
+        assert_eq!(backend.id().0, "test-be");
+    }
+
+    #[test]
+    fn select_no_backends_returns_none() {
+        let router = BackendRouter::new();
+        assert!(router.select(ModelFormat::Gguf, None).is_none());
+    }
+
+    #[test]
+    fn select_preferred_not_found_falls_back() {
+        let router = BackendRouter::new();
+        router.register(Arc::new(MockBackend {
+            name: "actual",
+            formats: vec![ModelFormat::Gguf],
+        }));
+        // Preferred "missing" doesn't exist, should fall back to "actual"
+        let selected = router.select(ModelFormat::Gguf, Some("missing")).unwrap();
+        assert_eq!(selected.id().0, "actual");
+    }
+
+    #[test]
+    fn default_backend_unsupported_format_skips() {
+        let router = BackendRouter::with_default("default-be");
+        router.register(Arc::new(MockBackend {
+            name: "default-be",
+            formats: vec![ModelFormat::Onnx], // doesn't support Gguf
+        }));
+        router.register(Arc::new(MockBackend {
+            name: "gguf-be",
+            formats: vec![ModelFormat::Gguf],
+        }));
+        let selected = router.select(ModelFormat::Gguf, None).unwrap();
+        assert_eq!(selected.id().0, "gguf-be");
+    }
+
+    #[test]
+    fn supports_format_empty_router() {
+        let router = BackendRouter::new();
+        assert!(!router.supports_format(ModelFormat::Gguf));
+    }
+
+    #[test]
+    fn default_trait() {
+        let router = BackendRouter::default();
+        assert_eq!(router.count(), 0);
+    }
 }

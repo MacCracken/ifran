@@ -274,4 +274,75 @@ mod tests {
         let gpus = client.request_gpu(16384, 4).await.unwrap();
         assert!(gpus.is_empty());
     }
+
+    #[tokio::test]
+    async fn request_gpu_edge_cases() {
+        let client = test_client();
+        // Zero memory, zero count
+        let gpus = client.request_gpu(0, 0).await.unwrap();
+        assert!(gpus.is_empty());
+        // Max values
+        let gpus = client.request_gpu(u64::MAX, u32::MAX).await.unwrap();
+        assert!(gpus.is_empty());
+    }
+
+    #[tokio::test]
+    async fn report_progress_extreme_values() {
+        let client = test_client();
+        client
+            .report_progress("", "running", u64::MAX, f64::INFINITY)
+            .await
+            .unwrap();
+        client
+            .report_progress("job-1", "", 0, 0.0)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn worker_assignment_empty_devices() {
+        let client = test_client();
+        client
+            .request_worker_assignment("job-1", 0, "http://localhost:9000", &[])
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn sync_checkpoint_empty_path() {
+        let client = test_client();
+        client.sync_checkpoint("job-1", 0, "").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn announce_multiple_times() {
+        let client = test_client();
+        client.connect().await.unwrap();
+        for i in 0..3 {
+            let caps = Capabilities {
+                instance_id: format!("test-{i}"),
+                version: "1.0".into(),
+                gpu_count: i,
+                total_gpu_memory_mb: 8192,
+                supported_methods: vec![],
+            };
+            client.announce(caps).await.unwrap();
+        }
+        assert_eq!(client.connection_state().await, ConnectionState::Connected);
+    }
+
+    #[tokio::test]
+    async fn reconnect_succeeds_within_limit() {
+        let config = ProtocolConfig {
+            max_reconnect_attempts: 3,
+            reconnect_delay: std::time::Duration::from_millis(1),
+            ..ProtocolConfig::default()
+        };
+        let client = BridgeClient::new("http://127.0.0.1:9420".into(), config);
+        // First reconnect should succeed (attempt 1 <= 3)
+        client.reconnect().await.unwrap();
+        assert_eq!(client.connection_state().await, ConnectionState::Connected);
+        // reconnect_count should have been reset by successful connect
+        assert_eq!(*client.reconnect_count.read().await, 0);
+    }
 }

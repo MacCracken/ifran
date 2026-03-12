@@ -168,4 +168,46 @@ mod tests {
         server.enter_degraded().await;
         assert_eq!(server.connection_state().await, ConnectionState::Degraded);
     }
+
+    #[test]
+    fn build_heartbeat_max_values() {
+        let server = test_server();
+        let hb = server.build_heartbeat(u32::MAX, u64::MAX, u32::MAX);
+        assert_eq!(hb.loaded_models, u32::MAX);
+        assert_eq!(hb.gpu_memory_free_mb, u64::MAX);
+        assert_eq!(hb.active_training_jobs, u32::MAX);
+    }
+
+    #[test]
+    fn build_heartbeat_instance_id_matches() {
+        let server = BridgeServer::new("my-node-42".into(), ProtocolConfig::default());
+        let hb = server.build_heartbeat(1, 2048, 0);
+        assert_eq!(hb.instance_id, "my-node-42");
+    }
+
+    #[test]
+    fn build_heartbeat_timestamp_monotonic() {
+        let server = test_server();
+        let hb1 = server.build_heartbeat(0, 0, 0);
+        let hb2 = server.build_heartbeat(0, 0, 0);
+        assert!(hb2.timestamp >= hb1.timestamp);
+    }
+
+    #[test]
+    fn empty_instance_id() {
+        let server = BridgeServer::new("".into(), ProtocolConfig::default());
+        let hb = server.build_heartbeat(0, 0, 0);
+        assert_eq!(hb.instance_id, "");
+    }
+
+    #[tokio::test]
+    async fn enter_degraded_from_disconnected() {
+        let server = test_server();
+        assert_eq!(
+            server.connection_state().await,
+            ConnectionState::Disconnected
+        );
+        server.enter_degraded().await;
+        assert_eq!(server.connection_state().await, ConnectionState::Degraded);
+    }
 }

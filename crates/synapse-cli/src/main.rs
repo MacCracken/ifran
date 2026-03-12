@@ -470,4 +470,118 @@ mod tests {
     fn cli_unknown_command_fails() {
         assert!(Cli::try_parse_from(["synapse", "nonexistent"]).is_err());
     }
+
+    #[test]
+    fn cli_experiment_run() {
+        let cli =
+            Cli::try_parse_from(["synapse", "experiment", "run", "experiment.toml"]).unwrap();
+        match cli.command {
+            Commands::Experiment {
+                action: ExperimentAction::Run { program },
+            } => assert_eq!(program, "experiment.toml"),
+            _ => panic!("expected Experiment Run"),
+        }
+    }
+
+    #[test]
+    fn cli_experiment_list() {
+        let cli = Cli::try_parse_from(["synapse", "experiment", "list"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Experiment {
+                action: ExperimentAction::List
+            }
+        ));
+    }
+
+    #[test]
+    fn cli_experiment_status_no_id() {
+        let cli = Cli::try_parse_from(["synapse", "experiment", "status"]).unwrap();
+        match cli.command {
+            Commands::Experiment {
+                action: ExperimentAction::Status { id },
+            } => assert!(id.is_none()),
+            _ => panic!("expected Experiment Status"),
+        }
+    }
+
+    #[test]
+    fn cli_experiment_status_with_id() {
+        let cli =
+            Cli::try_parse_from(["synapse", "experiment", "status", "abc-123"]).unwrap();
+        match cli.command {
+            Commands::Experiment {
+                action: ExperimentAction::Status { id },
+            } => assert_eq!(id.unwrap(), "abc-123"),
+            _ => panic!("expected Experiment Status"),
+        }
+    }
+
+    #[test]
+    fn cli_experiment_leaderboard() {
+        let cli = Cli::try_parse_from([
+            "synapse",
+            "experiment",
+            "leaderboard",
+            "exp-1",
+            "--limit",
+            "10",
+        ])
+        .unwrap();
+        match cli.command {
+            Commands::Experiment {
+                action: ExperimentAction::Leaderboard { id, limit },
+            } => {
+                assert_eq!(id, "exp-1");
+                assert_eq!(limit, 10);
+            }
+            _ => panic!("expected Experiment Leaderboard"),
+        }
+    }
+
+    #[test]
+    fn cli_experiment_leaderboard_default_limit() {
+        let cli =
+            Cli::try_parse_from(["synapse", "experiment", "leaderboard", "exp-1"]).unwrap();
+        match cli.command {
+            Commands::Experiment {
+                action: ExperimentAction::Leaderboard { limit, .. },
+            } => assert_eq!(limit, 20),
+            _ => panic!("expected Experiment Leaderboard"),
+        }
+    }
+
+    #[test]
+    fn cli_experiment_stop() {
+        let cli = Cli::try_parse_from(["synapse", "experiment", "stop", "exp-1"]).unwrap();
+        match cli.command {
+            Commands::Experiment {
+                action: ExperimentAction::Stop { id },
+            } => assert_eq!(id, "exp-1"),
+            _ => panic!("expected Experiment Stop"),
+        }
+    }
+
+    #[test]
+    fn cli_marketplace_unpublish() {
+        let cli =
+            Cli::try_parse_from(["synapse", "marketplace", "unpublish", "my-model"]).unwrap();
+        match cli.command {
+            Commands::Marketplace {
+                action: MarketplaceAction::Unpublish { model },
+            } => assert_eq!(model, "my-model"),
+            _ => panic!("expected Marketplace Unpublish"),
+        }
+    }
+
+    #[test]
+    fn cli_marketplace_search_no_query() {
+        let cli = Cli::try_parse_from(["synapse", "marketplace", "search"]).unwrap();
+        match cli.command {
+            Commands::Marketplace {
+                action: MarketplaceAction::Search { query },
+            } => assert!(query.is_none()),
+            _ => panic!("expected Marketplace Search"),
+        }
+    }
 }

@@ -113,3 +113,49 @@ fn parse_benchmark(s: &str) -> synapse_types::error::Result<BenchmarkKind> {
         ))),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_benchmark_perplexity() {
+        assert_eq!(parse_benchmark("perplexity").unwrap(), BenchmarkKind::Perplexity);
+        assert_eq!(parse_benchmark("ppl").unwrap(), BenchmarkKind::Perplexity);
+    }
+
+    #[test]
+    fn parse_benchmark_mmlu() {
+        assert_eq!(parse_benchmark("mmlu").unwrap(), BenchmarkKind::Mmlu);
+    }
+
+    #[test]
+    fn parse_benchmark_hellaswag() {
+        assert_eq!(parse_benchmark("hellaswag").unwrap(), BenchmarkKind::HellaSwag);
+    }
+
+    #[test]
+    fn parse_benchmark_humaneval() {
+        assert_eq!(parse_benchmark("humaneval").unwrap(), BenchmarkKind::HumanEval);
+        assert_eq!(parse_benchmark("human_eval").unwrap(), BenchmarkKind::HumanEval);
+    }
+
+    #[test]
+    fn parse_benchmark_custom() {
+        assert_eq!(parse_benchmark("custom").unwrap(), BenchmarkKind::Custom);
+    }
+
+    #[test]
+    fn parse_benchmark_case_insensitive() {
+        assert_eq!(parse_benchmark("PERPLEXITY").unwrap(), BenchmarkKind::Perplexity);
+        assert_eq!(parse_benchmark("Mmlu").unwrap(), BenchmarkKind::Mmlu);
+        assert_eq!(parse_benchmark("HellaSwag").unwrap(), BenchmarkKind::HellaSwag);
+        assert_eq!(parse_benchmark("HumanEval").unwrap(), BenchmarkKind::HumanEval);
+    }
+
+    #[test]
+    fn parse_benchmark_invalid() {
+        assert!(parse_benchmark("nonexistent").is_err());
+        assert!(parse_benchmark("").is_err());
+    }
+}

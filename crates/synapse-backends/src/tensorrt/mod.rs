@@ -299,4 +299,130 @@ mod tests {
         let backend = TensorRtBackend::new(None);
         assert_eq!(backend.supported_formats(), &[ModelFormat::TensorRt]);
     }
+
+    #[test]
+    fn custom_url() {
+        let backend = TensorRtBackend::new(Some("http://gpu-server:8000".into()));
+        assert_eq!(backend.base_url, "http://gpu-server:8000");
+    }
+
+    #[test]
+    fn default_url() {
+        let backend = TensorRtBackend::new(None);
+        assert_eq!(backend.base_url, "http://127.0.0.1:8000");
+    }
+
+    #[test]
+    fn capabilities_details() {
+        let backend = TensorRtBackend::new(None);
+        let caps = backend.capabilities();
+        assert!(caps.supports_streaming);
+        assert!(!caps.supports_embeddings);
+        assert!(!caps.supports_vision);
+        assert_eq!(caps.max_context_length, Some(131072));
+    }
+
+    #[tokio::test]
+    async fn load_and_unload_model() {
+        let backend = TensorRtBackend::new(None);
+        let manifest = ModelManifest {
+            context_length: None,
+            gpu_layers: None,
+            tensor_split: None,
+            info: synapse_types::model::ModelInfo {
+                id: uuid::Uuid::new_v4(),
+                name: "test-trt".into(),
+                repo_id: Some("org/model".into()),
+                format: ModelFormat::TensorRt,
+                quant: synapse_types::model::QuantLevel::None,
+                size_bytes: 2000,
+                parameter_count: None,
+                architecture: None,
+                license: None,
+                local_path: "/tmp/model.engine".into(),
+                sha256: None,
+                pulled_at: chrono::Utc::now(),
+            },
+        };
+        let device = DeviceConfig {
+            accelerator: AcceleratorType::Cuda,
+            device_ids: vec![0],
+            memory_limit_mb: None,
+        };
+        let handle = backend.load_model(&manifest, &device).await.unwrap();
+        assert!(handle.0.starts_with("tensorrt-"));
+        backend.unload_model(handle).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn load_model_without_repo_id() {
+        let backend = TensorRtBackend::new(None);
+        let manifest = ModelManifest {
+            context_length: None,
+            gpu_layers: None,
+            tensor_split: None,
+            info: synapse_types::model::ModelInfo {
+                id: uuid::Uuid::new_v4(),
+                name: "local-model".into(),
+                repo_id: None,
+                format: ModelFormat::TensorRt,
+                quant: synapse_types::model::QuantLevel::None,
+                size_bytes: 0,
+                parameter_count: None,
+                architecture: None,
+                license: None,
+                local_path: "/tmp/model.engine".into(),
+                sha256: None,
+                pulled_at: chrono::Utc::now(),
+            },
+        };
+        let device = DeviceConfig {
+            accelerator: AcceleratorType::Cuda,
+            device_ids: vec![0],
+            memory_limit_mb: None,
+        };
+        let handle = backend.load_model(&manifest, &device).await.unwrap();
+        assert_eq!(handle.0, "tensorrt-local-model");
+    }
+
+    #[tokio::test]
+    async fn unload_nonexistent_fails() {
+        let backend = TensorRtBackend::new(None);
+        assert!(backend.unload_model(ModelHandle("nope".into())).await.is_err());
+    }
+
+    #[test]
+    fn build_messages_user_only() {
+        let req = InferenceRequest {
+            prompt: "hello".into(),
+            system_prompt: None,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+        };
+        let msgs = build_messages(&req);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["role"], "user");
+        assert_eq!(msgs[0]["content"], "hello");
+    }
+
+    #[test]
+    fn build_messages_with_system() {
+        let req = InferenceRequest {
+            prompt: "hello".into(),
+            system_prompt: Some("You are helpful".into()),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+        };
+        let msgs = build_messages(&req);
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0]["role"], "system");
+        assert_eq!(msgs[0]["content"], "You are helpful");
+        assert_eq!(msgs[1]["role"], "user");
+    }
 }

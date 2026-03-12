@@ -153,4 +153,162 @@ mod tests {
         let backend = GgufBackend::new();
         assert!(backend.health_check().await.unwrap());
     }
+
+    #[test]
+    fn default_constructor() {
+        let backend = GgufBackend::default();
+        assert_eq!(backend.id().0, "gguf");
+    }
+
+    #[test]
+    fn capabilities_details() {
+        let backend = GgufBackend::new();
+        let caps = backend.capabilities();
+        assert!(caps.accelerators.contains(&AcceleratorType::Cpu));
+        assert!(caps.accelerators.contains(&AcceleratorType::Cuda));
+        assert_eq!(caps.max_context_length, Some(32768));
+        assert!(caps.supports_streaming);
+        assert!(!caps.supports_embeddings);
+        assert!(!caps.supports_vision);
+    }
+
+    #[tokio::test]
+    async fn load_and_unload_model() {
+        let backend = GgufBackend::new();
+        let manifest = ModelManifest {
+            context_length: None,
+            gpu_layers: None,
+            tensor_split: None,
+            info: synapse_types::model::ModelInfo {
+                id: uuid::Uuid::new_v4(),
+                name: "test-model".into(),
+                repo_id: None,
+                format: ModelFormat::Gguf,
+                quant: synapse_types::model::QuantLevel::Q4KM,
+                size_bytes: 1000,
+                parameter_count: None,
+                architecture: None,
+                license: None,
+                local_path: "/tmp/model.gguf".into(),
+                sha256: None,
+                pulled_at: chrono::Utc::now(),
+            },
+        };
+        let device = DeviceConfig {
+            accelerator: AcceleratorType::Cpu,
+            device_ids: vec![0],
+            memory_limit_mb: None,
+        };
+
+        let handle = backend.load_model(&manifest, &device).await.unwrap();
+        assert!(handle.0.starts_with("gguf-"));
+
+        // Unload should succeed
+        backend.unload_model(handle).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn unload_nonexistent_fails() {
+        let backend = GgufBackend::new();
+        let handle = ModelHandle("nonexistent".into());
+        assert!(backend.unload_model(handle).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn infer_not_implemented() {
+        let backend = GgufBackend::new();
+        let manifest = ModelManifest {
+            context_length: None,
+            gpu_layers: None,
+            tensor_split: None,
+            info: synapse_types::model::ModelInfo {
+                id: uuid::Uuid::new_v4(),
+                name: "test".into(),
+                repo_id: None,
+                format: ModelFormat::Gguf,
+                quant: synapse_types::model::QuantLevel::None,
+                size_bytes: 0,
+                parameter_count: None,
+                architecture: None,
+                license: None,
+                local_path: "/tmp/m.gguf".into(),
+                sha256: None,
+                pulled_at: chrono::Utc::now(),
+            },
+        };
+        let device = DeviceConfig {
+            accelerator: AcceleratorType::Cpu,
+            device_ids: vec![0],
+            memory_limit_mb: None,
+        };
+        let handle = backend.load_model(&manifest, &device).await.unwrap();
+        let req = InferenceRequest {
+            prompt: "hello".into(),
+            system_prompt: None,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+        };
+        // Infer should return error (not yet wired)
+        assert!(backend.infer(&handle, &req).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn infer_stream_not_implemented() {
+        let backend = GgufBackend::new();
+        let manifest = ModelManifest {
+            context_length: None,
+            gpu_layers: None,
+            tensor_split: None,
+            info: synapse_types::model::ModelInfo {
+                id: uuid::Uuid::new_v4(),
+                name: "test".into(),
+                repo_id: None,
+                format: ModelFormat::Gguf,
+                quant: synapse_types::model::QuantLevel::None,
+                size_bytes: 0,
+                parameter_count: None,
+                architecture: None,
+                license: None,
+                local_path: "/tmp/m.gguf".into(),
+                sha256: None,
+                pulled_at: chrono::Utc::now(),
+            },
+        };
+        let device = DeviceConfig {
+            accelerator: AcceleratorType::Cpu,
+            device_ids: vec![0],
+            memory_limit_mb: None,
+        };
+        let handle = backend.load_model(&manifest, &device).await.unwrap();
+        let req = InferenceRequest {
+            prompt: "hello".into(),
+            system_prompt: None,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+        };
+        assert!(backend.infer_stream(&handle, req).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn infer_nonexistent_model_fails() {
+        let backend = GgufBackend::new();
+        let handle = ModelHandle("nonexistent".into());
+        let req = InferenceRequest {
+            prompt: "hello".into(),
+            system_prompt: None,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+        };
+        assert!(backend.infer(&handle, &req).await.is_err());
+        assert!(backend.infer_stream(&handle, req).await.is_err());
+    }
 }

@@ -95,4 +95,47 @@ mod tests {
         let copy = method;
         assert!(matches!(copy, DiscoveryMethod::WellKnown));
     }
+
+    #[test]
+    fn config_with_various_urls() {
+        let ep = discover(Some("http://10.0.0.1:9420")).unwrap();
+        assert_eq!(ep.address, "http://10.0.0.1:9420");
+        assert!(matches!(ep.discovered_via, DiscoveryMethod::Config));
+
+        let ep = discover(Some("https://sy.prod.example.com")).unwrap();
+        assert_eq!(ep.address, "https://sy.prod.example.com");
+    }
+
+    #[test]
+    fn none_config_without_env_falls_to_well_known() {
+        // Clear env var to ensure well-known fallback
+        let prev = std::env::var("SY_ENDPOINT").ok();
+        unsafe { std::env::remove_var("SY_ENDPOINT") };
+
+        let ep = discover(None).unwrap();
+        assert_eq!(ep.address, "http://127.0.0.1:9420");
+        assert!(matches!(ep.discovered_via, DiscoveryMethod::WellKnown));
+
+        // Restore
+        if let Some(val) = prev {
+            unsafe { std::env::set_var("SY_ENDPOINT", val) };
+        }
+    }
+
+    #[test]
+    fn sy_endpoint_clone() {
+        let ep = SyEndpoint {
+            address: "http://test:9420".into(),
+            discovered_via: DiscoveryMethod::Config,
+        };
+        let cloned = ep.clone();
+        assert_eq!(ep.address, cloned.address);
+    }
+
+    #[test]
+    fn all_discovery_methods_debug() {
+        assert!(format!("{:?}", DiscoveryMethod::Config).contains("Config"));
+        assert!(format!("{:?}", DiscoveryMethod::Environment).contains("Environment"));
+        assert!(format!("{:?}", DiscoveryMethod::WellKnown).contains("WellKnown"));
+    }
 }

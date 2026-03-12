@@ -242,4 +242,87 @@ mod tests {
         assert!(result.valid);
         assert_eq!(result.total_rows, 2);
     }
+
+    #[test]
+    fn jsonl_all_invalid() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        writeln!(tmp, "not json 1").unwrap();
+        writeln!(tmp, "not json 2").unwrap();
+        writeln!(tmp, "not json 3").unwrap();
+        tmp.flush().unwrap();
+
+        let result = validate(tmp.path(), DatasetFormat::Jsonl).unwrap();
+        assert!(!result.valid);
+        assert_eq!(result.total_rows, 3);
+        assert_eq!(result.invalid_rows, 3);
+        assert_eq!(result.errors.len(), 3);
+    }
+
+    #[test]
+    fn jsonl_errors_capped_at_10() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        for i in 0..15 {
+            writeln!(tmp, "invalid line {i}").unwrap();
+        }
+        tmp.flush().unwrap();
+
+        let result = validate(tmp.path(), DatasetFormat::Jsonl).unwrap();
+        assert!(!result.valid);
+        assert_eq!(result.invalid_rows, 15);
+        assert_eq!(result.errors.len(), 10); // capped
+    }
+
+    #[test]
+    fn csv_header_only() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        writeln!(tmp, "col1,col2,col3").unwrap();
+        tmp.flush().unwrap();
+
+        let result = validate(tmp.path(), DatasetFormat::Csv).unwrap();
+        assert!(result.valid);
+        assert_eq!(result.total_rows, 0);
+    }
+
+    #[test]
+    fn csv_many_columns() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        writeln!(tmp, "a,b,c,d,e").unwrap();
+        writeln!(tmp, "1,2,3,4,5").unwrap();
+        writeln!(tmp, "6,7,8,9,10").unwrap();
+        tmp.flush().unwrap();
+
+        let result = validate(tmp.path(), DatasetFormat::Csv).unwrap();
+        assert!(result.valid);
+        assert_eq!(result.total_rows, 2);
+    }
+
+    #[test]
+    fn count_csv_columns_quoted_commas_complex() {
+        // Deeply nested quoted field
+        assert_eq!(count_csv_columns(r#""a,b,c",d,"e,f""#), 3);
+    }
+
+    #[test]
+    fn jsonl_empty_file() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let result = validate(tmp.path(), DatasetFormat::Jsonl).unwrap();
+        assert!(result.valid); // no rows = no invalid rows
+        assert_eq!(result.total_rows, 0);
+    }
+
+    #[test]
+    fn csv_column_mismatch_multiple() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        writeln!(tmp, "a,b").unwrap();
+        writeln!(tmp, "1,2").unwrap();
+        writeln!(tmp, "x").unwrap(); // 1 col
+        writeln!(tmp, "y").unwrap(); // 1 col
+        writeln!(tmp, "3,4").unwrap();
+        tmp.flush().unwrap();
+
+        let result = validate(tmp.path(), DatasetFormat::Csv).unwrap();
+        assert!(!result.valid);
+        assert_eq!(result.invalid_rows, 2);
+        assert_eq!(result.total_rows, 4);
+    }
 }

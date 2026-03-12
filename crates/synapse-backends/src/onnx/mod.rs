@@ -154,4 +154,104 @@ mod tests {
         let backend = OnnxBackend::new();
         assert!(!backend.capabilities().supports_streaming);
     }
+
+    #[test]
+    fn default_constructor() {
+        let backend = OnnxBackend::default();
+        assert_eq!(backend.id().0, "onnx");
+    }
+
+    #[test]
+    fn capabilities_details() {
+        let backend = OnnxBackend::new();
+        let caps = backend.capabilities();
+        assert!(caps.supports_embeddings);
+        assert!(caps.supports_vision);
+        assert_eq!(caps.max_context_length, None);
+    }
+
+    #[tokio::test]
+    async fn health_check_ok() {
+        let backend = OnnxBackend::new();
+        assert!(backend.health_check().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn load_and_unload_model() {
+        let backend = OnnxBackend::new();
+        let manifest = ModelManifest {
+            context_length: None,
+            gpu_layers: None,
+            tensor_split: None,
+            info: synapse_types::model::ModelInfo {
+                id: uuid::Uuid::new_v4(),
+                name: "test-onnx".into(),
+                repo_id: None,
+                format: ModelFormat::Onnx,
+                quant: synapse_types::model::QuantLevel::None,
+                size_bytes: 500,
+                parameter_count: None,
+                architecture: None,
+                license: None,
+                local_path: "/tmp/model.onnx".into(),
+                sha256: None,
+                pulled_at: chrono::Utc::now(),
+            },
+        };
+        let device = DeviceConfig {
+            accelerator: AcceleratorType::Cpu,
+            device_ids: vec![0],
+            memory_limit_mb: None,
+        };
+        let handle = backend.load_model(&manifest, &device).await.unwrap();
+        assert!(handle.0.starts_with("onnx-"));
+        backend.unload_model(handle).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn unload_nonexistent_fails() {
+        let backend = OnnxBackend::new();
+        assert!(backend.unload_model(ModelHandle("nope".into())).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn infer_not_implemented() {
+        let backend = OnnxBackend::new();
+        let manifest = ModelManifest {
+            context_length: None,
+            gpu_layers: None,
+            tensor_split: None,
+            info: synapse_types::model::ModelInfo {
+                id: uuid::Uuid::new_v4(),
+                name: "test".into(),
+                repo_id: None,
+                format: ModelFormat::Onnx,
+                quant: synapse_types::model::QuantLevel::None,
+                size_bytes: 0,
+                parameter_count: None,
+                architecture: None,
+                license: None,
+                local_path: "/tmp/m.onnx".into(),
+                sha256: None,
+                pulled_at: chrono::Utc::now(),
+            },
+        };
+        let device = DeviceConfig {
+            accelerator: AcceleratorType::Cpu,
+            device_ids: vec![0],
+            memory_limit_mb: None,
+        };
+        let handle = backend.load_model(&manifest, &device).await.unwrap();
+        let req = InferenceRequest {
+            prompt: "hello".into(),
+            system_prompt: None,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+        };
+        assert!(backend.infer(&handle, &req).await.is_err());
+        assert!(backend.infer_stream(&handle, req).await.is_err());
+    }
 }

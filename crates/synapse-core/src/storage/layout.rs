@@ -222,4 +222,94 @@ mod tests {
         layout.remove_model_dir("test-model").unwrap();
         assert!(!model_dir.exists());
     }
+
+    #[test]
+    fn remove_nonexistent_model_dir_is_ok() {
+        let tmp = tempfile::tempdir().unwrap();
+        let layout = StorageLayout::new(tmp.path().join("synapse"));
+        // Removing a dir that doesn't exist should not error
+        layout.remove_model_dir("no-such-model").unwrap();
+    }
+
+    #[test]
+    fn slugify_with_org_prefix() {
+        assert_eq!(
+            StorageLayout::slugify("org/my-model", "f16"),
+            "my-model-f16"
+        );
+    }
+
+    #[test]
+    fn slugify_drops_special_chars() {
+        assert_eq!(
+            StorageLayout::slugify("model@v1!#$%", "none"),
+            "modelv1"
+        );
+    }
+
+    #[test]
+    fn slugify_collapses_dashes() {
+        assert_eq!(
+            StorageLayout::slugify("a---b---c", "none"),
+            "a-b-c"
+        );
+    }
+
+    #[test]
+    fn slugify_empty_quant() {
+        assert_eq!(StorageLayout::slugify("model", ""), "model");
+    }
+
+    #[test]
+    fn slugify_spaces_to_dashes() {
+        assert_eq!(
+            StorageLayout::slugify("my cool model", "q4km"),
+            "my-cool-model-q4km"
+        );
+    }
+
+    #[test]
+    fn model_file_path() {
+        let layout = StorageLayout::new("/root");
+        assert_eq!(
+            layout.model_file("slug", "model.gguf"),
+            PathBuf::from("/root/models/slug/model.gguf")
+        );
+    }
+
+    #[test]
+    fn cache_dir_path() {
+        let layout = StorageLayout::new("/root");
+        assert_eq!(layout.cache_dir(), PathBuf::from("/root/cache"));
+    }
+
+    #[test]
+    fn checkpoints_dir_path() {
+        let layout = StorageLayout::new("/root");
+        assert_eq!(
+            layout.checkpoints_dir(),
+            PathBuf::from("/root/checkpoints")
+        );
+    }
+
+    #[test]
+    fn config_path() {
+        let layout = StorageLayout::new("/root");
+        assert_eq!(layout.config_path(), PathBuf::from("/root/synapse.toml"));
+    }
+
+    #[test]
+    fn root_path() {
+        let layout = StorageLayout::new("/some/path");
+        assert_eq!(layout.root(), Path::new("/some/path"));
+    }
+
+    #[test]
+    fn ensure_dirs_idempotent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let layout = StorageLayout::new(tmp.path().join("synapse"));
+        layout.ensure_dirs().unwrap();
+        layout.ensure_dirs().unwrap(); // second call should also succeed
+        assert!(layout.models_dir().is_dir());
+    }
 }

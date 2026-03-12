@@ -164,3 +164,65 @@ fn format_bytes(bytes: u64) -> String {
         format!("{bytes} B")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_quant_all_variants() {
+        assert_eq!(parse_quant("f32"), QuantLevel::F32);
+        assert_eq!(parse_quant("f16"), QuantLevel::F16);
+        assert_eq!(parse_quant("bf16"), QuantLevel::Bf16);
+        assert_eq!(parse_quant("q8_0"), QuantLevel::Q8_0);
+        assert_eq!(parse_quant("q6k"), QuantLevel::Q6K);
+        assert_eq!(parse_quant("q5_k_m"), QuantLevel::Q5KM);
+        assert_eq!(parse_quant("q5_k_s"), QuantLevel::Q5KS);
+        assert_eq!(parse_quant("q4_k_m"), QuantLevel::Q4KM);
+        assert_eq!(parse_quant("q4_k_s"), QuantLevel::Q4KS);
+        assert_eq!(parse_quant("q4_0"), QuantLevel::Q4_0);
+        assert_eq!(parse_quant("q3_k_m"), QuantLevel::Q3KM);
+        assert_eq!(parse_quant("q3_k_s"), QuantLevel::Q3KS);
+        assert_eq!(parse_quant("q2k"), QuantLevel::Q2K);
+        assert_eq!(parse_quant("iq4_xs"), QuantLevel::Iq4Xs);
+        assert_eq!(parse_quant("iq3_xxs"), QuantLevel::Iq3Xxs);
+    }
+
+    #[test]
+    fn parse_quant_case_insensitive() {
+        assert_eq!(parse_quant("F16"), QuantLevel::F16);
+        assert_eq!(parse_quant("Q4_K_M"), QuantLevel::Q4KM);
+        assert_eq!(parse_quant("BF16"), QuantLevel::Bf16);
+    }
+
+    #[test]
+    fn parse_quant_unknown_returns_none() {
+        assert_eq!(parse_quant("unknown"), QuantLevel::None);
+        assert_eq!(parse_quant(""), QuantLevel::None);
+        assert_eq!(parse_quant("none"), QuantLevel::None);
+    }
+
+    #[test]
+    fn format_bytes_gb() {
+        assert_eq!(format_bytes(4_700_000_000), "4.7 GB");
+        assert_eq!(format_bytes(1_000_000_000), "1.0 GB");
+    }
+
+    #[test]
+    fn format_bytes_mb() {
+        assert_eq!(format_bytes(500_000_000), "500.0 MB");
+        assert_eq!(format_bytes(1_000_000), "1.0 MB");
+    }
+
+    #[test]
+    fn format_bytes_kb() {
+        assert_eq!(format_bytes(1_500), "1.5 KB");
+        assert_eq!(format_bytes(1_000), "1.0 KB");
+    }
+
+    #[test]
+    fn format_bytes_bytes() {
+        assert_eq!(format_bytes(999), "999 B");
+        assert_eq!(format_bytes(0), "0 B");
+    }
+}
