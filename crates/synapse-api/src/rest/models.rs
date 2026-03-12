@@ -76,16 +76,21 @@ pub async fn delete_model(
 
     let model = model.map_err(|_| StatusCode::NOT_FOUND)?;
 
-    // Remove files
+    // Delete from database first — if this fails, filesystem stays consistent.
+    // Reversing the order (FS first, then DB) risks orphaned DB records pointing
+    // to deleted files.
+    db.delete(model.id)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // Clean up files from disk (best-effort after successful DB delete)
     let local_path = std::path::Path::new(&model.local_path);
     if let Some(model_dir) = local_path.parent() {
         if model_dir.exists() {
-            let _ = std::fs::remove_dir_all(model_dir);
+            if let Err(e) = std::fs::remove_dir_all(model_dir) {
+                tracing::warn!(path = %model_dir.display(), error = %e, "Failed to remove model files from disk");
+            }
         }
     }
-
-    db.delete(model.id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(StatusCode::NO_CONTENT)
 }

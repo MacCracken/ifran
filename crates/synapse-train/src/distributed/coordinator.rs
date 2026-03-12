@@ -106,11 +106,19 @@ impl DistributedCoordinator {
     }
 
     /// Report that a worker has completed its portion.
+    ///
+    /// Guard: once all workers have reported, further calls are no-ops
+    /// to prevent over-counting from duplicate completion reports.
     pub async fn worker_completed(&self, job_id: DistributedJobId, _rank: u32) -> Result<()> {
         let mut jobs = self.jobs.write().await;
         let state = jobs.get_mut(&job_id).ok_or_else(|| {
             SynapseError::DistributedError(format!("Distributed job {job_id} not found"))
         })?;
+
+        // Guard against duplicate completions pushing count past world_size
+        if state.completed_workers >= state.config.world_size {
+            return Ok(());
+        }
 
         state.completed_workers += 1;
 

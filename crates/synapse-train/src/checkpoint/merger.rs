@@ -16,25 +16,32 @@ use tracing::info;
 pub async fn merge_lora(base_model: &str, adapter_path: &str, output_path: &str) -> Result<()> {
     info!(base = %base_model, adapter = %adapter_path, output = %output_path, "Merging LoRA adapter");
 
+    // Pass paths via environment variables to prevent code injection
     let output = Command::new("python3")
         .args([
             "-c",
-            &format!(
-                r#"
+            r#"
+import os, sys
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 
-base = AutoModelForCausalLM.from_pretrained("{base_model}", torch_dtype=torch.float16)
-model = PeftModel.from_pretrained(base, "{adapter_path}")
+base_model = os.environ["SYNAPSE_MERGE_BASE_MODEL"]
+adapter_path = os.environ["SYNAPSE_MERGE_ADAPTER_PATH"]
+output_path = os.environ["SYNAPSE_MERGE_OUTPUT_PATH"]
+
+base = AutoModelForCausalLM.from_pretrained(base_model, torch_dtype=torch.float16)
+model = PeftModel.from_pretrained(base, adapter_path)
 merged = model.merge_and_unload()
-merged.save_pretrained("{output_path}")
-tokenizer = AutoTokenizer.from_pretrained("{base_model}")
-tokenizer.save_pretrained("{output_path}")
+merged.save_pretrained(output_path)
+tokenizer = AutoTokenizer.from_pretrained(base_model)
+tokenizer.save_pretrained(output_path)
 print("Merge complete")
-"#
-            ),
+"#,
         ])
+        .env("SYNAPSE_MERGE_BASE_MODEL", base_model)
+        .env("SYNAPSE_MERGE_ADAPTER_PATH", adapter_path)
+        .env("SYNAPSE_MERGE_OUTPUT_PATH", output_path)
         .output()
         .await
         .map_err(|e| SynapseError::TrainingError(format!("Failed to run merge script: {e}")))?;

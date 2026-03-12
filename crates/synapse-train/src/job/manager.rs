@@ -41,6 +41,7 @@ impl JobManager {
 
     /// Create and enqueue a new training job.
     pub async fn create_job(&self, config: TrainingJobConfig) -> Result<TrainingJobId> {
+        config.hyperparams.validate()?;
         let id = uuid::Uuid::new_v4();
         let total_steps = estimate_total_steps(&config);
         let state = JobState::new(id, config, total_steps);
@@ -52,7 +53,14 @@ impl JobManager {
 
     /// Start a queued job.
     pub async fn start_job(&self, id: TrainingJobId) -> Result<()> {
-        let running_count = self.running_count().await;
+        let mut jobs = self.jobs.write().await;
+
+        // Check running count inside the write lock to prevent race condition
+        // where multiple concurrent start_job calls all pass the check
+        let running_count = jobs
+            .values()
+            .filter(|j| j.status == TrainingStatus::Running)
+            .count();
         if running_count >= self.max_concurrent {
             return Err(SynapseError::TrainingError(format!(
                 "Max concurrent jobs ({}) reached",
@@ -60,7 +68,6 @@ impl JobManager {
             )));
         }
 
-        let mut jobs = self.jobs.write().await;
         let state = jobs
             .get_mut(&id)
             .ok_or_else(|| SynapseError::TrainingError(format!("Job {id} not found")))?;
@@ -95,20 +102,33 @@ impl JobManager {
 
     /// Cancel a running or queued job.
     pub async fn cancel_job(&self, id: TrainingJobId) -> Result<()> {
-        let mut jobs = self.jobs.write().await;
-        let state = jobs
-            .get_mut(&id)
-            .ok_or_else(|| SynapseError::TrainingError(format!("Job {id} not found")))?;
+        // Validate the job exists and is cancellable, then release the lock
+        // before calling executor.cancel() to avoid holding the write lock
+        // during a potentially long async operation (which could deadlock
+        // if the executor also needs lock access).
+        {
+            let jobs = self.jobs.read().await;
+            let state = jobs
+                .get(&id)
+                .ok_or_else(|| SynapseError::TrainingError(format!("Job {id} not found")))?;
 
-        if state.is_terminal() {
-            return Err(SynapseError::TrainingError(format!(
-                "Job {id} already in terminal state {:?}",
-                state.status
-            )));
+            if state.is_terminal() {
+                return Err(SynapseError::TrainingError(format!(
+                    "Job {id} already in terminal state {:?}",
+                    state.status
+                )));
+            }
         }
 
         self.executor.cancel(id).await?;
-        state.cancel();
+
+        let mut jobs = self.jobs.write().await;
+        if let Some(state) = jobs.get_mut(&id) {
+            // Re-check: job may have completed between lock release and reacquire
+            if !state.is_terminal() {
+                state.cancel();
+            }
+        }
         info!(job_id = %id, "Cancelled training job");
         Ok(())
     }

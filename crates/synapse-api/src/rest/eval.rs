@@ -77,13 +77,18 @@ pub async fn create_run(
             let infer_fn = |prompt: String| {
                 let backends = backends.clone();
                 let model_manager = model_manager.clone();
+                let model_name = model_name.clone();
                 async move {
                     let loaded = model_manager.list_loaded().await;
-                    let loaded_model = loaded.first().ok_or_else(|| {
-                        synapse_types::SynapseError::EvalError(
-                            "No model loaded for evaluation".into(),
-                        )
-                    })?;
+                    let loaded_model = loaded
+                        .iter()
+                        .find(|m| m.model_name == model_name)
+                        .or_else(|| loaded.first())
+                        .ok_or_else(|| {
+                            synapse_types::SynapseError::EvalError(
+                                "No model loaded for evaluation".into(),
+                            )
+                        })?;
 
                     let backend_id =
                         synapse_types::backend::BackendId(loaded_model.backend_id.clone());

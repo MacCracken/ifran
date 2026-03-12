@@ -37,7 +37,7 @@ pub async fn require_auth(req: Request, next: Next) -> Result<Response, StatusCo
 
     match auth_header {
         Some(header) if header.starts_with("Bearer ") => {
-            let token = &header[7..];
+            let token = header.strip_prefix("Bearer ").unwrap_or("");
             if token == api_key {
                 Ok(next.run(req).await)
             } else {

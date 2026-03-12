@@ -34,6 +34,25 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
   - `synapse-api/rest/models`: Handler unit tests — list (empty/populated), get (by name/UUID/not found), delete (success/not found), field validation
 - CI coverage threshold raised to 50%
 - Added `mockito` for HTTP mocking in synapse-backends dev-dependencies
+- **Milestone 4 — API & Training (60%)**: 40 new tests across synapse-api and synapse-train
+  - `synapse-api/rest/inference`: InferenceBody serde tests (defaults, stream flag), no-model-loaded error paths for both endpoints
+  - `synapse-api/rest/openai_compat`: ChatCompletionRequest/ChatMessage serde, list_models (empty/with data), no-model error path
+  - `synapse-api/rest/training`: Full handler lifecycle — create (queued/auto-start), list, get, cancel, not-found errors, serde, job_to_response conversion
+  - `synapse-train/executor/docker`: Construction, container naming, cancel behavior, config serialization
+  - `synapse-train/executor/subprocess`: Construction, cancel with process kill, config serialization
+  - `synapse-train/executor/mod`: Extracted shared `script_for_method()` from docker/subprocess with full coverage
+- CI coverage threshold raised to 60%
+- Added `Debug` derive to `JobResponse` struct
+- **Milestone 5 — Bridge & CLI (70%)**: 55 new tests across synapse-api, synapse-bridge, and synapse-cli
+  - `synapse-api/rest/distributed`: Full handler unit tests — create, list, get, assign_worker, start, fail, worker_completed lifecycle, serde for all request/response types
+  - `synapse-api/rest/marketplace`: Handler unit tests — search (with/without query/no match), list_entries, unpublish (success/not found), serde for SearchQuery/PublishRequest/PullRequest, entry_to_response conversion
+  - `synapse-bridge/protocol`: Connection state variant distinctness, copy semantics, debug formatting, custom config, heartbeat/capabilities roundtrip with all fields
+  - `synapse-bridge/client`: Connect resets reconnect count, report_progress without connect, GPU request stub
+  - `synapse-bridge/server`: Custom heartbeat interval, zero-value heartbeat, full state transition chain
+  - `synapse-bridge/discovery`: Empty config fallthrough, debug format, DiscoveryMethod copy
+  - `synapse-cli/commands/list`: format_size (GB/MB/boundary/zero), truncate (short/exact/long)
+- CI coverage threshold raised to 70%
+- Added `Debug` derive to `DistributedJobResponse` struct
 
 #### Core
 - `synapse-types`: Core data structures — models, backends, inference, training, eval, marketplace, distributed, errors
@@ -138,7 +157,7 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - rustls-tls for cross-compilation without OpenSSL headers
 - Dependency update automation (weekly cargo update PRs)
 - Governance: CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, SUPPORT
-- 236 tests across all modules (~55% coverage)
+- 510 tests across all modules (~70% coverage)
 
 #### Model Evaluation Benchmarks
 - `synapse-core/eval/benchmarks`: MMLU, HellaSwag, HumanEval, perplexity prompt formatting and scoring
@@ -166,7 +185,55 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - `synapse-api/rest/system`: Bridge connection state included in `/system/status`
 - `synapse-api/rest/training`: Training job start and cancel events reported to SY via bridge client
 - `synapse-api/rest/distributed`: Worker assignments forwarded to SY via `RequestWorkerAssignment`, checkpoint sync via `SyncCheckpoint` on worker completion, job completion reported to SY
-- 243 tests across all modules (~56% coverage)
+- 510 tests across all modules (~70% coverage)
 
 ### Fixed
+- **SECURITY**: SQL injection in `synapse-core/marketplace/catalog.rs` — `search()` now uses parameterized queries instead of string interpolation
+- **SECURITY**: Python code injection in `synapse-train/checkpoint/merger.rs` — `merge_lora()` now passes paths via environment variables instead of interpolating into Python source
+- `synapse-core/pull/downloader.rs`: Corrupted `.part` files are now cleaned up when SHA-256 verification fails, preventing infinite retry loops
+- `synapse-core/registry/huggingface.rs`: Replaced `.unwrap()` with proper error handling in `resolve_gguf()` fallback path
+- `synapse-core/marketplace/catalog.rs`: Replaced `serde_json::to_string().unwrap()` calls with proper error propagation in `publish()`
+- `synapse-api/rest/openai_compat.rs`: `list_models` now returns `Result` — database errors are propagated as 500 instead of silently returning empty list
+- `synapse-api/rest/inference.rs`: Both `/inference` and `/inference/stream` now use the loaded model's actual backend instead of hardcoding `"llamacpp"`
+- `synapse-api/rest/models.rs`: Failed filesystem cleanup during model deletion is now logged as a warning instead of silently ignored
+- `synapse-api/rest/marketplace.rs`: Model download endpoint now streams files via `tokio_util::io::ReaderStream` instead of loading entire model into memory (prevents OOM on large files)
+- `synapse-train/executor/subprocess.rs`: Fixed potential deadlock in `run()` — child process is now removed from the tracking map before awaiting, so `cancel()` can acquire the write lock concurrently
+- `synapse-backends/llamacpp`: `unload_model()` now calls `wait()` after `kill()` to reap child processes and prevent zombie `llama-server` processes
+- `synapse-backends/ollama`: `unload_model()` now logs HTTP errors instead of silently discarding them with `let _ =`
+- `synapse-backends/ollama`: Stream errors in `infer_stream()` now logged with `warn!` instead of silently breaking
+- `synapse-backends/router`: `select()` now logs a warning when the user's preferred backend is not found, before falling back to auto-selection
+- `synapse-train/job/manager`: Fixed potential deadlock in `cancel_job()` — read lock is now released before calling `executor.cancel()`, preventing deadlock when the executor needs write access
+- `synapse-train/executor/docker`: Container is now tracked BEFORE `docker run` executes, so `cancel()` can find and stop the container during long-running training
+- `synapse-train/distributed/coordinator`: `worker_completed()` now guards against over-counting — duplicate completion reports after all workers have finished are no-ops
+- `synapse-api/rest/training`: `create_job` auto-start failures are now logged as warnings instead of silently ignored with `let _ =`
+- `synapse-core/marketplace/resolver`: HTTP client builder failure now logs a warning and falls back to default client instead of silently using `unwrap_or_default()`
+- `synapse-core/marketplace/resolver`: Format filter serialization failure in `query_peer()` now returns an error instead of silently dropping the filter via `unwrap_or_default()`
+- `synapse-core/lifecycle/manager`: Replaced `.unwrap()` on `best_accelerator()` with proper error propagation — prevents panic when GPU is detected but accelerator type is undetermined
+- `synapse-core/lifecycle/memory`: `estimate_gguf()` now rounds up file size to nearest MB instead of truncating, preventing underestimation of memory requirements
+- `synapse-backends/router`: `select()` no longer returns an incompatible backend as fallback — returns `None` when no backend supports the requested format, instead of silently picking any backend
+- `synapse-backends/ollama`: `load_model()` now validates the HTTP response status — previously a failed load (HTTP 500) was silently treated as success, causing phantom loaded models
+- `synapse-train/executor/docker`: `cancel()` now removes the container from tracking after stopping, preventing unbounded memory growth from accumulated stale entries
+- `synapse-train/executor/docker`: `cancel()` now logs `docker stop` errors instead of silently discarding them with `let _ =`
+- `synapse-train/executor/docker`: Container tracking cleanup on spawn failure is now synchronous instead of fire-and-forget `tokio::spawn`
+- `synapse-train/job/manager`: Fixed race condition in `start_job()` — running job count is now checked inside the write lock, preventing concurrent calls from exceeding `max_concurrent`
+- `synapse-train/job/manager`: `cancel_job()` now re-validates terminal state after reacquiring write lock, preventing Cancelled from overwriting a concurrent Completed transition
+- `synapse-api/rest/models`: `delete_model` now deletes from database first, then cleans up filesystem — prevents orphaned DB records if FS deletion succeeds but DB deletion fails
+- `synapse-api/rest/marketplace`: Download endpoint removes TOCTOU race — uses `File::open()` error handling instead of separate `exists()` check, and gets metadata from the open file handle
+- `synapse-api/middleware/auth`: Replaced hardcoded `&header[7..]` string slice with `strip_prefix("Bearer ")` for safer token extraction
+- `synapse-api/main`: Heartbeat bridge communication errors now logged with `warn!` instead of silently discarded
 - CI/CD container image build timeout: switched from compiling Rust inside Docker (30+ min under QEMU for arm64) to using pre-built binaries from the build-release job via `Dockerfile.release` with `TARGETARCH`
+
+### Enhanced
+- `synapse-backends/*`: All 4 HTTP backends (llamacpp, ollama, vllm, tensorrt) now use 300-second request timeouts instead of unbounded `reqwest::Client::new()`
+- `synapse-backends/*`: All 4 streaming backends now check `tx.is_closed()` to stop processing when the receiver is dropped (early client disconnect)
+- `synapse-backends/*`: All 4 streaming backends enforce a 1 MB buffer limit to prevent unbounded memory growth from malformed SSE streams
+- `synapse-backends/llamacpp`: `load_model()` now validates that the model file exists before spawning `llama-server`, providing a clear error instead of a cryptic process failure
+- `synapse-api/rest/inference`: Both `/inference` and `/inference/stream` now match the requested model by name instead of always using the first loaded model
+- `synapse-api/rest/openai_compat`: `/v1/chat/completions` now matches the requested model by name instead of always using the first loaded model
+- `synapse-api/rest/eval`: Eval run inference now targets the requested model by name instead of always using the first loaded model
+- `synapse-core/lifecycle/manager`: `LoadedModel` now carries `model_name` to support model selection by name in inference endpoints
+- `synapse-types/training`: `HyperParams::validate()` rejects `learning_rate <= 0`, `epochs == 0`, `batch_size == 0`, and `max_seq_length == 0`
+- `synapse-train/job/manager`: `create_job()` now validates hyperparameters before creating the job
+- `synapse-train/checkpoint/store`: `prune()` now handles already-deleted checkpoints gracefully (ENOENT-tolerant) instead of propagating errors
+- `synapse-train/dataset/validator`: CSV validation now handles RFC 4180 quoted fields — commas inside `"quoted,field"` no longer cause false column-count mismatches
+- 512 tests across all modules

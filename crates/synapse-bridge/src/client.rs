@@ -229,4 +229,51 @@ mod tests {
             .await
             .unwrap();
     }
+
+    #[tokio::test]
+    async fn connect_resets_reconnect_count() {
+        let config = ProtocolConfig {
+            max_reconnect_attempts: 5,
+            reconnect_delay: std::time::Duration::from_millis(1),
+            ..ProtocolConfig::default()
+        };
+        let client = BridgeClient::new("http://127.0.0.1:9420".into(), config);
+
+        // Bump reconnect count
+        *client.reconnect_count.write().await = 3;
+        assert_eq!(*client.reconnect_count.read().await, 3);
+
+        // Connect should reset it
+        client.connect().await.unwrap();
+        assert_eq!(*client.reconnect_count.read().await, 0);
+    }
+
+    #[tokio::test]
+    async fn connect_transitions_through_connecting() {
+        let client = test_client();
+        assert_eq!(
+            client.connection_state().await,
+            ConnectionState::Disconnected
+        );
+        client.connect().await.unwrap();
+        // After connect(), should be Connected (Connecting is transient)
+        assert_eq!(client.connection_state().await, ConnectionState::Connected);
+    }
+
+    #[tokio::test]
+    async fn report_progress_works_without_connect() {
+        // report_progress doesn't check connection state (stub)
+        let client = test_client();
+        let result = client
+            .report_progress("job-1", "running", 0, 0.0)
+            .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn request_gpu_returns_empty_in_stub() {
+        let client = test_client();
+        let gpus = client.request_gpu(16384, 4).await.unwrap();
+        assert!(gpus.is_empty());
+    }
 }

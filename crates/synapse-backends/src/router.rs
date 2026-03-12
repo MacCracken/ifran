@@ -77,6 +77,7 @@ impl BackendRouter {
             if let Some(b) = self.get(&id) {
                 return Some(b);
             }
+            tracing::warn!(backend = %name, "Preferred backend not found, falling back to auto-selection");
         }
 
         // 2. Configured default, if it supports the format
@@ -95,8 +96,9 @@ impl BackendRouter {
             }
         }
 
-        // 4. Any backend
-        self.backends.iter().next().map(|e| e.value().clone())
+        // 4. No matching backend found
+        tracing::warn!(?format, "No backend supports the requested model format");
+        None
     }
 
     /// Select a backend for a format, returning the BackendId too.

@@ -67,4 +67,32 @@ mod tests {
         assert_eq!(ep.address, "http://127.0.0.1:9420");
         assert!(matches!(ep.discovered_via, DiscoveryMethod::WellKnown));
     }
+
+    #[test]
+    fn empty_config_falls_through() {
+        let ep = discover(Some("")).unwrap();
+        // Empty string should be treated as no config
+        assert!(matches!(
+            ep.discovered_via,
+            DiscoveryMethod::Environment | DiscoveryMethod::WellKnown
+        ));
+    }
+
+    #[test]
+    fn sy_endpoint_debug_format() {
+        let ep = SyEndpoint {
+            address: "http://test:9420".into(),
+            discovered_via: DiscoveryMethod::Config,
+        };
+        let debug = format!("{:?}", ep);
+        assert!(debug.contains("http://test:9420"));
+        assert!(debug.contains("Config"));
+    }
+
+    #[test]
+    fn discovery_method_is_copy() {
+        let method = DiscoveryMethod::WellKnown;
+        let copy = method;
+        assert!(matches!(copy, DiscoveryMethod::WellKnown));
+    }
 }

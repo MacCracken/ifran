@@ -33,7 +33,10 @@ impl TensorRtBackend {
     pub fn new(base_url: Option<String>) -> Self {
         Self {
             base_url: base_url.unwrap_or_else(|| "http://127.0.0.1:8000".into()),
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(300))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             loaded: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -187,10 +190,14 @@ impl InferenceBackend for TensorRtBackend {
 
         tokio::spawn(async move {
             use futures::StreamExt;
+            const MAX_BUFFER_SIZE: usize = 1024 * 1024; // 1 MB
             let mut stream = resp.bytes_stream();
             let mut buffer = String::new();
 
             while let Some(chunk) = stream.next().await {
+                if tx.is_closed() {
+                    break;
+                }
                 let chunk = match chunk {
                     Ok(c) => c,
                     Err(e) => {
@@ -199,6 +206,10 @@ impl InferenceBackend for TensorRtBackend {
                     }
                 };
                 buffer.push_str(&String::from_utf8_lossy(&chunk));
+                if buffer.len() > MAX_BUFFER_SIZE {
+                    warn!("TensorRT stream buffer exceeded {MAX_BUFFER_SIZE} bytes, aborting");
+                    break;
+                }
 
                 while let Some(line_end) = buffer.find('\n') {
                     let line = buffer[..line_end].trim().to_string();

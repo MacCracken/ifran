@@ -126,4 +126,46 @@ mod tests {
             std::time::Duration::from_secs(10)
         );
     }
+
+    #[test]
+    fn custom_heartbeat_interval() {
+        let config = ProtocolConfig {
+            heartbeat_interval: std::time::Duration::from_secs(30),
+            ..ProtocolConfig::default()
+        };
+        let server = BridgeServer::new("test".into(), config);
+        assert_eq!(
+            server.heartbeat_interval(),
+            std::time::Duration::from_secs(30)
+        );
+    }
+
+    #[test]
+    fn build_heartbeat_has_positive_timestamp() {
+        let server = test_server();
+        let hb = server.build_heartbeat(0, 0, 0);
+        assert!(hb.timestamp > 0);
+    }
+
+    #[test]
+    fn build_heartbeat_zero_values() {
+        let server = test_server();
+        let hb = server.build_heartbeat(0, 0, 0);
+        assert_eq!(hb.loaded_models, 0);
+        assert_eq!(hb.gpu_memory_free_mb, 0);
+        assert_eq!(hb.active_training_jobs, 0);
+    }
+
+    #[tokio::test]
+    async fn start_then_degraded_then_check_state() {
+        let server = test_server();
+        assert_eq!(
+            server.connection_state().await,
+            ConnectionState::Disconnected
+        );
+        server.start("127.0.0.1:0").await.unwrap();
+        assert_eq!(server.connection_state().await, ConnectionState::Connected);
+        server.enter_degraded().await;
+        assert_eq!(server.connection_state().await, ConnectionState::Degraded);
+    }
 }

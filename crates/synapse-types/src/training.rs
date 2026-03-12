@@ -57,6 +57,33 @@ pub struct HyperParams {
     pub max_seq_length: u32,
 }
 
+impl HyperParams {
+    /// Validate hyperparameters, returning an error if any are invalid.
+    pub fn validate(&self) -> crate::error::Result<()> {
+        if self.learning_rate <= 0.0 {
+            return Err(crate::SynapseError::TrainingError(
+                "learning_rate must be positive".into(),
+            ));
+        }
+        if self.epochs == 0 {
+            return Err(crate::SynapseError::TrainingError(
+                "epochs must be at least 1".into(),
+            ));
+        }
+        if self.batch_size == 0 {
+            return Err(crate::SynapseError::TrainingError(
+                "batch_size must be at least 1".into(),
+            ));
+        }
+        if self.max_seq_length == 0 {
+            return Err(crate::SynapseError::TrainingError(
+                "max_seq_length must be at least 1".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// LoRA-specific configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoraConfig {

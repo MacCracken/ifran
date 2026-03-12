@@ -49,6 +49,19 @@ impl MarketplaceCatalog {
 
     /// Publish a model to the marketplace.
     pub fn publish(&self, entry: &MarketplaceEntry) -> Result<()> {
+        let format_str = serde_json::to_string(&entry.format)
+            .map_err(|e| SynapseError::StorageError(e.to_string()))?;
+        let quant_str = serde_json::to_string(&entry.quant)
+            .map_err(|e| SynapseError::StorageError(e.to_string()))?;
+        let tags_str = serde_json::to_string(&entry.tags)
+            .map_err(|e| SynapseError::StorageError(e.to_string()))?;
+        let eval_str = entry
+            .eval_scores
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|e| SynapseError::StorageError(e.to_string()))?;
+
         self.conn
             .execute(
                 "INSERT OR REPLACE INTO marketplace_entries
@@ -59,24 +72,17 @@ impl MarketplaceCatalog {
                 params![
                     entry.model_name,
                     entry.description,
-                    serde_json::to_string(&entry.format)
-                        .unwrap()
-                        .trim_matches('"'),
-                    serde_json::to_string(&entry.quant)
-                        .unwrap()
-                        .trim_matches('"'),
+                    format_str.trim_matches('"'),
+                    quant_str.trim_matches('"'),
                     entry.size_bytes as i64,
                     entry.parameter_count.map(|v| v as i64),
                     entry.architecture,
                     entry.publisher_instance,
                     entry.download_url,
                     entry.sha256,
-                    serde_json::to_string(&entry.tags).unwrap(),
+                    tags_str,
                     entry.published_at.to_rfc3339(),
-                    entry
-                        .eval_scores
-                        .as_ref()
-                        .map(|s| serde_json::to_string(s).unwrap()),
+                    eval_str,
                 ],
             )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
@@ -101,26 +107,38 @@ impl MarketplaceCatalog {
 
     /// Search the marketplace catalog.
     pub fn search(&self, query: &MarketplaceQuery) -> Result<Vec<MarketplaceEntry>> {
-        // Build a simple WHERE clause
+        // Build parameterized WHERE clause to prevent SQL injection
         let mut conditions = Vec::new();
-        let mut sql = String::from("SELECT * FROM marketplace_entries");
+        let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        let mut param_idx = 1;
 
         if let Some(ref search) = query.search {
             conditions.push(format!(
-                "(model_name LIKE '%{search}%' OR description LIKE '%{search}%')"
+                "(model_name LIKE ?{pi1} OR description LIKE ?{pi2})",
+                pi1 = param_idx,
+                pi2 = param_idx + 1
             ));
+            let pattern = format!("%{search}%");
+            param_values.push(Box::new(pattern.clone()));
+            param_values.push(Box::new(pattern));
+            param_idx += 2;
         }
         if let Some(ref format) = query.format {
+            conditions.push(format!("format = ?{param_idx}"));
             let f = serde_json::to_string(format)
-                .unwrap()
-                .trim_matches('"')
-                .to_string();
-            conditions.push(format!("format = '{f}'"));
+                .map_err(|e| SynapseError::StorageError(e.to_string()))?;
+            param_values.push(Box::new(f.trim_matches('"').to_string()));
+            param_idx += 1;
         }
         if let Some(max_size) = query.max_size_bytes {
-            conditions.push(format!("size_bytes <= {max_size}"));
+            conditions.push(format!("size_bytes <= ?{param_idx}"));
+            param_values.push(Box::new(max_size as i64));
+            param_idx += 1;
         }
 
+        let _ = param_idx; // suppress unused warning
+
+        let mut sql = String::from("SELECT * FROM marketplace_entries");
         if !conditions.is_empty() {
             sql.push_str(" WHERE ");
             sql.push_str(&conditions.join(" AND "));
@@ -132,8 +150,11 @@ impl MarketplaceCatalog {
             .prepare(&sql)
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
 
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            param_values.iter().map(|p| p.as_ref()).collect();
+
         let entries = stmt
-            .query_map([], row_to_entry)
+            .query_map(params.as_slice(), row_to_entry)
             .map_err(|e| SynapseError::StorageError(e.to_string()))?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;

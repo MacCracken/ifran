@@ -38,9 +38,13 @@ fn default_max_tokens() -> u32 {
 }
 
 /// GET /v1/models — list models in OpenAI format.
-pub async fn list_models(State(state): State<AppState>) -> Json<serde_json::Value> {
+pub async fn list_models(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let db = state.db.lock().await;
-    let models = db.list().unwrap_or_default();
+    let models = db
+        .list()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let data: Vec<serde_json::Value> = models
         .iter()
@@ -54,10 +58,10 @@ pub async fn list_models(State(state): State<AppState>) -> Json<serde_json::Valu
         })
         .collect();
 
-    Json(serde_json::json!({
+    Ok(Json(serde_json::json!({
         "object": "list",
         "data": data,
-    }))
+    })))
 }
 
 /// POST /v1/chat/completions — OpenAI-compatible chat completions.
@@ -67,7 +71,9 @@ pub async fn chat_completions(
 ) -> Result<axum::response::Response, (StatusCode, String)> {
     let loaded = state.model_manager.list_loaded().await;
     let loaded_model = loaded
-        .first()
+        .iter()
+        .find(|m| m.model_name == body.model)
+        .or_else(|| loaded.first())
         .ok_or((StatusCode::BAD_REQUEST, "No model loaded".into()))?;
 
     let backend = state
@@ -184,4 +190,155 @@ async fn stream_response(
     };
 
     Ok(Sse::new(stream).into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::AppState;
+    use synapse_core::config::*;
+    use synapse_core::storage::db::ModelDatabase;
+    use synapse_types::model::{ModelFormat, ModelInfo, QuantLevel};
+
+    fn test_state(tmp: &tempfile::TempDir) -> AppState {
+        let config = SynapseConfig {
+            server: ServerConfig {
+                bind: "127.0.0.1:0".into(),
+                grpc_bind: "127.0.0.1:0".into(),
+            },
+            storage: StorageConfig {
+                models_dir: tmp.path().join("models"),
+                database: tmp.path().join("test.db"),
+                cache_dir: tmp.path().join("cache"),
+            },
+            backends: BackendsConfig {
+                default: "llamacpp".into(),
+                enabled: vec!["llamacpp".into()],
+            },
+            training: TrainingConfig {
+                executor: "subprocess".into(),
+                trainer_image: None,
+                max_concurrent_jobs: 2,
+                checkpoints_dir: tmp.path().join("checkpoints"),
+            },
+            bridge: BridgeConfig {
+                sy_endpoint: None,
+                enabled: false,
+                heartbeat_interval_secs: 10,
+            },
+            hardware: HardwareConfig {
+                gpu_memory_reserve_mb: 512,
+            },
+        };
+        AppState::new(config).unwrap()
+    }
+
+    #[test]
+    fn chat_message_deserialize() {
+        let json = r#"{"role": "user", "content": "Hello!"}"#;
+        let msg: ChatMessage = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.role, "user");
+        assert_eq!(msg.content, "Hello!");
+    }
+
+    #[test]
+    fn chat_completion_request_deserialize() {
+        let json = r#"{
+            "model": "llama-7b",
+            "messages": [
+                {"role": "system", "content": "Be helpful."},
+                {"role": "user", "content": "Hi"}
+            ],
+            "max_tokens": 256,
+            "temperature": 0.7
+        }"#;
+        let req: ChatCompletionRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.model, "llama-7b");
+        assert_eq!(req.messages.len(), 2);
+        assert_eq!(req.max_tokens, 256);
+        assert_eq!(req.temperature, Some(0.7));
+        assert!(!req.stream);
+    }
+
+    #[test]
+    fn chat_completion_request_defaults() {
+        let json = r#"{"model": "test", "messages": [{"role": "user", "content": "hi"}]}"#;
+        let req: ChatCompletionRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.max_tokens, 512);
+        assert!(!req.stream);
+        assert_eq!(req.temperature, None);
+        assert_eq!(req.top_p, None);
+    }
+
+    #[test]
+    fn chat_completion_request_with_stream() {
+        let json = r#"{"model": "t", "messages": [{"role": "user", "content": "h"}], "stream": true}"#;
+        let req: ChatCompletionRequest = serde_json::from_str(json).unwrap();
+        assert!(req.stream);
+    }
+
+    #[tokio::test]
+    async fn list_models_empty() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        let Json(json) = list_models(State(state)).await.unwrap();
+        assert_eq!(json["object"], "list");
+        assert_eq!(json["data"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn list_models_with_data() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        let db = ModelDatabase::open(&tmp.path().join("test.db")).unwrap();
+        let model = ModelInfo {
+            id: uuid::Uuid::new_v4(),
+            name: "test-model".into(),
+            repo_id: None,
+            format: ModelFormat::Gguf,
+            quant: QuantLevel::Q4KM,
+            size_bytes: 1000,
+            parameter_count: None,
+            architecture: None,
+            license: None,
+            local_path: "/tmp/model.gguf".into(),
+            sha256: None,
+            pulled_at: chrono::Utc::now(),
+        };
+        db.insert(&model).unwrap();
+        drop(db);
+
+        let Json(json) = list_models(State(state)).await.unwrap();
+        let data = json["data"].as_array().unwrap();
+        assert_eq!(data.len(), 1);
+        assert_eq!(data[0]["id"], "test-model");
+        assert_eq!(data[0]["object"], "model");
+        assert_eq!(data[0]["owned_by"], "synapse");
+        assert!(data[0]["created"].is_number());
+    }
+
+    #[tokio::test]
+    async fn chat_completions_no_model_loaded() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        let body = ChatCompletionRequest {
+            model: "test".into(),
+            messages: vec![ChatMessage {
+                role: "user".into(),
+                content: "Hello".into(),
+            }],
+            max_tokens: 100,
+            temperature: None,
+            top_p: None,
+            stream: false,
+        };
+
+        let result = chat_completions(State(state), Json(body)).await;
+        let err = result.unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert!(err.1.contains("No model loaded"));
+    }
 }

@@ -1974,6 +1974,7 @@ dependencies = [
  "synapse-types",
  "tempfile",
  "tokio",
+ "tokio-util",
  "tonic",
  "tower 0.5.3",
  "tower-http",

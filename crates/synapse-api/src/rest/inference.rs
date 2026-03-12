@@ -33,14 +33,20 @@ pub async fn inference(
     Json(body): Json<InferenceBody>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let loaded = state.model_manager.list_loaded().await;
-    let loaded_model = loaded.iter().find(|m| m.backend_id == "llamacpp").ok_or((
-        StatusCode::BAD_REQUEST,
-        "No model loaded. Load a model first.".into(),
-    ))?;
+    let loaded_model = loaded
+        .iter()
+        .find(|m| m.model_name == body.model)
+        .or_else(|| loaded.first())
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            "No model loaded. Load a model first.".into(),
+        ))?;
 
     let backend = state
         .backends
-        .get(&synapse_types::backend::BackendId("llamacpp".into()))
+        .get(&synapse_types::backend::BackendId(
+            loaded_model.backend_id.clone(),
+        ))
         .ok_or((
             StatusCode::INTERNAL_SERVER_ERROR,
             "Backend not available".into(),
@@ -84,12 +90,15 @@ pub async fn inference_stream(
     let loaded = state.model_manager.list_loaded().await;
     let loaded_model = loaded
         .iter()
-        .find(|m| m.backend_id == "llamacpp")
+        .find(|m| m.model_name == body.model)
+        .or_else(|| loaded.first())
         .ok_or((StatusCode::BAD_REQUEST, "No model loaded".into()))?;
 
     let backend = state
         .backends
-        .get(&synapse_types::backend::BackendId("llamacpp".into()))
+        .get(&synapse_types::backend::BackendId(
+            loaded_model.backend_id.clone(),
+        ))
         .ok_or((
             StatusCode::INTERNAL_SERVER_ERROR,
             "Backend not available".into(),
@@ -123,4 +132,126 @@ pub async fn inference_stream(
     };
 
     Ok(Sse::new(stream))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::AppState;
+    use synapse_core::config::*;
+
+    fn test_state(tmp: &tempfile::TempDir) -> AppState {
+        let config = SynapseConfig {
+            server: ServerConfig {
+                bind: "127.0.0.1:0".into(),
+                grpc_bind: "127.0.0.1:0".into(),
+            },
+            storage: StorageConfig {
+                models_dir: tmp.path().join("models"),
+                database: tmp.path().join("test.db"),
+                cache_dir: tmp.path().join("cache"),
+            },
+            backends: BackendsConfig {
+                default: "llamacpp".into(),
+                enabled: vec!["llamacpp".into()],
+            },
+            training: TrainingConfig {
+                executor: "subprocess".into(),
+                trainer_image: None,
+                max_concurrent_jobs: 2,
+                checkpoints_dir: tmp.path().join("checkpoints"),
+            },
+            bridge: BridgeConfig {
+                sy_endpoint: None,
+                enabled: false,
+                heartbeat_interval_secs: 10,
+            },
+            hardware: HardwareConfig {
+                gpu_memory_reserve_mb: 512,
+            },
+        };
+        AppState::new(config).unwrap()
+    }
+
+    #[test]
+    fn inference_body_deserialize() {
+        let json = r#"{
+            "model": "llama-7b",
+            "prompt": "Hello, world!",
+            "max_tokens": 256,
+            "temperature": 0.8,
+            "top_p": 0.95,
+            "system_prompt": "Be helpful."
+        }"#;
+        let body: InferenceBody = serde_json::from_str(json).unwrap();
+        assert_eq!(body.model, "llama-7b");
+        assert_eq!(body.prompt, "Hello, world!");
+        assert_eq!(body.max_tokens, 256);
+        assert_eq!(body.temperature, Some(0.8));
+        assert_eq!(body.top_p, Some(0.95));
+        assert_eq!(body.system_prompt, Some("Be helpful.".into()));
+        assert!(!body.stream);
+    }
+
+    #[test]
+    fn inference_body_defaults() {
+        let json = r#"{"model": "test", "prompt": "hi"}"#;
+        let body: InferenceBody = serde_json::from_str(json).unwrap();
+        assert_eq!(body.max_tokens, 512);
+        assert!(!body.stream);
+        assert_eq!(body.temperature, None);
+        assert_eq!(body.top_p, None);
+        assert_eq!(body.top_k, None);
+        assert_eq!(body.system_prompt, None);
+    }
+
+    #[test]
+    fn inference_body_with_stream() {
+        let json = r#"{"model": "test", "prompt": "hi", "stream": true}"#;
+        let body: InferenceBody = serde_json::from_str(json).unwrap();
+        assert!(body.stream);
+    }
+
+    #[tokio::test]
+    async fn inference_no_model_loaded() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        let body = InferenceBody {
+            model: "test-model".into(),
+            prompt: "Hello".into(),
+            max_tokens: 100,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            system_prompt: None,
+            stream: false,
+        };
+
+        let result = inference(State(state), Json(body)).await;
+        let err = result.unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert!(err.1.contains("No model loaded"));
+    }
+
+    #[tokio::test]
+    async fn inference_stream_no_model_loaded() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        let body = InferenceBody {
+            model: "test-model".into(),
+            prompt: "Hello".into(),
+            max_tokens: 100,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            system_prompt: None,
+            stream: true,
+        };
+
+        let result = inference_stream(State(state), Json(body)).await;
+        let err = result.unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+    }
 }

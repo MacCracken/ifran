@@ -25,7 +25,7 @@ pub fn estimate_gguf(
     gpu_layers: Option<u32>,
     total_layers: u32,
 ) -> MemoryEstimate {
-    let file_mb = file_size_bytes / (1024 * 1024);
+    let file_mb = file_size_bytes.saturating_add(1024 * 1024 - 1) / (1024 * 1024);
     let overhead = file_mb / 5; // ~20% for KV cache + buffers
 
     let gpu_fraction = match gpu_layers {

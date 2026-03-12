@@ -67,6 +67,24 @@ fn validate_jsonl(path: &Path) -> Result<ValidationResult> {
     })
 }
 
+/// Count CSV columns handling RFC 4180 quoted fields.
+fn count_csv_columns(line: &str) -> usize {
+    if line.is_empty() {
+        return 0;
+    }
+    let mut cols = 1;
+    let mut in_quotes = false;
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => in_quotes = !in_quotes,
+            ',' if !in_quotes => cols += 1,
+            _ => {}
+        }
+    }
+    cols
+}
+
 fn validate_csv(path: &Path) -> Result<ValidationResult> {
     let content = std::fs::read_to_string(path)?;
     let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
@@ -80,12 +98,12 @@ fn validate_csv(path: &Path) -> Result<ValidationResult> {
         });
     }
 
-    let header_cols = lines[0].split(',').count();
+    let header_cols = count_csv_columns(lines[0]);
     let mut invalid = 0;
     let mut errors = Vec::new();
 
     for (i, line) in lines.iter().skip(1).enumerate() {
-        let cols = line.split(',').count();
+        let cols = count_csv_columns(line);
         if cols != header_cols {
             invalid += 1;
             if errors.len() < 10 {
@@ -184,6 +202,27 @@ mod tests {
         let result = validate(tmp.path(), DatasetFormat::HuggingFace).unwrap();
         assert!(result.valid);
         assert_eq!(result.total_rows, 0);
+    }
+
+    #[test]
+    fn csv_with_quoted_commas() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        writeln!(tmp, "text,label").unwrap();
+        writeln!(tmp, r#""hello, world",1"#).unwrap();
+        writeln!(tmp, r#""foo",0"#).unwrap();
+        tmp.flush().unwrap();
+
+        let result = validate(tmp.path(), DatasetFormat::Csv).unwrap();
+        assert!(result.valid);
+        assert_eq!(result.total_rows, 2);
+    }
+
+    #[test]
+    fn count_csv_columns_basic() {
+        assert_eq!(super::count_csv_columns("a,b,c"), 3);
+        assert_eq!(super::count_csv_columns(r#""a,b",c"#), 2);
+        assert_eq!(super::count_csv_columns(""), 0);
+        assert_eq!(super::count_csv_columns("single"), 1);
     }
 
     #[test]

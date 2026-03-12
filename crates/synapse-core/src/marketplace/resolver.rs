@@ -18,7 +18,10 @@ impl MarketplaceResolver {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(10))
             .build()
-            .unwrap_or_default();
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "Failed to build HTTP client with timeout, using default");
+                reqwest::Client::new()
+            });
         Self {
             peers: Vec::new(),
             client,
@@ -83,7 +86,11 @@ impl MarketplaceResolver {
         }
         if let Some(ref format) = query.format {
             let f = serde_json::to_string(format)
-                .unwrap_or_default()
+                .map_err(|e| {
+                    synapse_types::SynapseError::MarketplaceError(format!(
+                        "Failed to serialize format filter: {e}"
+                    ))
+                })?
                 .trim_matches('"')
                 .to_string();
             req = req.query(&[("format", f.as_str())]);

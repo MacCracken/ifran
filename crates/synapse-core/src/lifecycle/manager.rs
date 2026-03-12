@@ -10,6 +10,7 @@ use crate::lifecycle::memory;
 use std::collections::HashMap;
 use std::sync::Arc;
 use synapse_types::backend::{AcceleratorType, DeviceConfig};
+use synapse_types::SynapseError;
 use synapse_types::error::Result;
 use synapse_types::model::{ModelId, ModelManifest};
 use tokio::sync::RwLock;
@@ -18,6 +19,7 @@ use tokio::sync::RwLock;
 #[derive(Debug, Clone)]
 pub struct LoadedModel {
     pub model_id: ModelId,
+    pub model_name: String,
     pub handle: String,
     pub backend_id: String,
     pub vram_used_mb: u64,
@@ -56,7 +58,11 @@ impl ModelManager {
 
         // Determine device config based on available hardware
         let (accelerator, device_ids) = if hardware.has_gpu() {
-            let kind = hardware.best_accelerator().unwrap();
+            let kind = hardware.best_accelerator().ok_or_else(|| {
+                SynapseError::HardwareError(
+                    "GPU detected but no accelerator type could be determined".into(),
+                )
+            })?;
             let acc = match kind {
                 detect::AcceleratorKind::Cuda => AcceleratorType::Cuda,
                 detect::AcceleratorKind::Rocm => AcceleratorType::Rocm,
@@ -78,6 +84,7 @@ impl ModelManager {
     pub async fn register_loaded(
         &self,
         model_id: ModelId,
+        model_name: String,
         handle: String,
         backend_id: String,
         vram_used_mb: u64,
@@ -87,6 +94,7 @@ impl ModelManager {
             model_id,
             LoadedModel {
                 model_id,
+                model_name,
                 handle,
                 backend_id,
                 vram_used_mb,
@@ -136,7 +144,7 @@ mod tests {
 
         let id = uuid::Uuid::new_v4();
         manager
-            .register_loaded(id, "handle-1".into(), "llamacpp".into(), 4000)
+            .register_loaded(id, "test-model".into(), "handle-1".into(), "llamacpp".into(), 4000)
             .await;
 
         assert!(manager.is_loaded(&id).await);
@@ -149,7 +157,7 @@ mod tests {
         let manager = ModelManager::new(512);
         let id = uuid::Uuid::new_v4();
         manager
-            .register_loaded(id, "handle-1".into(), "llamacpp".into(), 4000)
+            .register_loaded(id, "test-model".into(), "handle-1".into(), "llamacpp".into(), 4000)
             .await;
 
         let loaded = manager.get_loaded(&id).await;
@@ -172,10 +180,10 @@ mod tests {
         let id1 = uuid::Uuid::new_v4();
         let id2 = uuid::Uuid::new_v4();
         manager
-            .register_loaded(id1, "h1".into(), "llamacpp".into(), 2000)
+            .register_loaded(id1, "model-1".into(), "h1".into(), "llamacpp".into(), 2000)
             .await;
         manager
-            .register_loaded(id2, "h2".into(), "ollama".into(), 3000)
+            .register_loaded(id2, "model-2".into(), "h2".into(), "ollama".into(), 3000)
             .await;
 
         assert_eq!(manager.list_loaded().await.len(), 2);
@@ -189,7 +197,7 @@ mod tests {
         let manager = ModelManager::new(512);
         let id = uuid::Uuid::new_v4();
         manager
-            .register_loaded(id, "handle-1".into(), "llamacpp".into(), 4000)
+            .register_loaded(id, "test-model".into(), "handle-1".into(), "llamacpp".into(), 4000)
             .await;
 
         let removed = manager.unregister(&id).await;

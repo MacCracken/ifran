@@ -58,3 +58,52 @@ fn truncate(s: &str, max: usize) -> String {
         format!("{}…", &s[..max - 1])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_size_gigabytes() {
+        assert_eq!(format_size(4_000_000_000), "4.0 GB");
+        assert_eq!(format_size(1_500_000_000), "1.5 GB");
+        assert_eq!(format_size(13_200_000_000), "13.2 GB");
+    }
+
+    #[test]
+    fn format_size_megabytes() {
+        assert_eq!(format_size(500_000_000), "500 MB");
+        assert_eq!(format_size(100_000_000), "100 MB");
+        assert_eq!(format_size(1_000_000), "1 MB");
+    }
+
+    #[test]
+    fn format_size_boundary() {
+        // Exactly 1 GB
+        assert_eq!(format_size(1_000_000_000), "1.0 GB");
+        // Just under 1 GB
+        assert_eq!(format_size(999_999_999), "1000 MB");
+    }
+
+    #[test]
+    fn truncate_short_string() {
+        assert_eq!(truncate("hello", 10), "hello");
+    }
+
+    #[test]
+    fn truncate_exact_length() {
+        assert_eq!(truncate("hello", 5), "hello");
+    }
+
+    #[test]
+    fn truncate_long_string() {
+        let result = truncate("this is a very long model name", 10);
+        assert!(result.len() <= 12); // 9 chars + ellipsis (multi-byte)
+        assert!(result.ends_with('…'));
+    }
+
+    #[test]
+    fn format_size_zero() {
+        assert_eq!(format_size(0), "0 MB");
+    }
+}

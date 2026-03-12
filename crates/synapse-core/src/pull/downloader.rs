@@ -130,11 +130,15 @@ pub async fn download(
             DownloadState::Verifying,
             "Verifying SHA-256 integrity...",
         );
-        crate::pull::verifier::verify_file(
+        if let Err(e) = crate::pull::verifier::verify_file(
             &part_path,
             expected,
             crate::pull::verifier::HashAlgorithm::Sha256,
-        )?;
+        ) {
+            // Clean up corrupted partial file so next attempt starts fresh
+            let _ = tokio::fs::remove_file(&part_path).await;
+            return Err(e);
+        }
     }
 
     // Rename .part to final destination

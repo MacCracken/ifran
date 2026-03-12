@@ -129,15 +129,23 @@ pub async fn download(
         .get_by_name(&model_name)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
+    // Open file and get metadata atomically — avoids TOCTOU race where
+    // file could be deleted between exists() check and open()
     let path = std::path::Path::new(&model.local_path);
-    if !path.exists() {
-        return Err((
-            StatusCode::NOT_FOUND,
-            format!("Model file not found on disk: {}", model.local_path),
-        ));
-    }
 
-    let file_bytes = tokio::fs::read(path)
+    let file = tokio::fs::File::open(path).await.map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Model file not found on disk: {}", model.local_path),
+            )
+        } else {
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        }
+    })?;
+
+    let metadata = file
+        .metadata()
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -146,14 +154,18 @@ pub async fn download(
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| model_name.clone());
 
+    // Stream file instead of loading entirely into memory
+    let stream = tokio_util::io::ReaderStream::new(file);
+    let body = Body::from_stream(stream);
+
     let response = axum::response::Response::builder()
         .header("content-type", "application/octet-stream")
         .header(
             "content-disposition",
             format!("attachment; filename=\"{filename}\""),
         )
-        .header("content-length", file_bytes.len().to_string())
-        .body(Body::from(file_bytes))
+        .header("content-length", metadata.len().to_string())
+        .body(body)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(response)
@@ -212,5 +224,254 @@ fn entry_to_response(entry: &MarketplaceEntry) -> MarketplaceEntryResponse {
         sha256: entry.sha256.clone(),
         tags: entry.tags.clone(),
         published_at: entry.published_at.to_rfc3339(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::AppState;
+    use synapse_core::config::*;
+    use synapse_types::marketplace::MarketplaceEntry;
+    use synapse_types::model::{ModelFormat, QuantLevel};
+
+    fn test_state(tmp: &tempfile::TempDir) -> AppState {
+        let config = SynapseConfig {
+            server: ServerConfig {
+                bind: "127.0.0.1:0".into(),
+                grpc_bind: "127.0.0.1:0".into(),
+            },
+            storage: StorageConfig {
+                models_dir: tmp.path().join("models"),
+                database: tmp.path().join("test.db"),
+                cache_dir: tmp.path().join("cache"),
+            },
+            backends: BackendsConfig {
+                default: "llamacpp".into(),
+                enabled: vec!["llamacpp".into()],
+            },
+            training: TrainingConfig {
+                executor: "subprocess".into(),
+                trainer_image: None,
+                max_concurrent_jobs: 2,
+                checkpoints_dir: tmp.path().join("checkpoints"),
+            },
+            bridge: BridgeConfig {
+                sy_endpoint: None,
+                enabled: false,
+                heartbeat_interval_secs: 10,
+            },
+            hardware: HardwareConfig {
+                gpu_memory_reserve_mb: 512,
+            },
+        };
+        AppState::new(config).unwrap()
+    }
+
+    fn test_entry() -> MarketplaceEntry {
+        MarketplaceEntry {
+            model_name: "test-model".into(),
+            description: Some("A test model".into()),
+            format: ModelFormat::Gguf,
+            quant: QuantLevel::Q4KM,
+            size_bytes: 4_000_000_000,
+            parameter_count: Some(7_000_000_000),
+            architecture: Some("llama".into()),
+            publisher_instance: "node-1".into(),
+            download_url: "http://node-1:8420/marketplace/download/test-model".into(),
+            sha256: Some("abc123".into()),
+            tags: vec!["llama".into(), "chat".into()],
+            published_at: chrono::Utc::now(),
+            eval_scores: None,
+        }
+    }
+
+    #[test]
+    fn search_query_deserialize() {
+        let json = r#"{"q": "llama", "format": "gguf", "max_size": 10000000000}"#;
+        let q: SearchQuery = serde_json::from_str(json).unwrap();
+        assert_eq!(q.q.unwrap(), "llama");
+        assert_eq!(q.max_size, Some(10_000_000_000));
+    }
+
+    #[test]
+    fn search_query_all_optional() {
+        let json = r#"{}"#;
+        let q: SearchQuery = serde_json::from_str(json).unwrap();
+        assert!(q.q.is_none());
+        assert!(q.format.is_none());
+        assert!(q.max_size.is_none());
+    }
+
+    #[test]
+    fn publish_request_deserialize() {
+        let json = r#"{"model_name": "my-model"}"#;
+        let req: PublishRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.model_name, "my-model");
+    }
+
+    #[test]
+    fn pull_request_deserialize() {
+        let json = r#"{
+            "model_name": "remote-model",
+            "source_url": "http://peer:8420/marketplace/download/remote-model"
+        }"#;
+        let req: PullRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.model_name, "remote-model");
+        assert!(req.expected_sha256.is_none());
+    }
+
+    #[test]
+    fn pull_request_with_sha256() {
+        let json = r#"{
+            "model_name": "remote-model",
+            "source_url": "http://peer:8420/marketplace/download/remote-model",
+            "expected_sha256": "deadbeef"
+        }"#;
+        let req: PullRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.expected_sha256.unwrap(), "deadbeef");
+    }
+
+    #[test]
+    fn marketplace_entry_response_serializes() {
+        let resp = MarketplaceEntryResponse {
+            model_name: "test-model".into(),
+            description: Some("desc".into()),
+            format: ModelFormat::Gguf,
+            size_bytes: 4_000_000_000,
+            publisher_instance: "node-1".into(),
+            download_url: "http://node-1/download".into(),
+            sha256: Some("abc".into()),
+            tags: vec!["llama".into()],
+            published_at: chrono::Utc::now().to_rfc3339(),
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["model_name"], "test-model");
+        assert_eq!(json["size_bytes"], 4_000_000_000u64);
+        assert_eq!(json["tags"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn entry_to_response_conversion() {
+        let entry = test_entry();
+        let resp = entry_to_response(&entry);
+        assert_eq!(resp.model_name, entry.model_name);
+        assert_eq!(resp.description, entry.description);
+        assert_eq!(resp.format, entry.format);
+        assert_eq!(resp.size_bytes, entry.size_bytes);
+        assert_eq!(resp.publisher_instance, entry.publisher_instance);
+        assert_eq!(resp.download_url, entry.download_url);
+        assert_eq!(resp.sha256, entry.sha256);
+        assert_eq!(resp.tags, entry.tags);
+    }
+
+    #[tokio::test]
+    async fn list_entries_empty() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        let result = list_entries(State(state)).await.unwrap();
+        assert!(result.0.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_entries_with_data() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        // Publish directly via catalog
+        {
+            let catalog = state.marketplace_catalog.lock().await;
+            catalog.publish(&test_entry()).unwrap();
+        }
+
+        let result = list_entries(State(state)).await.unwrap();
+        assert_eq!(result.0.len(), 1);
+        assert_eq!(result.0[0].model_name, "test-model");
+    }
+
+    #[tokio::test]
+    async fn search_no_query() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        {
+            let catalog = state.marketplace_catalog.lock().await;
+            catalog.publish(&test_entry()).unwrap();
+        }
+
+        let params = SearchQuery {
+            q: None,
+            format: None,
+            max_size: None,
+        };
+        let result = search(State(state), Query(params)).await.unwrap();
+        assert_eq!(result.0.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn search_with_query() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        {
+            let catalog = state.marketplace_catalog.lock().await;
+            catalog.publish(&test_entry()).unwrap();
+        }
+
+        let params = SearchQuery {
+            q: Some("test".into()),
+            format: None,
+            max_size: None,
+        };
+        let result = search(State(state), Query(params)).await.unwrap();
+        assert_eq!(result.0.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn search_no_match() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        {
+            let catalog = state.marketplace_catalog.lock().await;
+            catalog.publish(&test_entry()).unwrap();
+        }
+
+        let params = SearchQuery {
+            q: Some("nonexistent-xyz".into()),
+            format: None,
+            max_size: None,
+        };
+        let result = search(State(state), Query(params)).await.unwrap();
+        assert!(result.0.is_empty());
+    }
+
+    #[tokio::test]
+    async fn unpublish_success() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        {
+            let catalog = state.marketplace_catalog.lock().await;
+            catalog.publish(&test_entry()).unwrap();
+        }
+
+        let result = unpublish(State(state.clone()), Path("test-model".into()))
+            .await
+            .unwrap();
+        assert_eq!(result, StatusCode::NO_CONTENT);
+
+        // Verify it's gone
+        let entries = list_entries(State(state)).await.unwrap();
+        assert!(entries.0.is_empty());
+    }
+
+    #[tokio::test]
+    async fn unpublish_not_found() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        let result = unpublish(State(state), Path("nonexistent".into())).await;
+        assert_eq!(result.unwrap_err().0, StatusCode::NOT_FOUND);
     }
 }

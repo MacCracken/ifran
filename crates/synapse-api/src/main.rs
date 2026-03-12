@@ -61,7 +61,9 @@ async fn main() {
                         "Heartbeat sent"
                     );
                     // Report as progress to keep SY informed
-                    let _ = client.report_progress("heartbeat", "alive", 0, 0.0).await;
+                    if let Err(e) = client.report_progress("heartbeat", "alive", 0, 0.0).await {
+                        tracing::warn!(error = %e, "Failed to send heartbeat to SY");
+                    }
                 }
             });
         }

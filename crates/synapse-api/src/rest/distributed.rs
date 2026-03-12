@@ -10,7 +10,7 @@ use synapse_types::training::{TrainingJobConfig, TrainingStatus};
 use crate::state::AppState;
 
 /// Response for a distributed training job.
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct DistributedJobResponse {
     pub job_id: DistributedJobId,
     pub coordinator: String,
@@ -271,5 +271,392 @@ fn job_to_response(job: &DistributedJobState) -> DistributedJobResponse {
         status: job.status,
         aggregate_loss: job.aggregate_loss,
         completed_workers: job.completed_workers,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::AppState;
+    use synapse_core::config::*;
+    use synapse_types::distributed::*;
+    use synapse_types::training::*;
+
+    fn test_state(tmp: &tempfile::TempDir) -> AppState {
+        let config = SynapseConfig {
+            server: ServerConfig {
+                bind: "127.0.0.1:0".into(),
+                grpc_bind: "127.0.0.1:0".into(),
+            },
+            storage: StorageConfig {
+                models_dir: tmp.path().join("models"),
+                database: tmp.path().join("test.db"),
+                cache_dir: tmp.path().join("cache"),
+            },
+            backends: BackendsConfig {
+                default: "llamacpp".into(),
+                enabled: vec!["llamacpp".into()],
+            },
+            training: TrainingConfig {
+                executor: "subprocess".into(),
+                trainer_image: None,
+                max_concurrent_jobs: 2,
+                checkpoints_dir: tmp.path().join("checkpoints"),
+            },
+            bridge: BridgeConfig {
+                sy_endpoint: None,
+                enabled: false,
+                heartbeat_interval_secs: 10,
+            },
+            hardware: HardwareConfig {
+                gpu_memory_reserve_mb: 512,
+            },
+        };
+        AppState::new(config).unwrap()
+    }
+
+    fn test_job_config() -> TrainingJobConfig {
+        TrainingJobConfig {
+            base_model: "llama-7b".into(),
+            dataset: DatasetConfig {
+                path: "/data/train.jsonl".into(),
+                format: DatasetFormat::Jsonl,
+                split: None,
+                max_samples: None,
+            },
+            method: TrainingMethod::Lora,
+            hyperparams: HyperParams {
+                learning_rate: 2e-4,
+                epochs: 1,
+                batch_size: 4,
+                gradient_accumulation_steps: 1,
+                warmup_steps: 0,
+                weight_decay: 0.0,
+                max_seq_length: 512,
+            },
+            output_name: None,
+            lora: None,
+        }
+    }
+
+    #[test]
+    fn create_distributed_job_request_deserialize() {
+        let json = r#"{
+            "base_model": "llama-7b",
+            "dataset": {"path": "/data/train.jsonl", "format": "jsonl"},
+            "method": "lora",
+            "hyperparams": {"learning_rate": 0.0002, "epochs": 1, "batch_size": 4, "gradient_accumulation_steps": 1, "warmup_steps": 0, "weight_decay": 0.0, "max_seq_length": 512},
+            "world_size": 4,
+            "strategy": "data_parallel"
+        }"#;
+        let req: CreateDistributedJobRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.world_size, 4);
+        assert_eq!(req.strategy, DistributedStrategy::DataParallel);
+        assert_eq!(req.base_config.base_model, "llama-7b");
+    }
+
+    #[test]
+    fn assign_worker_request_deserialize() {
+        let json = r#"{
+            "rank": 1,
+            "instance_id": "node-2",
+            "endpoint": "http://node-2:9000"
+        }"#;
+        let req: AssignWorkerRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.rank, 1);
+        assert_eq!(req.instance_id, "node-2");
+        assert!(req.device_ids.is_empty()); // default
+    }
+
+    #[test]
+    fn assign_worker_request_with_devices() {
+        let json = r#"{
+            "rank": 0,
+            "instance_id": "node-1",
+            "endpoint": "http://node-1:9000",
+            "device_ids": [0, 1]
+        }"#;
+        let req: AssignWorkerRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.device_ids, vec![0, 1]);
+    }
+
+    #[test]
+    fn aggregate_request_deserialize_defaults() {
+        let json = r#"{"output_dir": "/output/merged"}"#;
+        let req: AggregateRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.output_dir, "/output/merged");
+        assert_eq!(req.method, "average");
+    }
+
+    #[test]
+    fn aggregate_request_with_method() {
+        let json = r#"{"output_dir": "/output/merged", "method": "weighted_average"}"#;
+        let req: AggregateRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.method, "weighted_average");
+    }
+
+    #[test]
+    fn distributed_job_response_serializes() {
+        let resp = DistributedJobResponse {
+            job_id: uuid::Uuid::new_v4(),
+            coordinator: "node-1".into(),
+            world_size: 4,
+            strategy: DistributedStrategy::DataParallel,
+            workers: vec![],
+            status: TrainingStatus::Queued,
+            aggregate_loss: None,
+            completed_workers: 0,
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["world_size"], 4);
+        assert_eq!(json["strategy"], "data_parallel");
+        assert_eq!(json["completed_workers"], 0);
+        assert!(json["aggregate_loss"].is_null());
+    }
+
+    #[tokio::test]
+    async fn create_distributed_job_success() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        let req = CreateDistributedJobRequest {
+            base_config: test_job_config(),
+            world_size: 2,
+            strategy: DistributedStrategy::DataParallel,
+        };
+
+        let result = create_job(State(state), Json(req)).await.unwrap();
+        assert_eq!(result.0, StatusCode::CREATED);
+        assert_eq!(result.1.status, TrainingStatus::Queued);
+        assert_eq!(result.1.world_size, 2);
+        assert_eq!(result.1.workers.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn list_distributed_jobs_empty() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        let Json(jobs) = list_jobs(State(state)).await;
+        assert!(jobs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_distributed_jobs_with_data() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        let req1 = CreateDistributedJobRequest {
+            base_config: test_job_config(),
+            world_size: 2,
+            strategy: DistributedStrategy::DataParallel,
+        };
+        let req2 = CreateDistributedJobRequest {
+            base_config: test_job_config(),
+            world_size: 4,
+            strategy: DistributedStrategy::ModelParallel,
+        };
+        let _ = create_job(State(state.clone()), Json(req1)).await.unwrap();
+        let _ = create_job(State(state.clone()), Json(req2)).await.unwrap();
+
+        let Json(jobs) = list_jobs(State(state)).await;
+        assert_eq!(jobs.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn get_distributed_job_success() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        let req = CreateDistributedJobRequest {
+            base_config: test_job_config(),
+            world_size: 2,
+            strategy: DistributedStrategy::DataParallel,
+        };
+        let (_, Json(created)) = create_job(State(state.clone()), Json(req)).await.unwrap();
+
+        let result = get_job(State(state), Path(created.job_id)).await.unwrap();
+        assert_eq!(result.job_id, created.job_id);
+        assert_eq!(result.status, TrainingStatus::Queued);
+    }
+
+    #[tokio::test]
+    async fn get_distributed_job_not_found() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        let result = get_job(State(state), Path(uuid::Uuid::new_v4())).await;
+        assert_eq!(result.unwrap_err().0, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn assign_worker_success() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        let req = CreateDistributedJobRequest {
+            base_config: test_job_config(),
+            world_size: 2,
+            strategy: DistributedStrategy::DataParallel,
+        };
+        let (_, Json(created)) = create_job(State(state.clone()), Json(req)).await.unwrap();
+
+        let worker_req = AssignWorkerRequest {
+            rank: 0,
+            instance_id: "node-1".into(),
+            endpoint: "http://node-1:9000".into(),
+            device_ids: vec![0],
+        };
+        let result = assign_worker(State(state), Path(created.job_id), Json(worker_req))
+            .await
+            .unwrap();
+        assert_eq!(result.workers.len(), 1);
+        assert_eq!(result.workers[0].rank, 0);
+    }
+
+    #[tokio::test]
+    async fn start_distributed_job_success() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        let req = CreateDistributedJobRequest {
+            base_config: test_job_config(),
+            world_size: 2,
+            strategy: DistributedStrategy::DataParallel,
+        };
+        let (_, Json(created)) = create_job(State(state.clone()), Json(req)).await.unwrap();
+
+        // Assign both workers
+        for rank in 0..2 {
+            let worker_req = AssignWorkerRequest {
+                rank,
+                instance_id: format!("node-{}", rank + 1),
+                endpoint: format!("http://node-{}:9000", rank + 1),
+                device_ids: vec![0],
+            };
+            let _ = assign_worker(State(state.clone()), Path(created.job_id), Json(worker_req))
+                .await
+                .unwrap();
+        }
+
+        let result = start_job(State(state), Path(created.job_id)).await.unwrap();
+        assert_eq!(result.status, TrainingStatus::Running);
+    }
+
+    #[tokio::test]
+    async fn start_job_insufficient_workers() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        let req = CreateDistributedJobRequest {
+            base_config: test_job_config(),
+            world_size: 2,
+            strategy: DistributedStrategy::DataParallel,
+        };
+        let (_, Json(created)) = create_job(State(state.clone()), Json(req)).await.unwrap();
+
+        // Only assign 1 of 2 workers
+        let worker_req = AssignWorkerRequest {
+            rank: 0,
+            instance_id: "node-1".into(),
+            endpoint: "http://node-1:9000".into(),
+            device_ids: vec![0],
+        };
+        let _ = assign_worker(State(state.clone()), Path(created.job_id), Json(worker_req))
+            .await
+            .unwrap();
+
+        let result = start_job(State(state), Path(created.job_id)).await;
+        assert_eq!(result.unwrap_err().0, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn fail_distributed_job_success() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        let req = CreateDistributedJobRequest {
+            base_config: test_job_config(),
+            world_size: 2,
+            strategy: DistributedStrategy::DataParallel,
+        };
+        let (_, Json(created)) = create_job(State(state.clone()), Json(req)).await.unwrap();
+
+        let result = fail_job(State(state), Path(created.job_id)).await.unwrap();
+        assert_eq!(result.status, TrainingStatus::Failed);
+    }
+
+    #[tokio::test]
+    async fn worker_completed_lifecycle() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        let req = CreateDistributedJobRequest {
+            base_config: test_job_config(),
+            world_size: 2,
+            strategy: DistributedStrategy::DataParallel,
+        };
+        let (_, Json(created)) = create_job(State(state.clone()), Json(req)).await.unwrap();
+
+        for rank in 0..2 {
+            let worker_req = AssignWorkerRequest {
+                rank,
+                instance_id: format!("node-{}", rank + 1),
+                endpoint: format!("http://node-{}:9000", rank + 1),
+                device_ids: vec![0],
+            };
+            let _ = assign_worker(State(state.clone()), Path(created.job_id), Json(worker_req))
+                .await
+                .unwrap();
+        }
+        let _ = start_job(State(state.clone()), Path(created.job_id))
+            .await
+            .unwrap();
+
+        // First worker completes
+        let result = worker_completed(State(state.clone()), Path((created.job_id, 0)))
+            .await
+            .unwrap();
+        assert_eq!(result.completed_workers, 1);
+        assert_eq!(result.status, TrainingStatus::Running);
+
+        // Second worker completes — job should be done
+        let result = worker_completed(State(state), Path((created.job_id, 1)))
+            .await
+            .unwrap();
+        assert_eq!(result.completed_workers, 2);
+        assert_eq!(result.status, TrainingStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn job_to_response_conversion() {
+        let job = DistributedJobState {
+            job_id: uuid::Uuid::new_v4(),
+            config: DistributedTrainingConfig {
+                base_config: test_job_config(),
+                world_size: 4,
+                strategy: DistributedStrategy::PipelineParallel,
+            },
+            coordinator: "node-1".into(),
+            workers: vec![WorkerAssignment {
+                rank: 0,
+                instance_id: "node-1".into(),
+                endpoint: "http://node-1:9000".into(),
+                device_ids: vec![0, 1],
+            }],
+            status: TrainingStatus::Running,
+            aggregate_loss: Some(0.42),
+            completed_workers: 1,
+        };
+
+        let resp = job_to_response(&job);
+        assert_eq!(resp.job_id, job.job_id);
+        assert_eq!(resp.coordinator, "node-1");
+        assert_eq!(resp.world_size, 4);
+        assert_eq!(resp.strategy, DistributedStrategy::PipelineParallel);
+        assert_eq!(resp.workers.len(), 1);
+        assert_eq!(resp.status, TrainingStatus::Running);
+        assert_eq!(resp.aggregate_loss, Some(0.42));
+        assert_eq!(resp.completed_workers, 1);
     }
 }

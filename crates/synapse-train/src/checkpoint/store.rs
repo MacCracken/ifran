@@ -67,9 +67,12 @@ impl CheckpointStore {
         let mut removed = 0;
         for cp in to_remove {
             let cp_path = Path::new(&cp.path);
-            if cp_path.exists() {
-                std::fs::remove_dir_all(cp_path)?;
-                removed += 1;
+            match std::fs::remove_dir_all(cp_path) {
+                Ok(()) => removed += 1,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    // Already deleted — skip silently
+                }
+                Err(e) => return Err(e.into()),
             }
         }
 

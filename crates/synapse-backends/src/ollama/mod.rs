@@ -15,7 +15,7 @@ use synapse_types::inference::{
 };
 use synapse_types::model::{ModelFormat, ModelManifest};
 use tokio::sync::{RwLock, mpsc};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::traits::{InferenceBackend, ModelHandle};
 
@@ -33,7 +33,10 @@ impl OllamaBackend {
     pub fn new(base_url: Option<String>) -> Self {
         Self {
             base_url: base_url.unwrap_or_else(|| "http://127.0.0.1:11434".into()),
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(300))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             loaded: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -83,7 +86,8 @@ impl InferenceBackend for OllamaBackend {
             "keep_alive": "10m",
         });
 
-        self.client
+        let resp = self
+            .client
             .post(&url)
             .json(&body)
             .send()
@@ -91,6 +95,14 @@ impl InferenceBackend for OllamaBackend {
             .map_err(|e| {
                 SynapseError::BackendError(format!("Failed to load model in Ollama: {e}"))
             })?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(SynapseError::BackendError(format!(
+                "Ollama failed to load model (HTTP {status}): {text}"
+            )));
+        }
 
         let handle_id = format!("ollama-{}", model_name.replace('/', "-"));
         info!(handle = %handle_id, model = %model_name, "Loaded model in Ollama");
@@ -116,7 +128,9 @@ impl InferenceBackend for OllamaBackend {
             "keep_alive": 0,
         });
 
-        let _ = self.client.post(&url).json(&body).send().await;
+        if let Err(e) = self.client.post(&url).json(&body).send().await {
+            warn!(handle = %handle.0, error = %e, "Failed to send unload request to Ollama");
+        }
         info!(handle = %handle.0, "Unloaded model from Ollama");
         Ok(())
     }
@@ -217,15 +231,26 @@ impl InferenceBackend for OllamaBackend {
 
         tokio::spawn(async move {
             use futures::StreamExt;
+            const MAX_BUFFER_SIZE: usize = 1024 * 1024; // 1 MB
             let mut stream = resp.bytes_stream();
             let mut buffer = String::new();
 
             while let Some(chunk) = stream.next().await {
+                if tx.is_closed() {
+                    break;
+                }
                 let chunk = match chunk {
                     Ok(c) => c,
-                    Err(_) => break,
+                    Err(e) => {
+                        tracing::warn!("Ollama stream error: {e}");
+                        break;
+                    }
                 };
                 buffer.push_str(&String::from_utf8_lossy(&chunk));
+                if buffer.len() > MAX_BUFFER_SIZE {
+                    tracing::warn!("Ollama stream buffer exceeded {MAX_BUFFER_SIZE} bytes, aborting");
+                    break;
+                }
 
                 while let Some(line_end) = buffer.find('\n') {
                     let line = buffer[..line_end].trim().to_string();

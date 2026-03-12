@@ -53,7 +53,10 @@ impl LlamaCppBackend {
             server_bin: server_bin.unwrap_or_else(|| "llama-server".into()),
             instances: Arc::new(RwLock::new(HashMap::new())),
             next_port: Arc::new(RwLock::new(8430)),
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(300))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
         }
     }
 
@@ -114,6 +117,12 @@ impl InferenceBackend for LlamaCppBackend {
         let port = self.allocate_port().await;
         let model_path = &manifest.info.local_path;
 
+        if !std::path::Path::new(model_path).exists() {
+            return Err(SynapseError::BackendError(format!(
+                "Model file not found: {model_path}"
+            )));
+        }
+
         let mut cmd = Command::new(&self.server_bin);
         cmd.arg("--model")
             .arg(model_path)
@@ -168,6 +177,8 @@ impl InferenceBackend for LlamaCppBackend {
         if let Some(mut instance) = instances.remove(&handle.0) {
             info!(handle = %handle.0, "Stopping llama-server");
             let _ = instance.process.kill().await;
+            // Reap the child process to prevent zombies
+            let _ = instance.process.wait().await;
             Ok(())
         } else {
             Err(SynapseError::ModelNotFound(handle.0))
@@ -251,10 +262,14 @@ impl InferenceBackend for LlamaCppBackend {
 
         tokio::spawn(async move {
             use futures::StreamExt;
+            const MAX_BUFFER_SIZE: usize = 1024 * 1024; // 1 MB
             let mut stream = resp.bytes_stream();
             let mut buffer = String::new();
 
             while let Some(chunk) = stream.next().await {
+                if tx.is_closed() {
+                    break;
+                }
                 let chunk = match chunk {
                     Ok(c) => c,
                     Err(e) => {
@@ -264,6 +279,10 @@ impl InferenceBackend for LlamaCppBackend {
                 };
 
                 buffer.push_str(&String::from_utf8_lossy(&chunk));
+                if buffer.len() > MAX_BUFFER_SIZE {
+                    warn!("Stream buffer exceeded {MAX_BUFFER_SIZE} bytes, aborting");
+                    break;
+                }
 
                 // Parse SSE lines
                 while let Some(line_end) = buffer.find('\n') {

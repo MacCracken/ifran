@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use synapse_types::SynapseError;
 use synapse_types::error::Result;
-use synapse_types::training::{TrainingJobConfig, TrainingJobId, TrainingMethod};
+use synapse_types::training::{TrainingJobConfig, TrainingJobId};
 use tokio::process::{Child, Command};
 use tokio::sync::RwLock;
 use tracing::info;
@@ -27,13 +27,7 @@ impl SubprocessExecutor {
 #[async_trait]
 impl TrainingExecutor for SubprocessExecutor {
     async fn run(&self, config: &TrainingJobConfig, job_id: TrainingJobId) -> Result<()> {
-        let script = match config.method {
-            TrainingMethod::Lora | TrainingMethod::Qlora => "scripts/train_sft.py",
-            TrainingMethod::FullFineTune => "scripts/train_full.py",
-            TrainingMethod::Dpo => "scripts/train_dpo.py",
-            TrainingMethod::Rlhf => "scripts/train_rlhf.py",
-            TrainingMethod::Distillation => "scripts/train_distill.py",
-        };
+        let script = super::script_for_method(config.method);
 
         let config_json = serde_json::to_string(config)
             .map_err(|e| SynapseError::TrainingError(e.to_string()))?;
@@ -50,20 +44,23 @@ impl TrainingExecutor for SubprocessExecutor {
 
         self.processes.write().await.insert(job_id, child);
 
-        // Wait for completion
-        let status = {
+        // Wait for completion — take the child out of the map first to avoid
+        // holding the write lock during the potentially long wait. This prevents
+        // deadlock if cancel() is called concurrently.
+        let mut child = {
             let mut procs = self.processes.write().await;
-            if let Some(child) = procs.get_mut(&job_id) {
-                child
-                    .wait()
-                    .await
-                    .map_err(|e| SynapseError::TrainingError(e.to_string()))?
-            } else {
-                return Err(SynapseError::TrainingError("Process disappeared".into()));
+            match procs.remove(&job_id) {
+                Some(child) => child,
+                None => {
+                    return Err(SynapseError::TrainingError("Process disappeared".into()));
+                }
             }
         };
 
-        self.processes.write().await.remove(&job_id);
+        let status = child
+            .wait()
+            .await
+            .map_err(|e| SynapseError::TrainingError(e.to_string()))?;
 
         if !status.success() {
             return Err(SynapseError::TrainingError(format!(
@@ -84,5 +81,87 @@ impl TrainingExecutor for SubprocessExecutor {
         }
         procs.remove(&job_id);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_creates_default() {
+        let executor = SubprocessExecutor::new();
+        // Should compile and not panic
+        assert!(std::mem::size_of_val(&executor) > 0);
+    }
+
+    #[test]
+    fn default_creates_instance() {
+        let executor = SubprocessExecutor::default();
+        assert!(std::mem::size_of_val(&executor) > 0);
+    }
+
+    #[tokio::test]
+    async fn cancel_nonexistent_job_succeeds() {
+        let executor = SubprocessExecutor::new();
+        let job_id = uuid::Uuid::new_v4();
+        let result = executor.cancel(job_id).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn processes_starts_empty() {
+        let executor = SubprocessExecutor::new();
+        assert!(executor.processes.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn cancel_removes_tracked_process() {
+        let executor = SubprocessExecutor::new();
+        let job_id = uuid::Uuid::new_v4();
+
+        // Insert a dummy process (sleep)
+        let child = tokio::process::Command::new("sleep")
+            .arg("60")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+
+        executor.processes.write().await.insert(job_id, child);
+        assert_eq!(executor.processes.read().await.len(), 1);
+
+        executor.cancel(job_id).await.unwrap();
+        assert!(executor.processes.read().await.is_empty());
+    }
+
+    #[test]
+    fn config_serializes_for_args() {
+        use synapse_types::training::*;
+        let config = TrainingJobConfig {
+            base_model: "llama-7b".into(),
+            dataset: DatasetConfig {
+                path: "/data/train.jsonl".into(),
+                format: DatasetFormat::Jsonl,
+                split: None,
+                max_samples: None,
+            },
+            method: TrainingMethod::Dpo,
+            hyperparams: HyperParams {
+                    learning_rate: 2e-4,
+                    epochs: 1,
+                    batch_size: 4,
+                    gradient_accumulation_steps: 1,
+                    warmup_steps: 0,
+                    weight_decay: 0.0,
+                    max_seq_length: 512,
+                },
+            output_name: None,
+            lora: None,
+        };
+
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("llama-7b"));
+        assert!(json.contains("dpo"));
     }
 }

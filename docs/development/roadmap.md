@@ -21,7 +21,7 @@ Remaining (SY side):
 
 ### Test Coverage → 80%
 
-Current: **415 tests** across 7 crates. CI threshold: 50%.
+Current: **510 tests** across 7 crates. CI threshold: 70%.
 
 #### Coverage by Crate
 
@@ -30,10 +30,10 @@ Current: **415 tests** across 7 crates. CI threshold: 50%.
 | synapse-types | 49 | Serde roundtrips, error Display, all enums | Proto-generated code tests |
 | synapse-core | 123 | Registry, storage, lifecycle, eval, marketplace, pull | Edge cases, concurrent access |
 | synapse-backends | 72 | Router, all backends with mock HTTP, load/infer/unload | Streaming tests |
-| synapse-train | 80 | Job scheduling, training methods, distributed | `executor/docker.rs`, `executor/subprocess.rs` |
-| synapse-api | 54 | Integration tests, middleware, state, system, models | OpenAI compat, inference, training endpoints |
-| synapse-bridge | 19 | Protocol, discovery, client/server | Tonic mock for gRPC integration |
-| synapse-cli | 18 | Clap arg parsing for all commands | Command logic extraction + unit tests |
+| synapse-train | 97 | Job scheduling, training methods, distributed, executors | Executor run with mock subprocess |
+| synapse-api | 108 | Integration tests, middleware, state, system, models, inference, openai, training, distributed, marketplace | Streaming inference, eval, bridge endpoints |
+| synapse-bridge | 36 | Protocol, discovery, client/server, state transitions | Tonic mock for gRPC integration |
+| synapse-cli | 25 | Clap arg parsing, output formatting helpers | Command logic extraction + unit tests |
 
 #### Staged Backlog
 
@@ -63,21 +63,21 @@ Current: **415 tests** across 7 crates. CI threshold: 50%.
 - [x] `synapse-api/rest/models.rs` — list/get/delete unit tests with real AppState
 - [x] CI threshold → 50%
 
-##### Milestone 4: 60% — API & Training
-- [ ] `synapse-api/rest/inference.rs` — inference endpoint with mock backend
-- [ ] `synapse-api/rest/openai_compat.rs` — OpenAI-compatible API tests
-- [ ] `synapse-api/rest/training.rs` — training lifecycle endpoints
-- [ ] `synapse-train/executor/docker.rs` — Docker executor (mock subprocess)
-- [ ] `synapse-train/executor/subprocess.rs` — subprocess executor tests
-- [ ] CI threshold → 60%
+##### Milestone 4: 60% — API & Training (complete)
+- [x] `synapse-api/rest/inference.rs` — InferenceBody serde, no-model error paths
+- [x] `synapse-api/rest/openai_compat.rs` — ChatCompletionRequest serde, list_models, no-model error paths
+- [x] `synapse-api/rest/training.rs` — full CRUD lifecycle (create/list/get/cancel), auto_start, job_to_response conversion
+- [x] `synapse-train/executor/docker.rs` — construction, container naming, cancel behavior, config serialization
+- [x] `synapse-train/executor/subprocess.rs` — construction, cancel with process kill, config serialization
+- [x] `synapse-train/executor/mod.rs` — extracted `script_for_method()` with full coverage
+- [x] CI threshold → 60%
 
-##### Milestone 5: 70% — Bridge & CLI
-- [ ] `synapse-bridge` — tonic mock for gRPC client/server integration
-- [ ] `synapse-cli` — extract command logic into testable functions
-- [ ] `synapse-cli` — command output formatting tests
-- [ ] `synapse-api/rest/distributed.rs` — distributed training endpoint tests
-- [ ] `synapse-api/rest/marketplace.rs` — marketplace endpoint tests
-- [ ] CI threshold → 70%
+##### Milestone 5: 70% — Bridge & CLI (complete)
+- [x] `synapse-bridge` — protocol, client, server, discovery additional coverage
+- [x] `synapse-cli` — output formatting helper tests (format_size, truncate)
+- [x] `synapse-api/rest/distributed.rs` — full handler unit tests (create, list, get, assign, start, fail, worker_completed, serde)
+- [x] `synapse-api/rest/marketplace.rs` — handler unit tests (search, list, unpublish, serde, entry_to_response)
+- [x] CI threshold → 70%
 
 ##### Milestone 6: 80% — Hardening
 - [ ] Error paths and edge cases across all crates
