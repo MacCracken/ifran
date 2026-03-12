@@ -135,4 +135,62 @@ mod tests {
         let models = scan_dir(Path::new("/nonexistent/path")).unwrap();
         assert!(models.is_empty());
     }
+
+    #[test]
+    fn detect_tensorrt_formats() {
+        assert_eq!(detect_format("model.engine"), Some(ModelFormat::TensorRt));
+        assert_eq!(detect_format("model.trt"), Some(ModelFormat::TensorRt));
+    }
+
+    #[test]
+    fn detect_pytorch_pth() {
+        assert_eq!(detect_format("model.pth"), Some(ModelFormat::PyTorch));
+    }
+
+    #[test]
+    fn detect_case_insensitive() {
+        assert_eq!(detect_format("MODEL.GGUF"), Some(ModelFormat::Gguf));
+        assert_eq!(
+            detect_format("Weights.SafeTensors"),
+            Some(ModelFormat::SafeTensors)
+        );
+        assert_eq!(detect_format("MODEL.ONNX"), Some(ModelFormat::Onnx));
+    }
+
+    #[test]
+    fn scan_reports_correct_size() {
+        let tmp = tempfile::tempdir().unwrap();
+        let content = b"0123456789"; // 10 bytes
+        fs::write(tmp.path().join("model.gguf"), content).unwrap();
+
+        let models = scan_dir(tmp.path()).unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].size_bytes, 10);
+        assert_eq!(models[0].filename, "model.gguf");
+        assert_eq!(models[0].format, ModelFormat::Gguf);
+    }
+
+    #[test]
+    fn scan_multiple_files_in_subdir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sub = tmp.path().join("my-model");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join("model.gguf"), b"gguf").unwrap();
+        fs::write(sub.join("model.safetensors"), b"st").unwrap();
+        fs::write(sub.join("config.json"), b"{}").unwrap(); // ignored
+
+        let models = scan_dir(tmp.path()).unwrap();
+        assert_eq!(models.len(), 2);
+    }
+
+    #[test]
+    fn tokenizer_bin_excluded() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("tokenizer.bin"), b"tok").unwrap();
+        fs::write(tmp.path().join("model.bin"), b"mod").unwrap();
+
+        let models = scan_dir(tmp.path()).unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].format, ModelFormat::Bin);
+    }
 }

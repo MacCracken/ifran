@@ -63,12 +63,17 @@ pub struct HfModelInfo {
 pub struct HfClient {
     client: Client,
     token: Option<String>,
+    base_url: String,
 }
 
 impl HfClient {
     /// Create a new client, optionally with an API token.
     pub fn new(client: Client, token: Option<String>) -> Self {
-        Self { client, token }
+        Self {
+            client,
+            token,
+            base_url: HF_API_BASE.to_string(),
+        }
     }
 
     /// Create a client that reads the token from `HF_TOKEN` env var.
@@ -77,9 +82,15 @@ impl HfClient {
         Self::new(client, token)
     }
 
+    /// Override the API base URL (useful for testing).
+    pub fn with_base_url(mut self, base_url: String) -> Self {
+        self.base_url = base_url;
+        self
+    }
+
     /// Fetch model info including file listing.
     pub async fn model_info(&self, repo_id: &str) -> Result<HfModelInfo> {
-        let url = format!("{HF_API_BASE}/models/{repo_id}");
+        let url = format!("{}/models/{repo_id}", self.base_url);
         let mut req = self.client.get(&url);
         if let Some(ref token) = self.token {
             req = req.bearer_auth(token);
@@ -173,4 +184,356 @@ pub async fn search(client: &Client, query: &str, limit: usize) -> Result<Vec<Hf
 /// Minimal percent-encoding for query params.
 fn urlencoded(s: &str) -> String {
     s.replace(' ', "%20").replace('/', "%2F")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -- Pure function / data structure tests --
+
+    #[test]
+    fn hf_file_is_gguf() {
+        let f = HfFile {
+            filename: "model-Q4_K_M.gguf".into(),
+            size: Some(1000),
+            lfs: None,
+        };
+        assert!(f.is_gguf());
+
+        let f2 = HfFile {
+            filename: "config.json".into(),
+            size: Some(100),
+            lfs: None,
+        };
+        assert!(!f2.is_gguf());
+    }
+
+    #[test]
+    fn hf_file_sha256_from_lfs() {
+        let f = HfFile {
+            filename: "model.gguf".into(),
+            size: None,
+            lfs: Some(HfLfs {
+                sha256: Some("abc123".into()),
+                size: Some(5000),
+            }),
+        };
+        assert_eq!(f.sha256(), Some("abc123"));
+    }
+
+    #[test]
+    fn hf_file_sha256_none_without_lfs() {
+        let f = HfFile {
+            filename: "model.gguf".into(),
+            size: Some(1000),
+            lfs: None,
+        };
+        assert_eq!(f.sha256(), None);
+    }
+
+    #[test]
+    fn hf_file_size_prefers_lfs() {
+        let f = HfFile {
+            filename: "model.gguf".into(),
+            size: Some(100),
+            lfs: Some(HfLfs {
+                sha256: None,
+                size: Some(5000),
+            }),
+        };
+        assert_eq!(f.file_size(), Some(5000));
+    }
+
+    #[test]
+    fn hf_file_size_falls_back_to_top_level() {
+        let f = HfFile {
+            filename: "model.gguf".into(),
+            size: Some(100),
+            lfs: Some(HfLfs {
+                sha256: None,
+                size: None,
+            }),
+        };
+        assert_eq!(f.file_size(), Some(100));
+    }
+
+    #[test]
+    fn hf_file_size_none() {
+        let f = HfFile {
+            filename: "model.gguf".into(),
+            size: None,
+            lfs: None,
+        };
+        assert_eq!(f.file_size(), None);
+    }
+
+    #[test]
+    fn download_url_format() {
+        let url = HfClient::download_url("TheBloke/Llama-2-7B-GGUF", "llama-2-7b.Q4_K_M.gguf");
+        assert_eq!(
+            url,
+            "https://huggingface.co/TheBloke/Llama-2-7B-GGUF/resolve/main/llama-2-7b.Q4_K_M.gguf"
+        );
+    }
+
+    #[test]
+    fn urlencoded_spaces_and_slashes() {
+        assert_eq!(urlencoded("hello world"), "hello%20world");
+        assert_eq!(urlencoded("a/b"), "a%2Fb");
+        assert_eq!(urlencoded("no special"), "no%20special");
+    }
+
+    #[test]
+    fn hf_model_info_deserialize() {
+        let json = r#"{
+            "modelId": "test-org/test-model",
+            "sha": "abc123",
+            "author": "test-org",
+            "tags": ["gguf", "llama"],
+            "siblings": [
+                {"rfilename": "model.gguf", "size": 1000},
+                {"rfilename": "config.json", "size": 50}
+            ]
+        }"#;
+        let info: HfModelInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(info.model_id, "test-org/test-model");
+        assert_eq!(info.sha, Some("abc123".into()));
+        assert_eq!(info.author, Some("test-org".into()));
+        assert_eq!(info.tags, vec!["gguf", "llama"]);
+        assert_eq!(info.siblings.len(), 2);
+        assert!(info.siblings[0].is_gguf());
+        assert!(!info.siblings[1].is_gguf());
+    }
+
+    #[test]
+    fn hf_model_info_deserialize_minimal() {
+        let json = r#"{"modelId": "org/model"}"#;
+        let info: HfModelInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(info.model_id, "org/model");
+        assert_eq!(info.sha, None);
+        assert_eq!(info.author, None);
+        assert!(info.tags.is_empty());
+        assert!(info.siblings.is_empty());
+    }
+
+    #[test]
+    fn hf_file_with_lfs_deserialize() {
+        let json = r#"{
+            "rfilename": "model.gguf",
+            "size": 1000,
+            "lfs": {"sha256": "deadbeef", "size": 5000}
+        }"#;
+        let f: HfFile = serde_json::from_str(json).unwrap();
+        assert_eq!(f.filename, "model.gguf");
+        assert_eq!(f.sha256(), Some("deadbeef"));
+        assert_eq!(f.file_size(), Some(5000));
+    }
+
+    // -- Mock HTTP tests --
+
+    #[tokio::test]
+    async fn model_info_success() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/models/test-org/test-model")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "modelId": "test-org/test-model",
+                    "sha": "abc",
+                    "siblings": [
+                        {"rfilename": "model-Q4_K_M.gguf", "size": 4000000000},
+                        {"rfilename": "model-Q8_0.gguf", "size": 8000000000},
+                        {"rfilename": "config.json", "size": 200}
+                    ]
+                }"#,
+            )
+            .create_async()
+            .await;
+
+        let client = HfClient::new(Client::new(), None).with_base_url(server.url());
+        let info = client.model_info("test-org/test-model").await.unwrap();
+        assert_eq!(info.model_id, "test-org/test-model");
+        assert_eq!(info.siblings.len(), 3);
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn model_info_not_found() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/models/nonexistent/model")
+            .with_status(404)
+            .create_async()
+            .await;
+
+        let client = HfClient::new(Client::new(), None).with_base_url(server.url());
+        let result = client.model_info("nonexistent/model").await;
+        assert!(matches!(result, Err(SynapseError::ModelNotFound(_))));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn model_info_server_error() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/models/org/model")
+            .with_status(500)
+            .create_async()
+            .await;
+
+        let client = HfClient::new(Client::new(), None).with_base_url(server.url());
+        let result = client.model_info("org/model").await;
+        assert!(matches!(result, Err(SynapseError::DownloadError(_))));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn list_gguf_files_filters() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/models/org/model")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "modelId": "org/model",
+                    "siblings": [
+                        {"rfilename": "model.gguf", "size": 1000},
+                        {"rfilename": "config.json", "size": 50},
+                        {"rfilename": "weights.safetensors", "size": 2000}
+                    ]
+                }"#,
+            )
+            .create_async()
+            .await;
+
+        let client = HfClient::new(Client::new(), None).with_base_url(server.url());
+        let files = client.list_gguf_files("org/model").await.unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].filename, "model.gguf");
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn resolve_gguf_with_quant_filter() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/models/org/model")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "modelId": "org/model",
+                    "siblings": [
+                        {"rfilename": "model-Q4_K_M.gguf", "size": 4000},
+                        {"rfilename": "model-Q8_0.gguf", "size": 8000}
+                    ]
+                }"#,
+            )
+            .create_async()
+            .await;
+
+        let client = HfClient::new(Client::new(), None).with_base_url(server.url());
+        let file = client
+            .resolve_gguf("org/model", Some("q4_k_m"))
+            .await
+            .unwrap();
+        assert_eq!(file.filename, "model-Q4_K_M.gguf");
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn resolve_gguf_no_filter_returns_first() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/models/org/model")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "modelId": "org/model",
+                    "siblings": [
+                        {"rfilename": "model-Q4_K_M.gguf", "size": 4000},
+                        {"rfilename": "model-Q8_0.gguf", "size": 8000}
+                    ]
+                }"#,
+            )
+            .create_async()
+            .await;
+
+        let client = HfClient::new(Client::new(), None).with_base_url(server.url());
+        let file = client.resolve_gguf("org/model", None).await.unwrap();
+        assert_eq!(file.filename, "model-Q4_K_M.gguf");
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn resolve_gguf_no_matching_quant() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/models/org/model")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "modelId": "org/model",
+                    "siblings": [
+                        {"rfilename": "model-Q4_K_M.gguf", "size": 4000}
+                    ]
+                }"#,
+            )
+            .create_async()
+            .await;
+
+        let client = HfClient::new(Client::new(), None).with_base_url(server.url());
+        let result = client.resolve_gguf("org/model", Some("Q8_0")).await;
+        assert!(matches!(result, Err(SynapseError::ModelNotFound(_))));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn resolve_gguf_no_gguf_files() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/models/org/model")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "modelId": "org/model",
+                    "siblings": [
+                        {"rfilename": "config.json", "size": 50}
+                    ]
+                }"#,
+            )
+            .create_async()
+            .await;
+
+        let client = HfClient::new(Client::new(), None).with_base_url(server.url());
+        let result = client.resolve_gguf("org/model", None).await;
+        assert!(matches!(result, Err(SynapseError::ModelNotFound(_))));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn model_info_with_auth_token() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/models/org/private-model")
+            .match_header("authorization", "Bearer test-token-123")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"modelId": "org/private-model", "siblings": []}"#)
+            .create_async()
+            .await;
+
+        let client =
+            HfClient::new(Client::new(), Some("test-token-123".into())).with_base_url(server.url());
+        let info = client.model_info("org/private-model").await.unwrap();
+        assert_eq!(info.model_id, "org/private-model");
+        mock.assert_async().await;
+    }
 }

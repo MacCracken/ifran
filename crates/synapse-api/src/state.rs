@@ -85,3 +85,87 @@ impl AppState {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use synapse_core::config::*;
+
+    fn test_config(tmp: &tempfile::TempDir) -> SynapseConfig {
+        SynapseConfig {
+            server: ServerConfig {
+                bind: "127.0.0.1:0".into(),
+                grpc_bind: "127.0.0.1:0".into(),
+            },
+            storage: StorageConfig {
+                models_dir: tmp.path().join("models"),
+                database: tmp.path().join("test.db"),
+                cache_dir: tmp.path().join("cache"),
+            },
+            backends: BackendsConfig {
+                default: "llamacpp".into(),
+                enabled: vec!["llamacpp".into()],
+            },
+            training: TrainingConfig {
+                executor: "subprocess".into(),
+                trainer_image: None,
+                max_concurrent_jobs: 2,
+                checkpoints_dir: tmp.path().join("checkpoints"),
+            },
+            bridge: BridgeConfig {
+                sy_endpoint: None,
+                enabled: false,
+                heartbeat_interval_secs: 10,
+            },
+            hardware: HardwareConfig {
+                gpu_memory_reserve_mb: 512,
+            },
+        }
+    }
+
+    #[test]
+    fn app_state_new_succeeds() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config = test_config(&tmp);
+        let state = AppState::new(config);
+        assert!(state.is_ok());
+    }
+
+    #[test]
+    fn app_state_is_clone() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config = test_config(&tmp);
+        let state = AppState::new(config).unwrap();
+        let cloned = state.clone();
+        assert!(Arc::ptr_eq(&state.config, &cloned.config));
+        assert!(Arc::ptr_eq(&state.backends, &cloned.backends));
+    }
+
+    #[test]
+    fn app_state_bridge_disabled() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config = test_config(&tmp);
+        let state = AppState::new(config).unwrap();
+        assert!(state.bridge_client.is_none());
+        assert!(state.bridge_server.is_none());
+        assert!(!state.config.bridge.enabled);
+    }
+
+    #[test]
+    fn app_state_creates_databases() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config = test_config(&tmp);
+        let _state = AppState::new(config).unwrap();
+        assert!(tmp.path().join("test.db").exists());
+        assert!(tmp.path().join("marketplace.db").exists());
+    }
+
+    #[tokio::test]
+    async fn app_state_model_manager_starts_empty() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config = test_config(&tmp);
+        let state = AppState::new(config).unwrap();
+        let loaded = state.model_manager.list_loaded().await;
+        assert!(loaded.is_empty());
+    }
+}

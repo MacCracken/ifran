@@ -17,6 +17,23 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - `synapse-backends`: `ModelHandle` equality, hashing, and Debug tests
 - Test coverage roadmap with 6 staged milestones (30% → 80%)
 - CI coverage threshold set to 30% as baseline
+- **Milestone 2 — Core Logic (40%)**: 48 new tests across synapse-core and synapse-api
+  - `synapse-core/pull/downloader`: Mock HTTP tests — download, resume from `.part`, SHA-256 verification, progress events, error handling
+  - `synapse-core/pull/verifier`: verify_auto detection, BLAKE3 roundtrip, empty file hashing, integrity error content, nonexistent file error
+  - `synapse-core/registry/huggingface`: Mock API tests — model_info (success/404/500), list_gguf filtering, resolve_gguf with quant filter, auth token, serde roundtrips
+  - `synapse-core/registry/scanner`: TensorRT/PyTorch format detection, case-insensitive matching, size reporting, tokenizer.bin exclusion
+  - `synapse-api/state`: AppState construction, cloneability, bridge disabled, database file creation
+  - `synapse-api/rest/system`: health handler, status JSON structure with bridge fields
+- CI coverage threshold raised to 40%
+- Added `mockito` for HTTP mocking in synapse-core dev-dependencies
+- `HfClient::with_base_url()` for testable HuggingFace API client
+- **Milestone 3 — Backend Integration (50%)**: 40 new tests across synapse-backends and synapse-api
+  - `synapse-backends/ollama`: Mock HTTP tests — load/unload/infer/health, message building, capabilities, error handling
+  - `synapse-backends/vllm`: Mock HTTP tests — load/unload/infer/health, OpenAI response parsing, capabilities, error handling
+  - `synapse-backends/llamacpp`: Mock server infer cycle via instance injection, process lifecycle, error handling
+  - `synapse-api/rest/models`: Handler unit tests — list (empty/populated), get (by name/UUID/not found), delete (success/not found), field validation
+- CI coverage threshold raised to 50%
+- Added `mockito` for HTTP mocking in synapse-backends dev-dependencies
 
 #### Core
 - `synapse-types`: Core data structures — models, backends, inference, training, eval, marketplace, distributed, errors

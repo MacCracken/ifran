@@ -515,4 +515,129 @@ mod tests {
             .await;
         assert!(result.is_err());
     }
+
+    /// Insert a fake server instance pointing at a mock server port.
+    async fn insert_mock_instance(backend: &LlamaCppBackend, handle: &str, port: u16) {
+        // Spawn a harmless process to satisfy the Child requirement
+        let process = Command::new("sleep")
+            .arg("60")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let instance = ServerInstance {
+            process,
+            port,
+            model_path: "/tmp/test.gguf".into(),
+        };
+        backend
+            .instances
+            .write()
+            .await
+            .insert(handle.into(), instance);
+    }
+
+    #[tokio::test]
+    async fn infer_success_with_mock_server() {
+        let mut server = mockito::Server::new_async().await;
+        let port: u16 = server.url().split(':').last().unwrap().parse().unwrap();
+
+        let mock = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "choices": [{"message": {"content": "Test response"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
+                }"#,
+            )
+            .create_async()
+            .await;
+
+        let backend = LlamaCppBackend::new(None);
+        insert_mock_instance(&backend, "llamacpp-test", port).await;
+
+        let req = InferenceRequest {
+            prompt: "Hello".into(),
+            max_tokens: Some(100),
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: None,
+        };
+
+        let resp = backend
+            .infer(&ModelHandle("llamacpp-test".into()), &req)
+            .await
+            .unwrap();
+        assert_eq!(resp.text, "Test response");
+        assert_eq!(resp.usage.prompt_tokens, 5);
+        assert_eq!(resp.usage.total_tokens, 8);
+        assert!(matches!(resp.finish_reason, FinishReason::Stop));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn infer_model_not_loaded() {
+        let backend = LlamaCppBackend::new(None);
+        let req = InferenceRequest {
+            prompt: "Hello".into(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: None,
+        };
+        let result = backend
+            .infer(&ModelHandle("nonexistent".into()), &req)
+            .await;
+        assert!(matches!(result, Err(SynapseError::ModelNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn infer_server_error() {
+        let mut server = mockito::Server::new_async().await;
+        let port: u16 = server.url().split(':').last().unwrap().parse().unwrap();
+
+        let mock = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(500)
+            .with_body("Server error")
+            .create_async()
+            .await;
+
+        let backend = LlamaCppBackend::new(None);
+        insert_mock_instance(&backend, "llamacpp-test", port).await;
+
+        let req = InferenceRequest {
+            prompt: "Hello".into(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: None,
+        };
+        let result = backend
+            .infer(&ModelHandle("llamacpp-test".into()), &req)
+            .await;
+        assert!(matches!(result, Err(SynapseError::BackendError(_))));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn unload_kills_process() {
+        let backend = LlamaCppBackend::new(None);
+        insert_mock_instance(&backend, "llamacpp-kill-test", 9999).await;
+
+        assert!(backend.instances.read().await.contains_key("llamacpp-kill-test"));
+        backend
+            .unload_model(ModelHandle("llamacpp-kill-test".into()))
+            .await
+            .unwrap();
+        assert!(!backend.instances.read().await.contains_key("llamacpp-kill-test"));
+    }
 }

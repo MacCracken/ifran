@@ -174,7 +174,7 @@ jobs:
           cargo tarpaulin --workspace \
             --out xml \
             --output-dir coverage \
-            --fail-under 30 \
+            --fail-under 50 \
             --timeout 300
 
       - name: Upload coverage to Codecov

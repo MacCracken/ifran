@@ -54,3 +54,60 @@ pub async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
         "bridge": bridge,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn health_returns_ok() {
+        let result = health().await;
+        assert_eq!(result, "ok");
+    }
+
+    #[tokio::test]
+    async fn status_returns_expected_fields() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config = synapse_core::config::SynapseConfig {
+            server: synapse_core::config::ServerConfig {
+                bind: "127.0.0.1:0".into(),
+                grpc_bind: "127.0.0.1:0".into(),
+            },
+            storage: synapse_core::config::StorageConfig {
+                models_dir: tmp.path().join("models"),
+                database: tmp.path().join("test.db"),
+                cache_dir: tmp.path().join("cache"),
+            },
+            backends: synapse_core::config::BackendsConfig {
+                default: "llamacpp".into(),
+                enabled: vec!["llamacpp".into()],
+            },
+            training: synapse_core::config::TrainingConfig {
+                executor: "subprocess".into(),
+                trainer_image: None,
+                max_concurrent_jobs: 2,
+                checkpoints_dir: tmp.path().join("checkpoints"),
+            },
+            bridge: synapse_core::config::BridgeConfig {
+                sy_endpoint: None,
+                enabled: false,
+                heartbeat_interval_secs: 10,
+            },
+            hardware: synapse_core::config::HardwareConfig {
+                gpu_memory_reserve_mb: 512,
+            },
+        };
+
+        let state = AppState::new(config).unwrap();
+        let Json(json) = status(State(state)).await;
+
+        assert!(json["version"].is_string());
+        assert_eq!(json["loaded_models"], 0);
+        assert!(json["registered_backends"].is_array());
+        assert!(json["hardware"].is_object());
+        assert!(json["bridge"].is_object());
+        assert_eq!(json["bridge"]["enabled"], false);
+        assert_eq!(json["bridge"]["client_state"], "disabled");
+        assert_eq!(json["bridge"]["server_state"], "disabled");
+    }
+}

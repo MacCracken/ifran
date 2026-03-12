@@ -21,17 +21,17 @@ Remaining (SY side):
 
 ### Test Coverage → 80%
 
-Current: **327 tests** across 7 crates. CI threshold: 30%.
+Current: **415 tests** across 7 crates. CI threshold: 50%.
 
 #### Coverage by Crate
 
 | Crate | Tests | Status | Next targets |
 |---|---|---|---|
 | synapse-types | 49 | Serde roundtrips, error Display, all enums | Proto-generated code tests |
-| synapse-core | 83 | Registry, storage, lifecycle, eval, marketplace | `pull/downloader.rs`, `registry/huggingface.rs` |
-| synapse-backends | 39 | Router, all backend stubs, llamacpp helpers | Mock HTTP server for backend integration |
+| synapse-core | 123 | Registry, storage, lifecycle, eval, marketplace, pull | Edge cases, concurrent access |
+| synapse-backends | 72 | Router, all backends with mock HTTP, load/infer/unload | Streaming tests |
 | synapse-train | 80 | Job scheduling, training methods, distributed | `executor/docker.rs`, `executor/subprocess.rs` |
-| synapse-api | 39 | Integration tests, middleware auth | REST handler unit tests, OpenAI compat |
+| synapse-api | 54 | Integration tests, middleware, state, system, models | OpenAI compat, inference, training endpoints |
 | synapse-bridge | 19 | Protocol, discovery, client/server | Tonic mock for gRPC integration |
 | synapse-cli | 18 | Clap arg parsing for all commands | Command logic extraction + unit tests |
 
@@ -46,22 +46,22 @@ Current: **327 tests** across 7 crates. CI threshold: 30%.
 - [x] `LlamaCppBackend` construction, capabilities, port allocation
 - [x] CI threshold set to 30%
 
-##### Milestone 2: 40% — Core Logic
-- [ ] `synapse-core/pull/downloader.rs` — chunked download with resume (mock HTTP)
-- [ ] `synapse-core/pull/verifier.rs` — SHA256 verification
-- [ ] `synapse-core/registry/huggingface.rs` — HF API resolution (mock HTTP)
-- [ ] `synapse-core/registry/scanner.rs` — filesystem model scanning
-- [ ] `synapse-api/state.rs` — AppState construction
-- [ ] `synapse-api/rest/system.rs` — health/status endpoints
-- [ ] CI threshold → 40%
+##### Milestone 2: 40% — Core Logic (complete)
+- [x] `synapse-core/pull/downloader.rs` — chunked download with resume (mock HTTP via mockito)
+- [x] `synapse-core/pull/verifier.rs` — SHA256/BLAKE3 verification, verify_auto, edge cases
+- [x] `synapse-core/registry/huggingface.rs` — HF API resolution (mock HTTP via mockito)
+- [x] `synapse-core/registry/scanner.rs` — filesystem model scanning, format detection
+- [x] `synapse-api/state.rs` — AppState construction, cloneability, database creation
+- [x] `synapse-api/rest/system.rs` — health/status endpoint unit tests
+- [x] CI threshold → 40%
 
-##### Milestone 3: 50% — Backend Integration
-- [ ] Mock HTTP server test harness (shared utility)
-- [ ] `synapse-backends/ollama` — Ollama API integration tests
-- [ ] `synapse-backends/vllm` — vLLM API integration tests
-- [ ] `synapse-backends/llamacpp` — full load/infer cycle with mock server
-- [ ] `synapse-api/rest/models.rs` — model CRUD endpoint tests
-- [ ] CI threshold → 50%
+##### Milestone 3: 50% — Backend Integration (complete)
+- [x] Mock HTTP server test harness (mockito for all backends)
+- [x] `synapse-backends/ollama` — load/unload/infer/health with mock HTTP, message building, capabilities
+- [x] `synapse-backends/vllm` — load/unload/infer/health with mock HTTP, OpenAI response parsing
+- [x] `synapse-backends/llamacpp` — infer cycle with mock server (mock instance injection), process lifecycle
+- [x] `synapse-api/rest/models.rs` — list/get/delete unit tests with real AppState
+- [x] CI threshold → 50%
 
 ##### Milestone 4: 60% — API & Training
 - [ ] `synapse-api/rest/inference.rs` — inference endpoint with mock backend

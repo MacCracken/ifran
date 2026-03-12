@@ -24,6 +24,8 @@ futures = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+mockito = "1"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [lints]
 workspace = true

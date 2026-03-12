@@ -161,3 +161,227 @@ pub fn build_client() -> Result<Client> {
         .build()
         .map_err(|e| SynapseError::DownloadError(e.to_string()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pull::progress::ProgressTracker;
+
+    #[test]
+    fn build_client_succeeds() {
+        let client = build_client();
+        assert!(client.is_ok());
+    }
+
+    #[tokio::test]
+    async fn download_success() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/test-file.bin")
+            .with_status(200)
+            .with_body(b"file content here")
+            .create_async()
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("output.bin");
+
+        let request = DownloadRequest {
+            url: format!("{}/test-file.bin", server.url()),
+            dest: dest.clone(),
+            model_name: "test-model".into(),
+            expected_sha256: None,
+        };
+
+        let progress = ProgressTracker::default();
+        let client = Client::new();
+        download(&client, &request, &progress).await.unwrap();
+
+        assert!(dest.exists());
+        let content = tokio::fs::read(&dest).await.unwrap();
+        assert_eq!(content, b"file content here");
+
+        // .part file should be cleaned up
+        assert!(!PathBuf::from(format!("{}.part", dest.display())).exists());
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn download_creates_parent_dirs() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/file.bin")
+            .with_status(200)
+            .with_body(b"data")
+            .create_async()
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("nested").join("dir").join("file.bin");
+
+        let request = DownloadRequest {
+            url: format!("{}/file.bin", server.url()),
+            dest: dest.clone(),
+            model_name: "test".into(),
+            expected_sha256: None,
+        };
+
+        let progress = ProgressTracker::default();
+        download(&Client::new(), &request, &progress).await.unwrap();
+        assert!(dest.exists());
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn download_http_error() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/missing.bin")
+            .with_status(404)
+            .create_async()
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let request = DownloadRequest {
+            url: format!("{}/missing.bin", server.url()),
+            dest: tmp.path().join("output.bin"),
+            model_name: "test".into(),
+            expected_sha256: None,
+        };
+
+        let progress = ProgressTracker::default();
+        let result = download(&Client::new(), &request, &progress).await;
+        assert!(matches!(result, Err(SynapseError::DownloadError(_))));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn download_with_sha256_verification() {
+        let content = b"verifiable content";
+        let expected_hash = {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(content);
+            format!("{:x}", hasher.finalize())
+        };
+
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/verified.bin")
+            .with_status(200)
+            .with_body(content)
+            .create_async()
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("verified.bin");
+
+        let request = DownloadRequest {
+            url: format!("{}/verified.bin", server.url()),
+            dest: dest.clone(),
+            model_name: "test".into(),
+            expected_sha256: Some(expected_hash),
+        };
+
+        let progress = ProgressTracker::default();
+        download(&Client::new(), &request, &progress).await.unwrap();
+        assert!(dest.exists());
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn download_bad_sha256_fails() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/bad.bin")
+            .with_status(200)
+            .with_body(b"some content")
+            .create_async()
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let request = DownloadRequest {
+            url: format!("{}/bad.bin", server.url()),
+            dest: tmp.path().join("bad.bin"),
+            model_name: "test".into(),
+            expected_sha256: Some("wrong_hash".into()),
+        };
+
+        let progress = ProgressTracker::default();
+        let result = download(&Client::new(), &request, &progress).await;
+        assert!(result.is_err());
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn download_resume_from_partial() {
+        // Create a partial file first
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("resumed.bin");
+        let part_path = tmp.path().join("resumed.bin.part");
+        tokio::fs::write(&part_path, b"first_").await.unwrap();
+
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/resumed.bin")
+            .match_header("range", "bytes=6-")
+            .with_status(206)
+            .with_body(b"second")
+            .create_async()
+            .await;
+
+        let request = DownloadRequest {
+            url: format!("{}/resumed.bin", server.url()),
+            dest: dest.clone(),
+            model_name: "test".into(),
+            expected_sha256: None,
+        };
+
+        let progress = ProgressTracker::default();
+        download(&Client::new(), &request, &progress).await.unwrap();
+
+        let content = tokio::fs::read(&dest).await.unwrap();
+        assert_eq!(content, b"first_second");
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn download_progress_events() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/progress.bin")
+            .with_status(200)
+            .with_body(b"data")
+            .create_async()
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let request = DownloadRequest {
+            url: format!("{}/progress.bin", server.url()),
+            dest: tmp.path().join("progress.bin"),
+            model_name: "progress-test".into(),
+            expected_sha256: None,
+        };
+
+        let progress = ProgressTracker::default();
+        let mut rx = progress.subscribe();
+
+        download(&Client::new(), &request, &progress).await.unwrap();
+
+        // Should receive at least the initial and completion events
+        let first = rx.recv().await.unwrap();
+        assert_eq!(first.model_name, "progress-test");
+        assert_eq!(first.state, DownloadState::Downloading);
+
+        // Drain to find completion event
+        let mut found_complete = false;
+        while let Ok(event) = rx.try_recv() {
+            if event.state == DownloadState::Complete {
+                found_complete = true;
+                assert_eq!(event.message, Some("Download complete".into()));
+            }
+        }
+        assert!(found_complete);
+        mock.assert_async().await;
+    }
+}

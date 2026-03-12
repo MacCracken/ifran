@@ -116,4 +116,77 @@ mod tests {
         let result = verify_file(tmp.path(), "badhash", HashAlgorithm::Sha256);
         assert!(matches!(result, Err(SynapseError::IntegrityError { .. })));
     }
+
+    #[test]
+    fn verify_auto_sha256() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(b"hello world").unwrap();
+        tmp.flush().unwrap();
+
+        // 64-char hex → detected as SHA-256
+        verify_auto(
+            tmp.path(),
+            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn verify_auto_blake3() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(b"hello world").unwrap();
+        tmp.flush().unwrap();
+
+        let expected = hash_file(tmp.path(), HashAlgorithm::Blake3).unwrap();
+        // BLAKE3 produces 64 hex chars too, but verify_auto defaults to SHA-256 for 64-char.
+        // A non-64-char hash would go to BLAKE3. Verify the auto-detect logic with a truncated hash fails.
+        let result = verify_auto(tmp.path(), &expected[..32]);
+        assert!(matches!(result, Err(SynapseError::IntegrityError { .. })));
+    }
+
+    #[test]
+    fn hash_nonexistent_file() {
+        let result = hash_file(std::path::Path::new("/nonexistent/file"), HashAlgorithm::Sha256);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn hash_empty_file() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let hash = hash_file(tmp.path(), HashAlgorithm::Sha256).unwrap();
+        // SHA-256 of empty input
+        assert_eq!(
+            hash,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    #[test]
+    fn blake3_verify_roundtrip() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(b"test data for blake3").unwrap();
+        tmp.flush().unwrap();
+
+        let hash = hash_file(tmp.path(), HashAlgorithm::Blake3).unwrap();
+        verify_file(tmp.path(), &hash, HashAlgorithm::Blake3).unwrap();
+    }
+
+    #[test]
+    fn integrity_error_contains_hashes() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(b"hello world").unwrap();
+        tmp.flush().unwrap();
+
+        let result = verify_file(tmp.path(), "wrong_hash", HashAlgorithm::Sha256);
+        match result {
+            Err(SynapseError::IntegrityError { expected, actual }) => {
+                assert_eq!(expected, "wrong_hash");
+                assert_eq!(
+                    actual,
+                    "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+                );
+            }
+            other => panic!("Expected IntegrityError, got {:?}", other),
+        }
+    }
 }

@@ -307,4 +307,319 @@ mod tests {
                 .contains(&ModelFormat::SafeTensors)
         );
     }
+
+    #[test]
+    fn supports_pytorch() {
+        let backend = VllmBackend::new(None);
+        assert!(
+            backend
+                .supported_formats()
+                .contains(&ModelFormat::PyTorch)
+        );
+    }
+
+    #[test]
+    fn capabilities() {
+        let backend = VllmBackend::new(None);
+        let caps = backend.capabilities();
+        assert!(caps.supports_streaming);
+        assert!(!caps.supports_embeddings);
+        assert!(caps.supports_vision);
+        assert_eq!(caps.max_context_length, Some(131072));
+        assert!(caps.accelerators.contains(&AcceleratorType::Cuda));
+        assert!(caps.accelerators.contains(&AcceleratorType::Rocm));
+        assert!(!caps.accelerators.contains(&AcceleratorType::Cpu));
+    }
+
+    #[test]
+    fn custom_url() {
+        let backend = VllmBackend::new(Some("http://gpu-server:8000".into()));
+        assert_eq!(backend.base_url, "http://gpu-server:8000");
+    }
+
+    #[test]
+    fn build_messages_user_only() {
+        let req = InferenceRequest {
+            prompt: "Hello".into(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: None,
+        };
+        let msgs = build_messages(&req);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["role"], "user");
+    }
+
+    #[test]
+    fn build_messages_with_system() {
+        let req = InferenceRequest {
+            prompt: "Hi".into(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: Some("Be helpful.".into()),
+        };
+        let msgs = build_messages(&req);
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0]["role"], "system");
+    }
+
+    #[test]
+    fn parse_openai_response_stop() {
+        let json = serde_json::json!({
+            "choices": [{"message": {"content": "Hello!"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
+        });
+        let resp = parse_openai_response(&json).unwrap();
+        assert_eq!(resp.text, "Hello!");
+        assert_eq!(resp.usage.prompt_tokens, 5);
+        assert_eq!(resp.usage.total_tokens, 8);
+        assert!(matches!(resp.finish_reason, FinishReason::Stop));
+    }
+
+    #[test]
+    fn parse_openai_response_length() {
+        let json = serde_json::json!({
+            "choices": [{"message": {"content": "truncated"}, "finish_reason": "length"}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 512, "total_tokens": 522}
+        });
+        let resp = parse_openai_response(&json).unwrap();
+        assert!(matches!(resp.finish_reason, FinishReason::MaxTokens));
+    }
+
+    #[test]
+    fn parse_openai_response_missing_fields() {
+        let json = serde_json::json!({});
+        let resp = parse_openai_response(&json).unwrap();
+        assert_eq!(resp.text, "");
+        assert_eq!(resp.usage.total_tokens, 0);
+    }
+
+    #[tokio::test]
+    async fn load_model_success() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/v1/models")
+            .with_status(200)
+            .with_body(r#"{"data": [{"id": "test-model"}]}"#)
+            .create_async()
+            .await;
+
+        let backend = VllmBackend::new(Some(server.url()));
+        let manifest = synapse_types::model::ModelManifest {
+            info: synapse_types::model::ModelInfo {
+                id: uuid::Uuid::new_v4(),
+                name: "test-model".into(),
+                repo_id: Some("org/test-model".into()),
+                format: ModelFormat::SafeTensors,
+                quant: synapse_types::model::QuantLevel::None,
+                size_bytes: 1000,
+                parameter_count: None,
+                architecture: None,
+                license: None,
+                local_path: "/tmp/model".into(),
+                sha256: None,
+                pulled_at: chrono::Utc::now(),
+            },
+            context_length: None,
+            gpu_layers: None,
+            tensor_split: None,
+        };
+        let device = DeviceConfig {
+            accelerator: AcceleratorType::Cuda,
+            device_ids: vec![0],
+            memory_limit_mb: None,
+        };
+
+        let handle = backend.load_model(&manifest, &device).await.unwrap();
+        assert_eq!(handle.0, "vllm-org-test-model");
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn load_model_server_error() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/v1/models")
+            .with_status(500)
+            .create_async()
+            .await;
+
+        let backend = VllmBackend::new(Some(server.url()));
+        let manifest = synapse_types::model::ModelManifest {
+            info: synapse_types::model::ModelInfo {
+                id: uuid::Uuid::new_v4(),
+                name: "test".into(),
+                repo_id: None,
+                format: ModelFormat::SafeTensors,
+                quant: synapse_types::model::QuantLevel::None,
+                size_bytes: 1000,
+                parameter_count: None,
+                architecture: None,
+                license: None,
+                local_path: "/tmp/model".into(),
+                sha256: None,
+                pulled_at: chrono::Utc::now(),
+            },
+            context_length: None,
+            gpu_layers: None,
+            tensor_split: None,
+        };
+        let device = DeviceConfig {
+            accelerator: AcceleratorType::Cuda,
+            device_ids: vec![0],
+            memory_limit_mb: None,
+        };
+
+        let result = backend.load_model(&manifest, &device).await;
+        assert!(matches!(result, Err(SynapseError::BackendError(_))));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn unload_model_success() {
+        let backend = VllmBackend::new(None);
+        backend
+            .loaded
+            .write()
+            .await
+            .insert("vllm-test".into(), "test-model".into());
+
+        backend
+            .unload_model(ModelHandle("vllm-test".into()))
+            .await
+            .unwrap();
+        assert!(backend.loaded.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn unload_model_not_found() {
+        let backend = VllmBackend::new(None);
+        let result = backend
+            .unload_model(ModelHandle("nonexistent".into()))
+            .await;
+        assert!(matches!(result, Err(SynapseError::ModelNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn infer_success() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "choices": [{"message": {"content": "Hi there!"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 8, "completion_tokens": 4, "total_tokens": 12}
+                }"#,
+            )
+            .create_async()
+            .await;
+
+        let backend = VllmBackend::new(Some(server.url()));
+        backend
+            .loaded
+            .write()
+            .await
+            .insert("vllm-test".into(), "test-model".into());
+
+        let req = InferenceRequest {
+            prompt: "Hello".into(),
+            max_tokens: Some(100),
+            temperature: Some(0.5),
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: None,
+        };
+
+        let resp = backend
+            .infer(&ModelHandle("vllm-test".into()), &req)
+            .await
+            .unwrap();
+        assert_eq!(resp.text, "Hi there!");
+        assert_eq!(resp.usage.prompt_tokens, 8);
+        assert_eq!(resp.usage.completion_tokens, 4);
+        assert_eq!(resp.usage.total_tokens, 12);
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn infer_model_not_loaded() {
+        let backend = VllmBackend::new(None);
+        let req = InferenceRequest {
+            prompt: "Hello".into(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: None,
+        };
+        let result = backend
+            .infer(&ModelHandle("nonexistent".into()), &req)
+            .await;
+        assert!(matches!(result, Err(SynapseError::ModelNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn infer_server_error() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(500)
+            .with_body("GPU out of memory")
+            .create_async()
+            .await;
+
+        let backend = VllmBackend::new(Some(server.url()));
+        backend
+            .loaded
+            .write()
+            .await
+            .insert("vllm-test".into(), "model".into());
+
+        let req = InferenceRequest {
+            prompt: "Hello".into(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: None,
+        };
+        let result = backend
+            .infer(&ModelHandle("vllm-test".into()), &req)
+            .await;
+        assert!(matches!(result, Err(SynapseError::BackendError(_))));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn health_check_success() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/health")
+            .with_status(200)
+            .create_async()
+            .await;
+
+        let backend = VllmBackend::new(Some(server.url()));
+        let healthy = backend.health_check().await.unwrap();
+        assert!(healthy);
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn health_check_server_down() {
+        let backend = VllmBackend::new(Some("http://127.0.0.1:1".into()));
+        let healthy = backend.health_check().await.unwrap();
+        assert!(!healthy);
+    }
 }

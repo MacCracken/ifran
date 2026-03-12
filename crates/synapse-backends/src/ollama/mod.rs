@@ -308,4 +308,254 @@ mod tests {
         let backend = OllamaBackend::new(Some("http://remote:11434".into()));
         assert_eq!(backend.base_url, "http://remote:11434");
     }
+
+    #[test]
+    fn capabilities() {
+        let backend = OllamaBackend::new(None);
+        let caps = backend.capabilities();
+        assert!(caps.supports_streaming);
+        assert!(caps.supports_embeddings);
+        assert!(caps.supports_vision);
+        assert_eq!(caps.max_context_length, Some(131072));
+        assert!(caps.accelerators.contains(&AcceleratorType::Cpu));
+        assert!(caps.accelerators.contains(&AcceleratorType::Cuda));
+        assert!(caps.accelerators.contains(&AcceleratorType::Rocm));
+    }
+
+    #[test]
+    fn supported_formats_gguf() {
+        let backend = OllamaBackend::new(None);
+        assert_eq!(backend.supported_formats(), &[ModelFormat::Gguf]);
+    }
+
+    #[test]
+    fn build_messages_user_only() {
+        let req = InferenceRequest {
+            prompt: "Hello".into(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: None,
+        };
+        let msgs = build_ollama_messages(&req);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["role"], "user");
+        assert_eq!(msgs[0]["content"], "Hello");
+    }
+
+    #[test]
+    fn build_messages_with_system() {
+        let req = InferenceRequest {
+            prompt: "Hi".into(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: Some("Be concise.".into()),
+        };
+        let msgs = build_ollama_messages(&req);
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0]["role"], "system");
+        assert_eq!(msgs[0]["content"], "Be concise.");
+        assert_eq!(msgs[1]["role"], "user");
+    }
+
+    #[tokio::test]
+    async fn load_model_success() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", "/api/generate")
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+
+        let backend = OllamaBackend::new(Some(server.url()));
+        let manifest = ModelManifest {
+            info: synapse_types::model::ModelInfo {
+                id: uuid::Uuid::new_v4(),
+                name: "test-model".into(),
+                repo_id: Some("org/test-model".into()),
+                format: ModelFormat::Gguf,
+                quant: synapse_types::model::QuantLevel::Q4KM,
+                size_bytes: 1000,
+                parameter_count: None,
+                architecture: None,
+                license: None,
+                local_path: "/tmp/model.gguf".into(),
+                sha256: None,
+                pulled_at: chrono::Utc::now(),
+            },
+            context_length: None,
+            gpu_layers: None,
+            tensor_split: None,
+        };
+        let device = DeviceConfig {
+            accelerator: AcceleratorType::Cpu,
+            device_ids: vec![],
+            memory_limit_mb: None,
+        };
+
+        let handle = backend.load_model(&manifest, &device).await.unwrap();
+        assert_eq!(handle.0, "ollama-org-test-model");
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn unload_model_success() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", "/api/generate")
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+
+        let backend = OllamaBackend::new(Some(server.url()));
+        backend
+            .loaded
+            .write()
+            .await
+            .insert("ollama-test".into(), "test".into());
+
+        backend
+            .unload_model(ModelHandle("ollama-test".into()))
+            .await
+            .unwrap();
+
+        assert!(backend.loaded.read().await.is_empty());
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn unload_model_not_found() {
+        let backend = OllamaBackend::new(None);
+        let result = backend
+            .unload_model(ModelHandle("nonexistent".into()))
+            .await;
+        assert!(matches!(result, Err(SynapseError::ModelNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn infer_success() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", "/api/chat")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "message": {"content": "Hello! How can I help?"},
+                    "prompt_eval_count": 10,
+                    "eval_count": 5
+                }"#,
+            )
+            .create_async()
+            .await;
+
+        let backend = OllamaBackend::new(Some(server.url()));
+        backend
+            .loaded
+            .write()
+            .await
+            .insert("ollama-test".into(), "test-model".into());
+
+        let req = InferenceRequest {
+            prompt: "Hello".into(),
+            max_tokens: Some(100),
+            temperature: Some(0.5),
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: None,
+        };
+
+        let resp = backend
+            .infer(&ModelHandle("ollama-test".into()), &req)
+            .await
+            .unwrap();
+        assert_eq!(resp.text, "Hello! How can I help?");
+        assert_eq!(resp.usage.prompt_tokens, 10);
+        assert_eq!(resp.usage.completion_tokens, 5);
+        assert_eq!(resp.usage.total_tokens, 15);
+        assert!(matches!(resp.finish_reason, FinishReason::Stop));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn infer_model_not_loaded() {
+        let backend = OllamaBackend::new(None);
+        let req = InferenceRequest {
+            prompt: "Hello".into(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: None,
+        };
+        let result = backend
+            .infer(&ModelHandle("nonexistent".into()), &req)
+            .await;
+        assert!(matches!(result, Err(SynapseError::ModelNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn infer_server_error() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", "/api/chat")
+            .with_status(500)
+            .with_body("Internal Server Error")
+            .create_async()
+            .await;
+
+        let backend = OllamaBackend::new(Some(server.url()));
+        backend
+            .loaded
+            .write()
+            .await
+            .insert("ollama-test".into(), "model".into());
+
+        let req = InferenceRequest {
+            prompt: "Hello".into(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: None,
+        };
+        let result = backend
+            .infer(&ModelHandle("ollama-test".into()), &req)
+            .await;
+        assert!(matches!(result, Err(SynapseError::BackendError(_))));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn health_check_success() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/api/tags")
+            .with_status(200)
+            .with_body(r#"{"models":[]}"#)
+            .create_async()
+            .await;
+
+        let backend = OllamaBackend::new(Some(server.url()));
+        let healthy = backend.health_check().await.unwrap();
+        assert!(healthy);
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn health_check_server_down() {
+        let backend = OllamaBackend::new(Some("http://127.0.0.1:1".into()));
+        let healthy = backend.health_check().await.unwrap();
+        assert!(!healthy);
+    }
 }
