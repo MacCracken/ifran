@@ -146,7 +146,10 @@ mod tests {
 
     #[test]
     fn hash_nonexistent_file() {
-        let result = hash_file(std::path::Path::new("/nonexistent/file"), HashAlgorithm::Sha256);
+        let result = hash_file(
+            std::path::Path::new("/nonexistent/file"),
+            HashAlgorithm::Sha256,
+        );
         assert!(result.is_err());
     }
 

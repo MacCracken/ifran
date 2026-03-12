@@ -248,7 +248,9 @@ impl InferenceBackend for OllamaBackend {
                 };
                 buffer.push_str(&String::from_utf8_lossy(&chunk));
                 if buffer.len() > MAX_BUFFER_SIZE {
-                    tracing::warn!("Ollama stream buffer exceeded {MAX_BUFFER_SIZE} bytes, aborting");
+                    tracing::warn!(
+                        "Ollama stream buffer exceeded {MAX_BUFFER_SIZE} bytes, aborting"
+                    );
                     break;
                 }
 

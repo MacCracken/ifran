@@ -149,8 +149,14 @@ mod tests {
             serde_json::to_string(&TrainingMethod::FullFineTune).unwrap(),
             "\"full_fine_tune\""
         );
-        assert_eq!(serde_json::to_string(&TrainingMethod::Lora).unwrap(), "\"lora\"");
-        assert_eq!(serde_json::to_string(&TrainingMethod::Qlora).unwrap(), "\"qlora\"");
+        assert_eq!(
+            serde_json::to_string(&TrainingMethod::Lora).unwrap(),
+            "\"lora\""
+        );
+        assert_eq!(
+            serde_json::to_string(&TrainingMethod::Qlora).unwrap(),
+            "\"qlora\""
+        );
     }
 
     #[test]

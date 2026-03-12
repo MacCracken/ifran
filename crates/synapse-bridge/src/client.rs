@@ -264,9 +264,7 @@ mod tests {
     async fn report_progress_works_without_connect() {
         // report_progress doesn't check connection state (stub)
         let client = test_client();
-        let result = client
-            .report_progress("job-1", "running", 0, 0.0)
-            .await;
+        let result = client.report_progress("job-1", "running", 0, 0.0).await;
         assert!(result.is_ok());
     }
 

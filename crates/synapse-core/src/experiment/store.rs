@@ -9,7 +9,14 @@ use synapse_types::experiment::{
 use uuid::Uuid;
 
 /// Full experiment record returned by `get_experiment`.
-pub type ExperimentRecord = (ExperimentId, String, ExperimentProgram, ExperimentStatus, Option<TrialId>, Option<f64>);
+pub type ExperimentRecord = (
+    ExperimentId,
+    String,
+    ExperimentProgram,
+    ExperimentStatus,
+    Option<TrialId>,
+    Option<f64>,
+);
 
 /// Summary record returned by `list_experiments`.
 pub type ExperimentSummary = (ExperimentId, String, ExperimentStatus, Option<f64>);
@@ -25,8 +32,7 @@ impl ExperimentStore {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let conn =
-            Connection::open(path).map_err(|e| SynapseError::StorageError(e.to_string()))?;
+        let conn = Connection::open(path).map_err(|e| SynapseError::StorageError(e.to_string()))?;
         let store = Self { conn };
         store.migrate()?;
         Ok(store)
@@ -35,8 +41,8 @@ impl ExperimentStore {
     /// Create an in-memory store (for testing).
     #[cfg(test)]
     pub fn open_in_memory() -> Result<Self> {
-        let conn = Connection::open_in_memory()
-            .map_err(|e| SynapseError::StorageError(e.to_string()))?;
+        let conn =
+            Connection::open_in_memory().map_err(|e| SynapseError::StorageError(e.to_string()))?;
         let store = Self { conn };
         store.migrate()?;
         Ok(store)
@@ -209,11 +215,7 @@ impl ExperimentStore {
     }
 
     /// Get an experiment by ID, returns (id, name, program, status, best_trial_id, best_score).
-    pub fn get_experiment(
-        &self,
-        id: ExperimentId,
-    ) -> Result<ExperimentRecord>
-    {
+    pub fn get_experiment(&self, id: ExperimentId) -> Result<ExperimentRecord> {
         let mut stmt = self
             .conn
             .prepare("SELECT id, name, program_json, status, best_trial_id, best_score FROM experiments WHERE id = ?1")
@@ -228,18 +230,21 @@ impl ExperimentStore {
             let best_score: Option<f64> = row.get(5)?;
 
             let id = Uuid::parse_str(&id_str).map_err(|e| {
-                rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
             })?;
-            let program: ExperimentProgram =
-                serde_json::from_str(&program_json).map_err(|e| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        2,
-                        rusqlite::types::Type::Text,
-                        Box::new(e),
-                    )
-                })?;
-            let status: ExperimentStatus =
-                serde_json::from_str(&format!("\"{status_str}\"")).map_err(|e| {
+            let program: ExperimentProgram = serde_json::from_str(&program_json).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    2,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })?;
+            let status: ExperimentStatus = serde_json::from_str(&format!("\"{status_str}\""))
+                .map_err(|e| {
                     rusqlite::Error::FromSqlConversionFailure(
                         3,
                         rusqlite::types::Type::Text,
@@ -254,12 +259,12 @@ impl ExperimentStore {
     }
 
     /// List all experiments.
-    pub fn list_experiments(
-        &self,
-    ) -> Result<Vec<ExperimentSummary>> {
+    pub fn list_experiments(&self) -> Result<Vec<ExperimentSummary>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, name, status, best_score FROM experiments ORDER BY created_at DESC")
+            .prepare(
+                "SELECT id, name, status, best_score FROM experiments ORDER BY created_at DESC",
+            )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
 
         let results = stmt
@@ -276,14 +281,14 @@ impl ExperimentStore {
                         Box::new(e),
                     )
                 })?;
-                let status: ExperimentStatus =
-                    serde_json::from_str(&format!("\"{status_str}\"")).map_err(|e| {
-                        rusqlite::Error::FromSqlConversionFailure(
-                            2,
-                            rusqlite::types::Type::Text,
-                            Box::new(e),
-                        )
-                    })?;
+                let status: ExperimentStatus = serde_json::from_str(&format!("\"{status_str}\""))
+                    .map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        2,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    )
+                })?;
 
                 Ok((id, name, status, best_score))
             })
@@ -372,10 +377,9 @@ fn row_to_trial(row: &rusqlite::Row) -> rusqlite::Result<TrialResult> {
     let hyperparams = serde_json::from_str(&hp_json).map_err(|e| {
         rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e))
     })?;
-    let status: TrialStatus =
-        serde_json::from_str(&format!("\"{status_str}\"")).map_err(|e| {
-            rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(e))
-        })?;
+    let status: TrialStatus = serde_json::from_str(&format!("\"{status_str}\"")).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(e))
+    })?;
     let started_at = started_str.and_then(|s| {
         chrono::DateTime::parse_from_rfc3339(&s)
             .map(|dt| dt.with_timezone(&chrono::Utc))

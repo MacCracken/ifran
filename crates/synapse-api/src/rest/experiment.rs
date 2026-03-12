@@ -65,10 +65,10 @@ pub async fn create_experiment(
     State(state): State<AppState>,
     Json(req): Json<CreateExperimentRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, String)> {
-    let store = state
-        .experiment_store
-        .as_ref()
-        .ok_or((StatusCode::SERVICE_UNAVAILABLE, "Experiment store not initialized".into()))?;
+    let store = state.experiment_store.as_ref().ok_or((
+        StatusCode::SERVICE_UNAVAILABLE,
+        "Experiment store not initialized".into(),
+    ))?;
 
     let handle = synapse_train::experiment::runner::ExperimentRunner::start(
         state.job_manager.clone(),
@@ -104,10 +104,10 @@ pub async fn create_experiment(
 pub async fn list_experiments(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ExperimentListItem>>, (StatusCode, String)> {
-    let store = state
-        .experiment_store
-        .as_ref()
-        .ok_or((StatusCode::SERVICE_UNAVAILABLE, "Experiment store not initialized".into()))?;
+    let store = state.experiment_store.as_ref().ok_or((
+        StatusCode::SERVICE_UNAVAILABLE,
+        "Experiment store not initialized".into(),
+    ))?;
 
     let s = store.lock().await;
     let experiments = s
@@ -132,10 +132,10 @@ pub async fn get_experiment(
     State(state): State<AppState>,
     Path(id): Path<ExperimentId>,
 ) -> Result<Json<ExperimentResponse>, (StatusCode, String)> {
-    let store = state
-        .experiment_store
-        .as_ref()
-        .ok_or((StatusCode::SERVICE_UNAVAILABLE, "Experiment store not initialized".into()))?;
+    let store = state.experiment_store.as_ref().ok_or((
+        StatusCode::SERVICE_UNAVAILABLE,
+        "Experiment store not initialized".into(),
+    ))?;
 
     let s = store.lock().await;
     let (exp_id, name, _, status, _, best_score) = s
@@ -160,10 +160,10 @@ pub async fn get_leaderboard(
     State(state): State<AppState>,
     Path(id): Path<ExperimentId>,
 ) -> Result<Json<Vec<TrialResponse>>, (StatusCode, String)> {
-    let store = state
-        .experiment_store
-        .as_ref()
-        .ok_or((StatusCode::SERVICE_UNAVAILABLE, "Experiment store not initialized".into()))?;
+    let store = state.experiment_store.as_ref().ok_or((
+        StatusCode::SERVICE_UNAVAILABLE,
+        "Experiment store not initialized".into(),
+    ))?;
 
     let s = store.lock().await;
     let (_, _, program, _, _, _) = s

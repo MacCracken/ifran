@@ -40,12 +40,18 @@ mod tests {
 
     #[test]
     fn script_for_lora() {
-        assert_eq!(script_for_method(TrainingMethod::Lora), "scripts/train_sft.py");
+        assert_eq!(
+            script_for_method(TrainingMethod::Lora),
+            "scripts/train_sft.py"
+        );
     }
 
     #[test]
     fn script_for_qlora() {
-        assert_eq!(script_for_method(TrainingMethod::Qlora), "scripts/train_sft.py");
+        assert_eq!(
+            script_for_method(TrainingMethod::Qlora),
+            "scripts/train_sft.py"
+        );
     }
 
     #[test]
@@ -58,12 +64,18 @@ mod tests {
 
     #[test]
     fn script_for_dpo() {
-        assert_eq!(script_for_method(TrainingMethod::Dpo), "scripts/train_dpo.py");
+        assert_eq!(
+            script_for_method(TrainingMethod::Dpo),
+            "scripts/train_dpo.py"
+        );
     }
 
     #[test]
     fn script_for_rlhf() {
-        assert_eq!(script_for_method(TrainingMethod::Rlhf), "scripts/train_rlhf.py");
+        assert_eq!(
+            script_for_method(TrainingMethod::Rlhf),
+            "scripts/train_rlhf.py"
+        );
     }
 
     #[test]

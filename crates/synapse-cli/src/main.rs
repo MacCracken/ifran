@@ -189,9 +189,7 @@ async fn main() {
         Commands::Experiment { action } => match action {
             ExperimentAction::Run { program } => commands::experiment::run(&program).await,
             ExperimentAction::List => commands::experiment::list().await,
-            ExperimentAction::Status { id } => {
-                commands::experiment::status(id.as_deref()).await
-            }
+            ExperimentAction::Status { id } => commands::experiment::status(id.as_deref()).await,
             ExperimentAction::Leaderboard { id, limit } => {
                 commands::experiment::leaderboard(&id, limit).await
             }
@@ -421,8 +419,7 @@ mod tests {
 
     #[test]
     fn cli_marketplace_search() {
-        let cli =
-            Cli::try_parse_from(["synapse", "marketplace", "search", "llama"]).unwrap();
+        let cli = Cli::try_parse_from(["synapse", "marketplace", "search", "llama"]).unwrap();
         match cli.command {
             Commands::Marketplace {
                 action: MarketplaceAction::Search { query },
@@ -433,8 +430,7 @@ mod tests {
 
     #[test]
     fn cli_marketplace_publish() {
-        let cli =
-            Cli::try_parse_from(["synapse", "marketplace", "publish", "my-model"]).unwrap();
+        let cli = Cli::try_parse_from(["synapse", "marketplace", "publish", "my-model"]).unwrap();
         match cli.command {
             Commands::Marketplace {
                 action: MarketplaceAction::Publish { model },

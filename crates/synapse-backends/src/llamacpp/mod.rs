@@ -652,11 +652,23 @@ mod tests {
         let backend = LlamaCppBackend::new(None);
         insert_mock_instance(&backend, "llamacpp-kill-test", 9999).await;
 
-        assert!(backend.instances.read().await.contains_key("llamacpp-kill-test"));
+        assert!(
+            backend
+                .instances
+                .read()
+                .await
+                .contains_key("llamacpp-kill-test")
+        );
         backend
             .unload_model(ModelHandle("llamacpp-kill-test".into()))
             .await
             .unwrap();
-        assert!(!backend.instances.read().await.contains_key("llamacpp-kill-test"));
+        assert!(
+            !backend
+                .instances
+                .read()
+                .await
+                .contains_key("llamacpp-kill-test")
+        );
     }
 }

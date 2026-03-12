@@ -36,7 +36,13 @@ pub async fn execute(model: &str) -> Result<()> {
     let handle = backend.load_model(&manifest, &device).await?;
 
     manager
-        .register_loaded(model_info.id, model_info.name.clone(), handle.0.clone(), "llamacpp".into(), 0)
+        .register_loaded(
+            model_info.id,
+            model_info.name.clone(),
+            handle.0.clone(),
+            "llamacpp".into(),
+            0,
+        )
         .await;
 
     eprintln!("Model loaded. Type your message (Ctrl+D to quit).\n");

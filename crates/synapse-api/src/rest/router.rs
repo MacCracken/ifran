@@ -69,10 +69,7 @@ pub fn build(state: AppState) -> Router {
             "/experiments/{id}/leaderboard",
             get(experiment::get_leaderboard),
         )
-        .route(
-            "/experiments/{id}/stop",
-            post(experiment::stop_experiment),
-        )
+        .route("/experiments/{id}/stop", post(experiment::stop_experiment))
         // Eval
         .route("/eval/runs", post(eval::create_run).get(eval::list_runs))
         .route("/eval/runs/{id}", get(eval::get_run))

@@ -87,12 +87,18 @@ mod tests {
 
     #[test]
     fn model_format_json_values() {
-        assert_eq!(serde_json::to_string(&ModelFormat::Gguf).unwrap(), "\"gguf\"");
+        assert_eq!(
+            serde_json::to_string(&ModelFormat::Gguf).unwrap(),
+            "\"gguf\""
+        );
         assert_eq!(
             serde_json::to_string(&ModelFormat::SafeTensors).unwrap(),
             "\"safetensors\""
         );
-        assert_eq!(serde_json::to_string(&ModelFormat::Onnx).unwrap(), "\"onnx\"");
+        assert_eq!(
+            serde_json::to_string(&ModelFormat::Onnx).unwrap(),
+            "\"onnx\""
+        );
         assert_eq!(
             serde_json::to_string(&ModelFormat::TensorRt).unwrap(),
             "\"tensorrt\""

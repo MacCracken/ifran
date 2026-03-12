@@ -179,7 +179,10 @@ mod tests {
 
     #[test]
     fn connection_state_debug_format() {
-        assert_eq!(format!("{:?}", ConnectionState::Disconnected), "Disconnected");
+        assert_eq!(
+            format!("{:?}", ConnectionState::Disconnected),
+            "Disconnected"
+        );
         assert_eq!(format!("{:?}", ConnectionState::Connecting), "Connecting");
         assert_eq!(format!("{:?}", ConnectionState::Connected), "Connected");
         assert_eq!(format!("{:?}", ConnectionState::Degraded), "Degraded");

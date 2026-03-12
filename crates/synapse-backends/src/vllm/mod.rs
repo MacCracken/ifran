@@ -322,11 +322,7 @@ mod tests {
     #[test]
     fn supports_pytorch() {
         let backend = VllmBackend::new(None);
-        assert!(
-            backend
-                .supported_formats()
-                .contains(&ModelFormat::PyTorch)
-        );
+        assert!(backend.supported_formats().contains(&ModelFormat::PyTorch));
     }
 
     #[test]
@@ -605,9 +601,7 @@ mod tests {
             stop_sequences: None,
             system_prompt: None,
         };
-        let result = backend
-            .infer(&ModelHandle("vllm-test".into()), &req)
-            .await;
+        let result = backend.infer(&ModelHandle("vllm-test".into()), &req).await;
         assert!(matches!(result, Err(SynapseError::BackendError(_))));
         mock.assert_async().await;
     }

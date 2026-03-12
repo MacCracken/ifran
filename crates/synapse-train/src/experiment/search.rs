@@ -194,11 +194,7 @@ mod tests {
                 values: vec![1e-5, 5e-5, 1e-4, 2e-4, 5e-4],
             },
         }];
-        let ss = SearchSpace::new(
-            base_hp(),
-            ranges,
-            SearchStrategy::Random { n_trials: 7 },
-        );
+        let ss = SearchSpace::new(base_hp(), ranges, SearchStrategy::Random { n_trials: 7 });
         let trials = ss.generate_trials();
         assert_eq!(trials.len(), 7);
     }

@@ -108,7 +108,10 @@ mod tests {
 
     #[test]
     fn finish_reason_serde_values() {
-        assert_eq!(serde_json::to_string(&FinishReason::Stop).unwrap(), "\"stop\"");
+        assert_eq!(
+            serde_json::to_string(&FinishReason::Stop).unwrap(),
+            "\"stop\""
+        );
         assert_eq!(
             serde_json::to_string(&FinishReason::MaxTokens).unwrap(),
             "\"max_tokens\""

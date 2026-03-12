@@ -61,7 +61,9 @@ pub struct DistributedJobState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::training::{DatasetConfig, DatasetFormat, HyperParams, TrainingJobConfig, TrainingMethod};
+    use crate::training::{
+        DatasetConfig, DatasetFormat, HyperParams, TrainingJobConfig, TrainingMethod,
+    };
 
     #[test]
     fn distributed_strategy_serde_roundtrip() {

@@ -154,9 +154,10 @@ impl HfClient {
 
         // No filter — return the first GGUF file
         // Safety: files is guaranteed non-empty by the check above
-        files.into_iter().next().ok_or_else(|| {
-            SynapseError::ModelNotFound(format!("No GGUF files found in {repo_id}"))
-        })
+        files
+            .into_iter()
+            .next()
+            .ok_or_else(|| SynapseError::ModelNotFound(format!("No GGUF files found in {repo_id}")))
     }
 
     /// Build the download URL for a file in a repo.

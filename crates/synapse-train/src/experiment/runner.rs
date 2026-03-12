@@ -191,8 +191,7 @@ impl ExperimentRunner {
             match train_result {
                 Ok(final_loss) => {
                     trial.train_loss = final_loss;
-                    trial.checkpoint_path =
-                        Some(format!("/workspace/checkpoints/{output_name}"));
+                    trial.checkpoint_path = Some(format!("/workspace/checkpoints/{output_name}"));
 
                     // Use training loss as eval score for now
                     // (real eval would run perplexity/benchmark on the checkpoint)
@@ -263,10 +262,7 @@ impl ExperimentRunner {
     }
 
     /// Submit a training job, wait for it to finish, return final loss.
-    async fn run_training_trial(
-        &mut self,
-        config: &TrainingJobConfig,
-    ) -> Result<Option<f64>> {
+    async fn run_training_trial(&mut self, config: &TrainingJobConfig) -> Result<Option<f64>> {
         let job_id = self.job_manager.create_job(config.clone()).await?;
         self.job_manager.start_job(job_id).await?;
 

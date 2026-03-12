@@ -9,8 +9,8 @@ use crate::hardware::detect;
 use crate::lifecycle::memory;
 use std::collections::HashMap;
 use std::sync::Arc;
-use synapse_types::backend::{AcceleratorType, DeviceConfig};
 use synapse_types::SynapseError;
+use synapse_types::backend::{AcceleratorType, DeviceConfig};
 use synapse_types::error::Result;
 use synapse_types::model::{ModelId, ModelManifest};
 use tokio::sync::RwLock;
@@ -144,7 +144,13 @@ mod tests {
 
         let id = uuid::Uuid::new_v4();
         manager
-            .register_loaded(id, "test-model".into(), "handle-1".into(), "llamacpp".into(), 4000)
+            .register_loaded(
+                id,
+                "test-model".into(),
+                "handle-1".into(),
+                "llamacpp".into(),
+                4000,
+            )
             .await;
 
         assert!(manager.is_loaded(&id).await);
@@ -157,7 +163,13 @@ mod tests {
         let manager = ModelManager::new(512);
         let id = uuid::Uuid::new_v4();
         manager
-            .register_loaded(id, "test-model".into(), "handle-1".into(), "llamacpp".into(), 4000)
+            .register_loaded(
+                id,
+                "test-model".into(),
+                "handle-1".into(),
+                "llamacpp".into(),
+                4000,
+            )
             .await;
 
         let loaded = manager.get_loaded(&id).await;
@@ -197,7 +209,13 @@ mod tests {
         let manager = ModelManager::new(512);
         let id = uuid::Uuid::new_v4();
         manager
-            .register_loaded(id, "test-model".into(), "handle-1".into(), "llamacpp".into(), 4000)
+            .register_loaded(
+                id,
+                "test-model".into(),
+                "handle-1".into(),
+                "llamacpp".into(),
+                4000,
+            )
             .await;
 
         let removed = manager.unregister(&id).await;

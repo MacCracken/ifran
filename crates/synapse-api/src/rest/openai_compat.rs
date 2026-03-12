@@ -272,7 +272,8 @@ mod tests {
 
     #[test]
     fn chat_completion_request_with_stream() {
-        let json = r#"{"model": "t", "messages": [{"role": "user", "content": "h"}], "stream": true}"#;
+        let json =
+            r#"{"model": "t", "messages": [{"role": "user", "content": "h"}], "stream": true}"#;
         let req: ChatCompletionRequest = serde_json::from_str(json).unwrap();
         assert!(req.stream);
     }

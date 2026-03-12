@@ -49,7 +49,10 @@ pub async fn run(program_path: &str) -> Result<()> {
 
     let handle = ExperimentRunner::start(job_manager, store.clone(), program).await?;
     eprintln!("Experiment started: {}", handle.experiment_id);
-    eprintln!("Use 'synapse experiment status {}' to monitor", handle.experiment_id);
+    eprintln!(
+        "Use 'synapse experiment status {}' to monitor",
+        handle.experiment_id
+    );
 
     // Wait for completion by polling
     loop {
@@ -137,9 +140,8 @@ pub async fn status(id: Option<&str>) -> Result<()> {
     let store = ExperimentStore::open(&store_path)?;
 
     if let Some(id_str) = id {
-        let experiment_id: ExperimentId = uuid::Uuid::parse_str(id_str).map_err(|e| {
-            synapse_types::SynapseError::ConfigError(format!("Invalid UUID: {e}"))
-        })?;
+        let experiment_id: ExperimentId = uuid::Uuid::parse_str(id_str)
+            .map_err(|e| synapse_types::SynapseError::ConfigError(format!("Invalid UUID: {e}")))?;
 
         let (_, name, program, exp_status, _best_trial, best_score) =
             store.get_experiment(experiment_id)?;
@@ -208,15 +210,17 @@ pub async fn leaderboard(id: &str, limit: usize) -> Result<()> {
     let store_path = config.storage.database.with_file_name("experiments.db");
     let store = ExperimentStore::open(&store_path)?;
 
-    let experiment_id: ExperimentId = uuid::Uuid::parse_str(id).map_err(|e| {
-        synapse_types::SynapseError::ConfigError(format!("Invalid UUID: {e}"))
-    })?;
+    let experiment_id: ExperimentId = uuid::Uuid::parse_str(id)
+        .map_err(|e| synapse_types::SynapseError::ConfigError(format!("Invalid UUID: {e}")))?;
 
     let (_, name, program, _, _, _) = store.get_experiment(experiment_id)?;
     let direction = program.objective.direction;
     let trials = store.get_leaderboard(experiment_id, direction, limit)?;
 
-    eprintln!("Leaderboard: {name} ({:?} {:?})", program.objective.metric, direction);
+    eprintln!(
+        "Leaderboard: {name} ({:?} {:?})",
+        program.objective.metric, direction
+    );
     eprintln!(
         "{:<4}  {:<12}  {:<12}  {:<12}  {:<8}",
         "RANK", "EVAL SCORE", "TRAIN LOSS", "LR", "SECS"
@@ -258,9 +262,8 @@ pub async fn stop(id: &str) -> Result<()> {
     let store_path = config.storage.database.with_file_name("experiments.db");
     let store = ExperimentStore::open(&store_path)?;
 
-    let experiment_id: ExperimentId = uuid::Uuid::parse_str(id).map_err(|e| {
-        synapse_types::SynapseError::ConfigError(format!("Invalid UUID: {e}"))
-    })?;
+    let experiment_id: ExperimentId = uuid::Uuid::parse_str(id)
+        .map_err(|e| synapse_types::SynapseError::ConfigError(format!("Invalid UUID: {e}")))?;
 
     store.update_experiment_status(experiment_id, ExperimentStatus::Stopped)?;
     eprintln!("Experiment {experiment_id} marked as stopped.");
