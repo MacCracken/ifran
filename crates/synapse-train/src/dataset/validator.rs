@@ -74,8 +74,7 @@ fn count_csv_columns(line: &str) -> usize {
     }
     let mut cols = 1;
     let mut in_quotes = false;
-    let mut chars = line.chars();
-    while let Some(c) = chars.next() {
+    for c in line.chars() {
         match c {
             '"' => in_quotes = !in_quotes,
             ',' if !in_quotes => cols += 1,
