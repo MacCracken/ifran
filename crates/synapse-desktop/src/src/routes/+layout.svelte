@@ -13,6 +13,7 @@
       <li><a href="/models">Models</a></li>
       <li><a href="/chat">Chat</a></li>
       <li><a href="/training">Training</a></li>
+      <li><a href="/rlhf">RLHF</a></li>
       <li><a href="/settings">Settings</a></li>
     </ul>
   </nav>

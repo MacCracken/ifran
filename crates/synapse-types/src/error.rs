@@ -44,6 +44,9 @@ pub enum SynapseError {
     #[error("Distributed training error: {0}")]
     DistributedError(String),
 
+    #[error("RAG pipeline error: {0}")]
+    RagError(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -123,6 +126,7 @@ mod tests {
             SynapseError::EvalError("x".into()),
             SynapseError::MarketplaceError("x".into()),
             SynapseError::DistributedError("x".into()),
+            SynapseError::RagError("x".into()),
             SynapseError::Other("x".into()),
         ];
         for e in errors {

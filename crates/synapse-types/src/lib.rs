@@ -6,7 +6,9 @@ pub mod experiment;
 pub mod inference;
 pub mod marketplace;
 pub mod model;
+pub mod rag;
 pub mod registry;
+pub mod rlhf;
 pub mod training;
 
 // Re-export core types at crate root

@@ -10,6 +10,8 @@ use synapse_core::eval::runner::EvalRunner;
 use synapse_core::experiment::store::ExperimentStore;
 use synapse_core::lifecycle::manager::ModelManager;
 use synapse_core::marketplace::catalog::MarketplaceCatalog;
+use synapse_core::rag::store::RagStore;
+use synapse_core::rlhf::store::AnnotationStore;
 use synapse_core::storage::db::ModelDatabase;
 use synapse_train::distributed::coordinator::DistributedCoordinator;
 use synapse_train::executor::ExecutorKind;
@@ -34,6 +36,8 @@ pub struct AppState {
     pub distributed_coordinator: Arc<DistributedCoordinator>,
     pub experiment_store: Option<Arc<Mutex<ExperimentStore>>>,
     pub experiment_runners: Arc<Mutex<HashMap<ExperimentId, ExperimentHandle>>>,
+    pub rag_store: Option<Arc<Mutex<RagStore>>>,
+    pub annotation_store: Option<Arc<Mutex<AnnotationStore>>>,
     pub bridge_client: Option<Arc<BridgeClient>>,
     pub bridge_server: Option<Arc<BridgeServer>>,
 }
@@ -57,6 +61,14 @@ impl AppState {
         // Initialize experiment store
         let experiment_store_path = config.storage.database.with_file_name("experiments.db");
         let experiment_store = ExperimentStore::open(&experiment_store_path).ok();
+
+        // Initialize RAG store
+        let rag_store_path = config.storage.database.with_file_name("rag.db");
+        let rag_store = RagStore::open(&rag_store_path).ok();
+
+        // Initialize annotation store
+        let annotation_store_path = config.storage.database.with_file_name("annotations.db");
+        let annotation_store = AnnotationStore::open(&annotation_store_path).ok();
 
         // Initialize bridge if enabled
         let (bridge_client, bridge_server) = if config.bridge.enabled {
@@ -92,6 +104,8 @@ impl AppState {
             distributed_coordinator: Arc::new(distributed_coordinator),
             experiment_store: experiment_store.map(|s| Arc::new(Mutex::new(s))),
             experiment_runners: Arc::new(Mutex::new(HashMap::new())),
+            rag_store: rag_store.map(|s| Arc::new(Mutex::new(s))),
+            annotation_store: annotation_store.map(|s| Arc::new(Mutex::new(s))),
             bridge_client,
             bridge_server,
         })

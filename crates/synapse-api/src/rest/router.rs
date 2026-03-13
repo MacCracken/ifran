@@ -2,8 +2,8 @@
 
 use crate::middleware;
 use crate::rest::{
-    bridge, distributed, eval, experiment, inference, marketplace, models, openai_compat, system,
-    training,
+    bridge, distributed, eval, experiment, inference, marketplace, models, openai_compat, rag,
+    rlhf, system, training,
 };
 use crate::state::AppState;
 use axum::Router;
@@ -83,6 +83,30 @@ pub fn build(state: AppState) -> Router {
         )
         .route("/marketplace/download/{name}", get(marketplace::download))
         .route("/marketplace/pull", post(marketplace::pull))
+        // RAG
+        .route(
+            "/rag/pipelines",
+            post(rag::create_pipeline).get(rag::list_pipelines),
+        )
+        .route(
+            "/rag/pipelines/{id}",
+            get(rag::get_pipeline).delete(rag::delete_pipeline),
+        )
+        .route("/rag/pipelines/{id}/ingest", post(rag::ingest_document))
+        .route("/rag/query", post(rag::query))
+        // RLHF
+        .route(
+            "/rlhf/sessions",
+            post(rlhf::create_session).get(rlhf::list_sessions),
+        )
+        .route("/rlhf/sessions/{id}", get(rlhf::get_session))
+        .route(
+            "/rlhf/sessions/{id}/pairs",
+            post(rlhf::add_pairs).get(rlhf::get_pairs),
+        )
+        .route("/rlhf/pairs/{id}/annotate", post(rlhf::annotate))
+        .route("/rlhf/sessions/{id}/export", post(rlhf::export_session))
+        .route("/rlhf/sessions/{id}/stats", get(rlhf::get_stats))
         // Bridge
         .route("/bridge/status", get(bridge::status))
         .route("/bridge/connect", post(bridge::connect))

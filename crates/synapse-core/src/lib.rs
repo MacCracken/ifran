@@ -5,5 +5,7 @@ pub mod hardware;
 pub mod lifecycle;
 pub mod marketplace;
 pub mod pull;
+pub mod rag;
 pub mod registry;
+pub mod rlhf;
 pub mod storage;

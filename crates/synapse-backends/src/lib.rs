@@ -30,6 +30,9 @@ pub mod tensorrt;
 #[cfg(feature = "candle-backend")]
 pub mod candle;
 
+#[cfg(feature = "wasm")]
+pub mod wasm;
+
 // Re-exports for convenience.
 pub use router::BackendRouter;
 pub use traits::{InferenceBackend, ModelHandle};

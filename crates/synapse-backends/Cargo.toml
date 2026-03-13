@@ -13,6 +13,7 @@ onnx = []
 tensorrt = []
 vllm = []
 ollama = []
+wasm = []
 
 [dependencies]
 synapse-types = { path = "../synapse-types" }

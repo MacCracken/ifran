@@ -116,3 +116,34 @@ export async function createJob(config: unknown): Promise<TrainingJob> {
 export async function cancelJob(id: string): Promise<TrainingJob> {
   return invoke("cancel_job", { id });
 }
+
+// RLHF
+export async function listRlhfSessions(): Promise<{ data: unknown[] }> {
+  return invoke("list_sessions");
+}
+
+export async function createRlhfSession(
+  name: string,
+  modelName: string,
+): Promise<unknown> {
+  return invoke("create_session", { name, modelName });
+}
+
+export async function getNextPair(sessionId: string): Promise<unknown> {
+  return invoke("get_next_pair", { sessionId });
+}
+
+export async function submitAnnotation(
+  pairId: string,
+  preference: string,
+): Promise<unknown> {
+  return invoke("submit_annotation", { pairId, preference });
+}
+
+export async function getSessionStats(sessionId: string): Promise<unknown> {
+  return invoke("get_session_stats", { sessionId });
+}
+
+export async function exportRlhfSession(sessionId: string): Promise<unknown> {
+  return invoke("export_session", { sessionId });
+}

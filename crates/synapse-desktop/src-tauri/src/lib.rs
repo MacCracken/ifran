@@ -13,6 +13,12 @@ pub fn run() {
             commands::training::list_jobs,
             commands::training::create_job,
             commands::training::cancel_job,
+            commands::rlhf::list_sessions,
+            commands::rlhf::create_session,
+            commands::rlhf::get_next_pair,
+            commands::rlhf::submit_annotation,
+            commands::rlhf::get_session_stats,
+            commands::rlhf::export_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

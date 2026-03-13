@@ -6,6 +6,8 @@ pub mod inference;
 pub mod marketplace;
 pub mod models;
 pub mod openai_compat;
+pub mod rag;
+pub mod rlhf;
 pub mod router;
 pub mod system;
 pub mod training;

@@ -5,6 +5,35 @@ All notable changes to Synapse will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 
+## [2026.3.13] — (in progress)
+
+### Added
+
+#### RAG Pipeline Integration
+- `synapse-types/rag`: RAG types — `RagPipelineConfig`, `DocumentInfo`, `ChunkInfo`, `RagQuery`, `RagResult`, `RagSource` with serde defaults for chunk_size (512), chunk_overlap (64), similarity_top_k (5)
+- `synapse-types/error`: `RagError(String)` variant added to `SynapseError`
+- `synapse-core/rag/store`: SQLite RAG store — `rag_pipelines`, `rag_documents`, `rag_chunks` tables with full CRUD, embedding blob serialization (f32 → little-endian bytes), cosine similarity search
+- `synapse-core/rag/chunker`: Token-boundary-aware text splitter with configurable chunk size and overlap
+- `synapse-core/rag/pipeline`: RAG pipeline orchestrator — document ingestion (chunk → embed → store) and similarity-based retrieval with pluggable embedding function
+- `synapse-api/rest/rag`: REST endpoints — `POST /rag/pipelines`, `GET /rag/pipelines`, `GET /rag/pipelines/{id}`, `DELETE /rag/pipelines/{id}`, `POST /rag/pipelines/{id}/ingest`, `POST /rag/query`
+- `synapse-api/state`: `rag_store` added to `AppState`
+
+#### WebAssembly Builds
+- `synapse-backends/wasm`: WebAssembly backend implementing `InferenceBackend` — feature-gated (`wasm`, opt-in, not in defaults), supports GGUF and ONNX formats, CPU-only, 4096 context
+- `synapse-backends/wasm`: Pluggable `WasmRuntime` trait for mock testing and real browser execution, `StubWasmRuntime` default for server-side testing
+- `synapse-backends/Cargo.toml`: `wasm` feature flag added
+
+#### RLHF Annotation UI
+- `synapse-types/rlhf`: RLHF types — `AnnotationSession`, `AnnotationSessionStatus`, `AnnotationPair`, `Preference` (ResponseA/ResponseB/Tie/BothBad), `AnnotationStats`, `AnnotationExport`
+- `synapse-core/rlhf/store`: SQLite annotation store — `annotation_sessions` and `annotation_pairs` tables with session/pair CRUD, preference annotation, stats computation, DPO-format export
+- `synapse-core/rlhf/generator`: Annotation pair generation — single pair creation and batch generation from prompts with pluggable inference function
+- `synapse-api/rest/rlhf`: REST endpoints — `POST /rlhf/sessions`, `GET /rlhf/sessions`, `GET /rlhf/sessions/{id}`, `POST /rlhf/sessions/{id}/pairs`, `GET /rlhf/sessions/{id}/pairs`, `POST /rlhf/pairs/{id}/annotate`, `POST /rlhf/sessions/{id}/export`, `GET /rlhf/sessions/{id}/stats`
+- `synapse-api/state`: `annotation_store` added to `AppState`
+- `synapse-desktop/commands/rlhf`: Tauri commands — `list_sessions`, `create_session`, `get_next_pair`, `submit_annotation`, `get_session_stats`, `export_session`
+- `synapse-desktop/routes/rlhf`: Annotation UI — session management, side-by-side response comparison, preference buttons, progress bar, JSON export
+
+---
+
 ## [2026.3.11] — (in progress)
 
 ### Added
