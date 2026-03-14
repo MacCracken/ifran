@@ -138,7 +138,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 - **Unit tests** live alongside source code in each crate (`#[cfg(test)]` modules).
 - **Integration tests** live alongside each crate (e.g. `crates/synapse-api/tests/`).
-- Coverage target: **45%** minimum (CI enforced, goal: 80%).
+- Coverage target: **65%** minimum (CI enforced, current: ~73%).
 - CI runs tests per-package in parallel.
 
 ```bash

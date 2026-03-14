@@ -1484,3 +1484,512 @@ async fn distributed_assign_worker_not_found() {
     // Handler returns BAD_REQUEST for nonexistent distributed jobs
     assert!(resp.status() == StatusCode::NOT_FOUND || resp.status() == StatusCode::BAD_REQUEST);
 }
+
+// -- RLHF --
+
+#[tokio::test]
+async fn rlhf_create_session() {
+    let (app, _tmp) = test_app();
+
+    let body = serde_json::json!({
+        "name": "test-session",
+        "model_name": "llama-7b"
+    });
+
+    let resp = app
+        .oneshot(
+            Request::post("/rlhf/sessions")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["name"], "test-session");
+    assert_eq!(json["model_name"], "llama-7b");
+    assert!(json["id"].is_string());
+}
+
+#[tokio::test]
+async fn rlhf_list_sessions_empty() {
+    let (app, _tmp) = test_app();
+
+    let resp = app
+        .oneshot(Request::get("/rlhf/sessions").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["data"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn rlhf_create_and_list_sessions() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let config = test_config(&tmp);
+    let state = AppState::new(config).unwrap();
+    let app = synapse_api::router::build(state);
+
+    // Create a session
+    let body = serde_json::json!({
+        "name": "session-1",
+        "model_name": "llama-7b"
+    });
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post("/rlhf/sessions")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+
+    // List sessions
+    let resp = app
+        .oneshot(Request::get("/rlhf/sessions").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["data"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn rlhf_add_pairs_and_get() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let config = test_config(&tmp);
+    let state = AppState::new(config).unwrap();
+    let app = synapse_api::router::build(state);
+
+    // Create session
+    let body = serde_json::json!({
+        "name": "pair-test",
+        "model_name": "llama-7b"
+    });
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post("/rlhf/sessions")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let resp_body = resp.into_body().collect().await.unwrap().to_bytes();
+    let session: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
+    let session_id = session["id"].as_str().unwrap();
+
+    // Add pairs
+    let pairs_body = serde_json::json!({
+        "pairs": [
+            {"prompt": "What is Rust?", "response_a": "A language", "response_b": "A systems language"},
+            {"prompt": "What is Python?", "response_a": "A scripting language", "response_b": "A general purpose language"}
+        ]
+    });
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/rlhf/sessions/{session_id}/pairs"))
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&pairs_body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["added"], 2);
+
+    // Get next unannotated pair
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/rlhf/sessions/{session_id}/pairs"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json["prompt"].is_string());
+
+    // Get session detail with stats
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/rlhf/sessions/{session_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["stats"]["total_pairs"], 2);
+    assert_eq!(json["stats"]["remaining"], 2);
+
+    // Get stats
+    let resp = app
+        .oneshot(
+            Request::get(format!("/rlhf/sessions/{session_id}/stats"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["total_pairs"], 2);
+}
+
+#[tokio::test]
+async fn rlhf_annotate_pair() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let config = test_config(&tmp);
+    let state = AppState::new(config).unwrap();
+    let app = synapse_api::router::build(state);
+
+    // Create session + add pair
+    let session_body = serde_json::json!({"name": "annotate-test", "model_name": "llama"});
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post("/rlhf/sessions")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&session_body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let resp_body = resp.into_body().collect().await.unwrap().to_bytes();
+    let session: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
+    let session_id = session["id"].as_str().unwrap();
+
+    let pairs_body = serde_json::json!({
+        "pairs": [{"prompt": "test", "response_a": "a", "response_b": "b"}]
+    });
+    app.clone()
+        .oneshot(
+            Request::post(format!("/rlhf/sessions/{session_id}/pairs"))
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&pairs_body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Get the pair ID
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/rlhf/sessions/{session_id}/pairs"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let pair: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let pair_id = pair["id"].as_str().unwrap();
+
+    // Annotate
+    let annotate_body = serde_json::json!({"preference": "response_a"});
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/rlhf/pairs/{pair_id}/annotate"))
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&annotate_body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Export session
+    let resp = app
+        .oneshot(
+            Request::post(format!("/rlhf/sessions/{session_id}/export"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["format"], "dpo_jsonl");
+    assert_eq!(json["count"], 1);
+}
+
+// -- RAG --
+
+#[tokio::test]
+async fn rag_create_pipeline() {
+    let (app, _tmp) = test_app();
+
+    let body = serde_json::json!({
+        "name": "test-rag",
+        "embedding_model": "nomic-embed",
+        "chunk_size": 256,
+        "chunk_overlap": 32,
+        "similarity_top_k": 3
+    });
+
+    let resp = app
+        .oneshot(
+            Request::post("/rag/pipelines")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["name"], "test-rag");
+}
+
+#[tokio::test]
+async fn rag_list_pipelines_empty() {
+    let (app, _tmp) = test_app();
+
+    let resp = app
+        .oneshot(Request::get("/rag/pipelines").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["data"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn rag_pipeline_lifecycle() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let config = test_config(&tmp);
+    let state = AppState::new(config).unwrap();
+    let app = synapse_api::router::build(state);
+
+    // Create pipeline
+    let body = serde_json::json!({
+        "name": "lifecycle-test",
+        "embedding_model": "nomic-embed"
+    });
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post("/rag/pipelines")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let resp_body = resp.into_body().collect().await.unwrap().to_bytes();
+    let pipeline: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
+    let pipeline_id = pipeline["id"].as_str().unwrap();
+
+    // Get pipeline
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/rag/pipelines/{pipeline_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["name"], "lifecycle-test");
+    assert_eq!(json["chunk_size"], 512); // default
+
+    // List pipelines
+    let resp = app
+        .clone()
+        .oneshot(Request::get("/rag/pipelines").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["data"].as_array().unwrap().len(), 1);
+
+    // Ingest a document
+    let ingest_body = serde_json::json!({
+        "filename": "test.txt",
+        "content": "Rust is a systems programming language focused on safety and performance."
+    });
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/rag/pipelines/{pipeline_id}/ingest"))
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&ingest_body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json["document_id"].is_string());
+    assert!(json["chunks"].as_u64().unwrap() >= 1);
+
+    // Query
+    let query_body = serde_json::json!({
+        "query": "What is Rust?",
+        "pipeline_id": pipeline_id,
+        "top_k": 3,
+        "include_sources": true
+    });
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post("/rag/query")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&query_body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json["sources"].is_array());
+
+    // Delete pipeline
+    let resp = app
+        .oneshot(
+            Request::delete(format!("/rag/pipelines/{pipeline_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+}
+
+// -- Eval extended --
+
+#[tokio::test]
+async fn eval_create_run_with_benchmarks() {
+    let (app, _tmp) = test_app();
+
+    let body = serde_json::json!({
+        "model_name": "llama-7b",
+        "benchmarks": ["custom"],
+        "sample_limit": 10
+    });
+
+    let resp = app
+        .oneshot(
+            Request::post("/eval/runs")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["model_name"], "llama-7b");
+    assert!(json["run_id"].is_string());
+}
+
+#[tokio::test]
+async fn eval_list_runs() {
+    let (app, _tmp) = test_app();
+
+    let resp = app
+        .oneshot(Request::get("/eval/runs").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json.is_array());
+}
+
+#[tokio::test]
+async fn eval_create_get_and_list_run() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let config = test_config(&tmp);
+    let state = AppState::new(config).unwrap();
+    let app = synapse_api::router::build(state);
+
+    // Create
+    let body = serde_json::json!({
+        "model_name": "test-model",
+        "benchmarks": ["perplexity", "mmlu"]
+    });
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post("/eval/runs")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let resp_body = resp.into_body().collect().await.unwrap().to_bytes();
+    let run: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
+    let run_id = run["run_id"].as_str().unwrap();
+
+    // Get
+    let resp = app
+        .oneshot(
+            Request::get(format!("/eval/runs/{run_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["model_name"], "test-model");
+}
+
+#[tokio::test]
+async fn eval_get_nonexistent_run() {
+    let (app, _tmp) = test_app();
+    let fake_id = uuid::Uuid::new_v4();
+
+    let resp = app
+        .oneshot(
+            Request::get(format!("/eval/runs/{fake_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}

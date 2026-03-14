@@ -178,6 +178,7 @@ pub async fn get_run(
     Ok(Json(run_to_response(&run)))
 }
 
+/// Convert internal run state to API response (visible for testing).
 fn run_to_response(run: &synapse_core::eval::runner::EvalRunState) -> EvalRunResponse {
     EvalRunResponse {
         run_id: run.run_id,
@@ -196,5 +197,147 @@ fn run_to_response(run: &synapse_core::eval::runner::EvalRunState) -> EvalRunRes
             })
             .collect(),
         error: run.error.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use synapse_core::eval::runner::EvalRunState;
+    use synapse_types::eval::*;
+
+    #[test]
+    fn create_eval_request_deserialize() {
+        let json = r#"{
+            "model_name": "llama-7b",
+            "benchmarks": ["custom", "mmlu"],
+            "sample_limit": 100,
+            "dataset_path": "/data/eval.jsonl"
+        }"#;
+        let req: CreateEvalRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.model_name, "llama-7b");
+        assert_eq!(req.benchmarks.len(), 2);
+        assert_eq!(req.sample_limit, Some(100));
+        assert_eq!(req.dataset_path, Some("/data/eval.jsonl".into()));
+    }
+
+    #[test]
+    fn create_eval_request_minimal() {
+        let json = r#"{"model_name": "test", "benchmarks": ["perplexity"]}"#;
+        let req: CreateEvalRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.model_name, "test");
+        assert_eq!(req.benchmarks, vec![BenchmarkKind::Perplexity]);
+        assert_eq!(req.sample_limit, None);
+        assert_eq!(req.dataset_path, None);
+    }
+
+    #[test]
+    fn eval_run_response_serializes() {
+        let resp = EvalRunResponse {
+            run_id: uuid::Uuid::nil(),
+            model_name: "test-model".into(),
+            status: EvalStatus::Completed,
+            benchmarks: vec![BenchmarkKind::Custom],
+            results: vec![EvalResultResponse {
+                benchmark: BenchmarkKind::Custom,
+                score: 0.85,
+                samples_evaluated: 100,
+                duration_secs: 12.5,
+                evaluated_at: "2026-03-14T00:00:00Z".into(),
+            }],
+            error: None,
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["model_name"], "test-model");
+        assert_eq!(json["results"][0]["score"], 0.85);
+        assert_eq!(json["results"][0]["samples_evaluated"], 100);
+        assert!(json["error"].is_null());
+    }
+
+    #[test]
+    fn eval_run_response_with_error() {
+        let resp = EvalRunResponse {
+            run_id: uuid::Uuid::nil(),
+            model_name: "test".into(),
+            status: EvalStatus::Failed,
+            benchmarks: vec![],
+            results: vec![],
+            error: Some("OOM".into()),
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["error"], "OOM");
+    }
+
+    #[test]
+    fn run_to_response_queued() {
+        let state = EvalRunState {
+            run_id: uuid::Uuid::nil(),
+            config: EvalConfig {
+                model_name: "test-model".into(),
+                benchmarks: vec![BenchmarkKind::Mmlu],
+                sample_limit: Some(50),
+                dataset_path: None,
+            },
+            status: EvalStatus::Queued,
+            results: vec![],
+            error: None,
+        };
+        let resp = run_to_response(&state);
+        assert_eq!(resp.model_name, "test-model");
+        assert_eq!(resp.benchmarks, vec![BenchmarkKind::Mmlu]);
+        assert!(matches!(resp.status, EvalStatus::Queued));
+        assert!(resp.results.is_empty());
+        assert!(resp.error.is_none());
+    }
+
+    #[test]
+    fn run_to_response_with_results() {
+        let now = chrono::Utc::now();
+        let state = EvalRunState {
+            run_id: uuid::Uuid::nil(),
+            config: EvalConfig {
+                model_name: "model".into(),
+                benchmarks: vec![BenchmarkKind::Custom],
+                sample_limit: None,
+                dataset_path: Some("/data.jsonl".into()),
+            },
+            status: EvalStatus::Completed,
+            results: vec![EvalResult {
+                run_id: uuid::Uuid::nil(),
+                model_name: "model".into(),
+                benchmark: BenchmarkKind::Custom,
+                score: 0.92,
+                details: None,
+                samples_evaluated: 200,
+                duration_secs: 30.0,
+                evaluated_at: now,
+            }],
+            error: None,
+        };
+        let resp = run_to_response(&state);
+        assert_eq!(resp.results.len(), 1);
+        assert_eq!(resp.results[0].score, 0.92);
+        assert_eq!(resp.results[0].samples_evaluated, 200);
+        assert_eq!(resp.results[0].duration_secs, 30.0);
+        assert_eq!(resp.results[0].evaluated_at, now.to_rfc3339());
+    }
+
+    #[test]
+    fn run_to_response_failed_with_error() {
+        let state = EvalRunState {
+            run_id: uuid::Uuid::nil(),
+            config: EvalConfig {
+                model_name: "m".into(),
+                benchmarks: vec![],
+                sample_limit: None,
+                dataset_path: None,
+            },
+            status: EvalStatus::Failed,
+            results: vec![],
+            error: Some("GPU out of memory".into()),
+        };
+        let resp = run_to_response(&state);
+        assert!(matches!(resp.status, EvalStatus::Failed));
+        assert_eq!(resp.error, Some("GPU out of memory".into()));
     }
 }

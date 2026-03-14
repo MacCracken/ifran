@@ -20,14 +20,9 @@ pub async fn execute(base_model: &str, dataset: &str, method: &str) -> Result<()
         config.training.max_concurrent_jobs as usize,
     );
 
-    let training_method = match method.to_lowercase().as_str() {
-        "lora" => TrainingMethod::Lora,
-        "qlora" => TrainingMethod::Qlora,
-        "full" => TrainingMethod::FullFineTune,
-        "dpo" => TrainingMethod::Dpo,
-        "rlhf" => TrainingMethod::Rlhf,
-        "distillation" => TrainingMethod::Distillation,
-        _ => {
+    let training_method = match parse_method(method) {
+        Some(m) => m,
+        None => {
             eprintln!(
                 "Unknown method '{method}'. Options: lora, qlora, full, dpo, rlhf, distillation"
             );
@@ -76,6 +71,30 @@ pub async fn execute(base_model: &str, dataset: &str, method: &str) -> Result<()
     Ok(())
 }
 
+/// Parse a training method string into a TrainingMethod enum.
+fn parse_method(method: &str) -> Option<synapse_types::training::TrainingMethod> {
+    use synapse_types::training::TrainingMethod;
+    match method.to_lowercase().as_str() {
+        "lora" => Some(TrainingMethod::Lora),
+        "qlora" => Some(TrainingMethod::Qlora),
+        "full" => Some(TrainingMethod::FullFineTune),
+        "dpo" => Some(TrainingMethod::Dpo),
+        "rlhf" => Some(TrainingMethod::Rlhf),
+        "distillation" => Some(TrainingMethod::Distillation),
+        _ => None,
+    }
+}
+
+/// Parse a distributed strategy string into a DistributedStrategy enum.
+fn parse_strategy(strategy: &str) -> synapse_types::distributed::DistributedStrategy {
+    use synapse_types::distributed::DistributedStrategy;
+    match strategy {
+        "model_parallel" => DistributedStrategy::ModelParallel,
+        "pipeline_parallel" => DistributedStrategy::PipelineParallel,
+        _ => DistributedStrategy::DataParallel,
+    }
+}
+
 /// Execute a distributed training job.
 pub async fn execute_distributed(
     base_model: &str,
@@ -88,14 +107,9 @@ pub async fn execute_distributed(
     use synapse_types::distributed::*;
     use synapse_types::training::*;
 
-    let training_method = match method.to_lowercase().as_str() {
-        "lora" => TrainingMethod::Lora,
-        "qlora" => TrainingMethod::Qlora,
-        "full" => TrainingMethod::FullFineTune,
-        "dpo" => TrainingMethod::Dpo,
-        "rlhf" => TrainingMethod::Rlhf,
-        "distillation" => TrainingMethod::Distillation,
-        _ => {
+    let training_method = match parse_method(method) {
+        Some(m) => m,
+        None => {
             eprintln!(
                 "Unknown method '{method}'. Options: lora, qlora, full, dpo, rlhf, distillation"
             );
@@ -103,11 +117,7 @@ pub async fn execute_distributed(
         }
     };
 
-    let dist_strategy = match strategy {
-        "model_parallel" => DistributedStrategy::ModelParallel,
-        "pipeline_parallel" => DistributedStrategy::PipelineParallel,
-        _ => DistributedStrategy::DataParallel,
-    };
+    let dist_strategy = parse_strategy(strategy);
 
     let hyperparams = match training_method {
         TrainingMethod::Lora | TrainingMethod::Qlora => {
@@ -180,4 +190,73 @@ pub async fn execute_distributed(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use synapse_types::distributed::DistributedStrategy;
+    use synapse_types::training::TrainingMethod;
+
+    #[test]
+    fn parse_method_all_variants() {
+        assert!(matches!(parse_method("lora"), Some(TrainingMethod::Lora)));
+        assert!(matches!(parse_method("qlora"), Some(TrainingMethod::Qlora)));
+        assert!(matches!(
+            parse_method("full"),
+            Some(TrainingMethod::FullFineTune)
+        ));
+        assert!(matches!(parse_method("dpo"), Some(TrainingMethod::Dpo)));
+        assert!(matches!(parse_method("rlhf"), Some(TrainingMethod::Rlhf)));
+        assert!(matches!(
+            parse_method("distillation"),
+            Some(TrainingMethod::Distillation)
+        ));
+    }
+
+    #[test]
+    fn parse_method_case_insensitive() {
+        assert!(matches!(parse_method("LORA"), Some(TrainingMethod::Lora)));
+        assert!(matches!(parse_method("Qlora"), Some(TrainingMethod::Qlora)));
+        assert!(matches!(
+            parse_method("Full"),
+            Some(TrainingMethod::FullFineTune)
+        ));
+        assert!(matches!(parse_method("DPO"), Some(TrainingMethod::Dpo)));
+    }
+
+    #[test]
+    fn parse_method_invalid() {
+        assert!(parse_method("unknown").is_none());
+        assert!(parse_method("").is_none());
+        assert!(parse_method("finetune").is_none());
+    }
+
+    #[test]
+    fn parse_strategy_all_variants() {
+        assert!(matches!(
+            parse_strategy("model_parallel"),
+            DistributedStrategy::ModelParallel
+        ));
+        assert!(matches!(
+            parse_strategy("pipeline_parallel"),
+            DistributedStrategy::PipelineParallel
+        ));
+        assert!(matches!(
+            parse_strategy("data_parallel"),
+            DistributedStrategy::DataParallel
+        ));
+    }
+
+    #[test]
+    fn parse_strategy_default_is_data_parallel() {
+        assert!(matches!(
+            parse_strategy("unknown"),
+            DistributedStrategy::DataParallel
+        ));
+        assert!(matches!(
+            parse_strategy(""),
+            DistributedStrategy::DataParallel
+        ));
+    }
 }

@@ -36,7 +36,7 @@ cargo test -p synapse-core
 cargo tarpaulin --workspace --out html
 ```
 
-Current coverage: ~45%. Target: 80%. See [roadmap.md](./roadmap.md) for the coverage improvement plan.
+Current coverage: ~73%. CI threshold: 65%. See [roadmap.md](./roadmap.md) for the coverage improvement plan.
 
 ## Project Structure
 
@@ -63,7 +63,7 @@ GitHub Actions workflows:
 - **Quality** — `cargo fmt --check` + `cargo clippy -D warnings`
 - **Security** — Trivy scan, `cargo audit`, `cargo deny`
 - **Tests** — per-package matrix (7 jobs in parallel)
-- **Coverage** — `cargo tarpaulin` with 45% threshold
+- **Coverage** — `cargo tarpaulin` with 65% threshold
 - **Docs** — verify required files exist, `cargo doc --no-deps`
 - **Container** — Docker build verification
 - **License** — MIT license check

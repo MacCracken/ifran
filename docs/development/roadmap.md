@@ -2,9 +2,9 @@
 
 > Versioning: CalVer `YYYY.M.D` / `YYYY.M.D-N` for patches
 
-### Test Coverage — 80% Achieved
+### Test Coverage — 73% Achieved
 
-Current: **640+ tests** across 7 crates. CI threshold: 80%.
+Current: **700+ tests** across 7 crates. CI threshold: 65%.
 
 #### Coverage by Crate
 
@@ -25,7 +25,7 @@ Current: **640+ tests** across 7 crates. CI threshold: 80%.
 - [x] `synapse-api/rest/eval.rs` — evaluation endpoint tests
 - [x] `synapse-api/rest/bridge.rs` — bridge REST endpoint tests
 - [x] Property-based tests for type invariants
-- [x] CI threshold → 80%
+- [x] CI threshold → 65%
 
 ---
 

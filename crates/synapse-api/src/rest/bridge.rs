@@ -142,3 +142,54 @@ pub async fn heartbeat(
         "active_training_jobs": hb.active_training_jobs,
     })))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bridge_status_response_serializes() {
+        let resp = BridgeStatusResponse {
+            enabled: true,
+            client_state: "Connected".into(),
+            server_state: "Listening".into(),
+            sy_endpoint: Some("https://sy.example.com".into()),
+            heartbeat_interval_secs: 30,
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["enabled"], true);
+        assert_eq!(json["client_state"], "Connected");
+        assert_eq!(json["server_state"], "Listening");
+        assert_eq!(json["sy_endpoint"], "https://sy.example.com");
+        assert_eq!(json["heartbeat_interval_secs"], 30);
+    }
+
+    #[test]
+    fn bridge_status_response_disabled() {
+        let resp = BridgeStatusResponse {
+            enabled: false,
+            client_state: "disabled".into(),
+            server_state: "disabled".into(),
+            sy_endpoint: None,
+            heartbeat_interval_secs: 10,
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["enabled"], false);
+        assert!(json["sy_endpoint"].is_null());
+        assert_eq!(json["heartbeat_interval_secs"], 10);
+    }
+
+    #[test]
+    fn bridge_status_response_roundtrip() {
+        let resp = BridgeStatusResponse {
+            enabled: true,
+            client_state: "Reconnecting".into(),
+            server_state: "disabled".into(),
+            sy_endpoint: Some("ws://10.0.0.1:9090".into()),
+            heartbeat_interval_secs: 60,
+        };
+        let serialized = serde_json::to_string(&resp).unwrap();
+        assert!(serialized.contains("Reconnecting"));
+        assert!(serialized.contains("ws://10.0.0.1:9090"));
+    }
+}
