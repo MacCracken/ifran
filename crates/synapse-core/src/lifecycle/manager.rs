@@ -223,4 +223,120 @@ mod tests {
         assert!(!manager.is_loaded(&id).await);
         assert_eq!(manager.total_vram_used().await, 0);
     }
+
+    #[tokio::test]
+    async fn unregister_not_found() {
+        let manager = ModelManager::new(512);
+        let result = manager.unregister(&uuid::Uuid::new_v4()).await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn register_overwrites_same_id() {
+        let manager = ModelManager::new(512);
+        let id = uuid::Uuid::new_v4();
+        manager
+            .register_loaded(id, "model-v1".into(), "h1".into(), "llamacpp".into(), 2000)
+            .await;
+        manager
+            .register_loaded(id, "model-v2".into(), "h2".into(), "ollama".into(), 3000)
+            .await;
+        assert_eq!(manager.list_loaded().await.len(), 1);
+        let loaded = manager.get_loaded(&id).await.unwrap();
+        assert_eq!(loaded.model_name, "model-v2");
+        assert_eq!(loaded.vram_used_mb, 3000);
+    }
+
+    #[tokio::test]
+    async fn total_vram_empty() {
+        let manager = ModelManager::new(512);
+        assert_eq!(manager.total_vram_used().await, 0);
+    }
+
+    // -- Concurrent access tests --
+
+    #[tokio::test]
+    async fn concurrent_register_and_list() {
+        let manager = Arc::new(ModelManager::new(512));
+        let mut handles = vec![];
+
+        // Spawn 20 concurrent registrations
+        for i in 0..20 {
+            let manager = manager.clone();
+            handles.push(tokio::spawn(async move {
+                let id = uuid::Uuid::new_v4();
+                manager
+                    .register_loaded(
+                        id,
+                        format!("model-{i}"),
+                        format!("h-{i}"),
+                        "llamacpp".into(),
+                        1000,
+                    )
+                    .await;
+            }));
+        }
+
+        // Concurrently read
+        for _ in 0..20 {
+            let manager = manager.clone();
+            handles.push(tokio::spawn(async move {
+                let _ = manager.list_loaded().await;
+                let _ = manager.total_vram_used().await;
+            }));
+        }
+
+        for h in handles {
+            h.await.unwrap();
+        }
+        assert_eq!(manager.list_loaded().await.len(), 20);
+        assert_eq!(manager.total_vram_used().await, 20000);
+    }
+
+    #[tokio::test]
+    async fn concurrent_register_and_unregister() {
+        let manager = Arc::new(ModelManager::new(512));
+        let mut ids = vec![];
+
+        // Pre-populate
+        for i in 0..20 {
+            let id = uuid::Uuid::new_v4();
+            ids.push(id);
+            manager
+                .register_loaded(
+                    id,
+                    format!("model-{i}"),
+                    format!("h-{i}"),
+                    "llamacpp".into(),
+                    1000,
+                )
+                .await;
+        }
+
+        let mut handles = vec![];
+
+        // Unregister even-indexed concurrently
+        for i in (0..20).step_by(2) {
+            let manager = manager.clone();
+            let id = ids[i];
+            handles.push(tokio::spawn(async move {
+                manager.unregister(&id).await;
+            }));
+        }
+
+        // Concurrently check is_loaded
+        for i in 0..20 {
+            let manager = manager.clone();
+            let id = ids[i];
+            handles.push(tokio::spawn(async move {
+                let _ = manager.is_loaded(&id).await;
+                let _ = manager.get_loaded(&id).await;
+            }));
+        }
+
+        for h in handles {
+            h.await.unwrap();
+        }
+        assert_eq!(manager.list_loaded().await.len(), 10);
+    }
 }

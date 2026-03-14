@@ -1016,6 +1016,369 @@ async fn system_status_includes_bridge() {
     assert_eq!(json["bridge"]["enabled"], false);
 }
 
+// -- Inference error paths --
+
+#[tokio::test]
+async fn inference_no_model_loaded() {
+    let (app, _tmp) = test_app();
+
+    let body = serde_json::json!({
+        "model": "test-model",
+        "prompt": "Hello"
+    });
+
+    let resp = app
+        .oneshot(
+            Request::post("/inference")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let text = String::from_utf8_lossy(&body);
+    assert!(text.contains("No model loaded"));
+}
+
+#[tokio::test]
+async fn inference_stream_no_model_loaded() {
+    let (app, _tmp) = test_app();
+
+    let body = serde_json::json!({
+        "model": "test-model",
+        "prompt": "Hello",
+        "stream": true
+    });
+
+    let resp = app
+        .oneshot(
+            Request::post("/inference/stream")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn inference_invalid_json() {
+    let (app, _tmp) = test_app();
+
+    let resp = app
+        .oneshot(
+            Request::post("/inference")
+                .header("content-type", "application/json")
+                .body(Body::from("not json"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Axum returns 422 for JSON parse errors
+    assert!(
+        resp.status() == StatusCode::UNPROCESSABLE_ENTITY
+            || resp.status() == StatusCode::BAD_REQUEST
+    );
+}
+
+// -- Eval extended --
+
+#[tokio::test]
+async fn eval_create_and_get_run() {
+    let (app, _tmp) = test_app();
+
+    let body = serde_json::json!({
+        "model_name": "test-model",
+        "benchmarks": ["perplexity", "mmlu"],
+        "sample_limit": 50,
+    });
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post("/eval/runs")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let run_id = json["run_id"].as_str().unwrap();
+    assert_eq!(json["model_name"], "test-model");
+    assert_eq!(json["benchmarks"].as_array().unwrap().len(), 2);
+
+    // Get the specific run
+    let resp = app
+        .oneshot(
+            Request::get(format!("/eval/runs/{run_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["run_id"], run_id);
+}
+
+#[tokio::test]
+async fn eval_list_after_create() {
+    let (app, _tmp) = test_app();
+
+    // Create two runs
+    for name in &["model-a", "model-b"] {
+        let body = serde_json::json!({
+            "model_name": name,
+            "benchmarks": ["custom"],
+        });
+        app.clone()
+            .oneshot(
+                Request::post("/eval/runs")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_string(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+
+    let resp = app
+        .oneshot(Request::get("/eval/runs").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json.as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn eval_create_with_dataset_path() {
+    let (app, _tmp) = test_app();
+
+    let body = serde_json::json!({
+        "model_name": "test-model",
+        "benchmarks": ["custom"],
+        "dataset_path": "/tmp/eval.jsonl",
+        "sample_limit": 10,
+    });
+
+    let resp = app
+        .oneshot(
+            Request::post("/eval/runs")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["model_name"], "test-model");
+    // Status may be queued (background task spawned but may not have started)
+    assert!(json["status"].is_string());
+}
+
+#[tokio::test]
+async fn eval_create_all_benchmark_kinds() {
+    let (app, _tmp) = test_app();
+
+    let body = serde_json::json!({
+        "model_name": "test-model",
+        "benchmarks": ["perplexity", "mmlu", "hella_swag", "human_eval", "custom"],
+    });
+
+    let resp = app
+        .oneshot(
+            Request::post("/eval/runs")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["benchmarks"].as_array().unwrap().len(), 5);
+}
+
+// -- Bridge extended --
+
+#[tokio::test]
+async fn bridge_status_includes_heartbeat_interval() {
+    let (app, _tmp) = test_app();
+
+    let resp = app
+        .oneshot(Request::get("/bridge/status").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["heartbeat_interval_secs"], 10);
+}
+
+#[tokio::test]
+async fn bridge_status_no_endpoint_when_disabled() {
+    let (app, _tmp) = test_app();
+
+    let resp = app
+        .oneshot(Request::get("/bridge/status").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json["sy_endpoint"].is_null());
+}
+
+#[tokio::test]
+async fn bridge_enabled_connect_and_status() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut config = test_config(&tmp);
+    config.bridge.enabled = true;
+    let state = AppState::new(config).unwrap();
+    let app = synapse_api::router::build(state);
+
+    // Connect
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post("/bridge/connect")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Verify status after connect
+    let resp = app
+        .oneshot(Request::get("/bridge/status").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["enabled"], true);
+    assert_eq!(json["client_state"], "Connected");
+}
+
+// -- Training extended error paths --
+
+#[tokio::test]
+async fn training_create_invalid_hyperparams() {
+    let (app, _tmp) = test_app();
+
+    let body = serde_json::json!({
+        "base_model": "test-model",
+        "dataset": {
+            "path": "/tmp/test.jsonl",
+            "format": "jsonl"
+        },
+        "method": "lora",
+        "hyperparams": {
+            "learning_rate": 0.0,
+            "epochs": 1,
+            "batch_size": 4,
+            "gradient_accumulation_steps": 4,
+            "warmup_steps": 10,
+            "weight_decay": 0.01,
+            "max_seq_length": 512
+        },
+        "auto_start": false
+    });
+
+    let resp = app
+        .oneshot(
+            Request::post("/training/jobs")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn training_create_and_list() {
+    let (app, _tmp) = test_app();
+
+    let body = serde_json::json!({
+        "base_model": "test-model",
+        "dataset": { "path": "/tmp/test.jsonl", "format": "jsonl" },
+        "method": "lora",
+        "hyperparams": {
+            "learning_rate": 2e-4, "epochs": 1, "batch_size": 4,
+            "gradient_accumulation_steps": 1, "warmup_steps": 0,
+            "weight_decay": 0.0, "max_seq_length": 512
+        },
+        "auto_start": false
+    });
+
+    // Create two jobs
+    for _ in 0..2 {
+        app.clone()
+            .oneshot(
+                Request::post("/training/jobs")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_string(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+
+    let resp = app
+        .oneshot(Request::get("/training/jobs").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json.as_array().unwrap().len(), 2);
+}
+
+// -- Model edge cases --
+
+#[tokio::test]
+async fn get_model_invalid_uuid_falls_through_to_name() {
+    let (app, _tmp) = test_app();
+
+    let resp = app
+        .oneshot(
+            Request::get("/models/not-a-uuid")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Should try name lookup and return 404
+    // Handler may return BAD_REQUEST or NOT_FOUND for nonexistent distributed jobs
+    assert!(resp.status() == StatusCode::NOT_FOUND || resp.status() == StatusCode::BAD_REQUEST);
+}
+
 // -- 404 for unknown routes --
 
 #[tokio::test]
@@ -1028,4 +1391,96 @@ async fn unknown_route_returns_404() {
         .unwrap();
 
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+// -- Method not allowed --
+
+#[tokio::test]
+async fn health_post_not_allowed() {
+    let (app, _tmp) = test_app();
+
+    let resp = app
+        .oneshot(Request::post("/health").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert!(
+        resp.status() == StatusCode::METHOD_NOT_ALLOWED || resp.status() == StatusCode::NOT_FOUND
+    );
+}
+
+// -- OpenAI extended --
+
+#[tokio::test]
+async fn openai_completions_no_model_loaded() {
+    let (app, _tmp) = test_app();
+
+    let body = serde_json::json!({
+        "model": "test-model",
+        "messages": [{"role": "user", "content": "Hello"}]
+    });
+
+    let resp = app
+        .oneshot(
+            Request::post("/v1/chat/completions")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+// -- Marketplace extended --
+
+#[tokio::test]
+async fn marketplace_publish_nonexistent_model() {
+    let (app, _tmp) = test_app();
+
+    let body = serde_json::json!({"model_name": "nonexistent"});
+
+    let resp = app
+        .oneshot(
+            Request::post("/marketplace/publish")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        resp.status() == StatusCode::NOT_FOUND
+            || resp.status() == StatusCode::INTERNAL_SERVER_ERROR
+    );
+}
+
+// -- Distributed extended --
+
+#[tokio::test]
+async fn distributed_assign_worker_not_found() {
+    let (app, _tmp) = test_app();
+    let fake_id = uuid::Uuid::new_v4();
+
+    let worker_body = serde_json::json!({
+        "rank": 0,
+        "instance_id": "node-1",
+        "endpoint": "http://node-1:9000",
+        "device_ids": [0]
+    });
+
+    let resp = app
+        .oneshot(
+            Request::post(format!("/training/distributed/jobs/{fake_id}/workers"))
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&worker_body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Handler returns BAD_REQUEST for nonexistent distributed jobs
+    assert!(resp.status() == StatusCode::NOT_FOUND || resp.status() == StatusCode::BAD_REQUEST);
 }

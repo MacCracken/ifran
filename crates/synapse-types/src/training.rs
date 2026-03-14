@@ -260,4 +260,186 @@ mod tests {
         let back: HyperParams = serde_json::from_str(&json).unwrap();
         assert_eq!(back.max_seq_length, 512);
     }
+
+    #[test]
+    fn hyperparams_validate_zero_learning_rate() {
+        let hp = HyperParams {
+            learning_rate: 0.0,
+            epochs: 1,
+            batch_size: 1,
+            gradient_accumulation_steps: 1,
+            warmup_steps: 0,
+            weight_decay: 0.0,
+            max_seq_length: 512,
+        };
+        assert!(hp.validate().is_err());
+    }
+
+    #[test]
+    fn hyperparams_validate_negative_learning_rate() {
+        let hp = HyperParams {
+            learning_rate: -1e-4,
+            epochs: 1,
+            batch_size: 1,
+            gradient_accumulation_steps: 1,
+            warmup_steps: 0,
+            weight_decay: 0.0,
+            max_seq_length: 512,
+        };
+        assert!(hp.validate().is_err());
+    }
+
+    #[test]
+    fn hyperparams_validate_zero_epochs() {
+        let hp = HyperParams {
+            learning_rate: 1e-4,
+            epochs: 0,
+            batch_size: 1,
+            gradient_accumulation_steps: 1,
+            warmup_steps: 0,
+            weight_decay: 0.0,
+            max_seq_length: 512,
+        };
+        assert!(hp.validate().is_err());
+    }
+
+    #[test]
+    fn hyperparams_validate_zero_batch_size() {
+        let hp = HyperParams {
+            learning_rate: 1e-4,
+            epochs: 1,
+            batch_size: 0,
+            gradient_accumulation_steps: 1,
+            warmup_steps: 0,
+            weight_decay: 0.0,
+            max_seq_length: 512,
+        };
+        assert!(hp.validate().is_err());
+    }
+
+    #[test]
+    fn hyperparams_validate_zero_max_seq_length() {
+        let hp = HyperParams {
+            learning_rate: 1e-4,
+            epochs: 1,
+            batch_size: 1,
+            gradient_accumulation_steps: 1,
+            warmup_steps: 0,
+            weight_decay: 0.0,
+            max_seq_length: 0,
+        };
+        assert!(hp.validate().is_err());
+    }
+
+    #[test]
+    fn hyperparams_validate_success() {
+        let hp = HyperParams {
+            learning_rate: 2e-4,
+            epochs: 3,
+            batch_size: 8,
+            gradient_accumulation_steps: 4,
+            warmup_steps: 100,
+            weight_decay: 0.01,
+            max_seq_length: 2048,
+        };
+        assert!(hp.validate().is_ok());
+    }
+
+    #[test]
+    fn training_method_invalid_json() {
+        let result = serde_json::from_str::<TrainingMethod>("\"invalid\"");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn dataset_format_invalid_json() {
+        let result = serde_json::from_str::<DatasetFormat>("\"invalid\"");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn training_status_invalid_json() {
+        let result = serde_json::from_str::<TrainingStatus>("\"invalid\"");
+        assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn arb_training_method() -> impl Strategy<Value = TrainingMethod> {
+        prop_oneof![
+            Just(TrainingMethod::FullFineTune),
+            Just(TrainingMethod::Lora),
+            Just(TrainingMethod::Qlora),
+            Just(TrainingMethod::Dpo),
+            Just(TrainingMethod::Rlhf),
+            Just(TrainingMethod::Distillation),
+        ]
+    }
+
+    fn arb_training_status() -> impl Strategy<Value = TrainingStatus> {
+        prop_oneof![
+            Just(TrainingStatus::Queued),
+            Just(TrainingStatus::Preparing),
+            Just(TrainingStatus::Running),
+            Just(TrainingStatus::Paused),
+            Just(TrainingStatus::Completed),
+            Just(TrainingStatus::Failed),
+            Just(TrainingStatus::Cancelled),
+        ]
+    }
+
+    fn arb_dataset_format() -> impl Strategy<Value = DatasetFormat> {
+        prop_oneof![
+            Just(DatasetFormat::Jsonl),
+            Just(DatasetFormat::Parquet),
+            Just(DatasetFormat::Csv),
+            Just(DatasetFormat::HuggingFace),
+        ]
+    }
+
+    proptest! {
+        #[test]
+        fn training_method_roundtrips(m in arb_training_method()) {
+            let json = serde_json::to_string(&m).unwrap();
+            let back: TrainingMethod = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(m, back);
+        }
+
+        #[test]
+        fn training_status_roundtrips(s in arb_training_status()) {
+            let json = serde_json::to_string(&s).unwrap();
+            let back: TrainingStatus = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(s, back);
+        }
+
+        #[test]
+        fn dataset_format_roundtrips(f in arb_dataset_format()) {
+            let json = serde_json::to_string(&f).unwrap();
+            let back: DatasetFormat = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(f, back);
+        }
+
+        #[test]
+        fn hyperparams_valid_always_pass_validation(
+            lr in 1e-8f64..1.0,
+            epochs in 1u32..100,
+            batch in 1u32..256,
+            seq_len in 1u32..65536,
+        ) {
+            let hp = HyperParams {
+                learning_rate: lr,
+                epochs,
+                batch_size: batch,
+                gradient_accumulation_steps: 1,
+                warmup_steps: 0,
+                weight_decay: 0.0,
+                max_seq_length: seq_len,
+            };
+            prop_assert!(hp.validate().is_ok());
+        }
+    }
 }

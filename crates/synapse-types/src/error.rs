@@ -133,4 +133,112 @@ mod tests {
             assert!(!e.to_string().is_empty());
         }
     }
+
+    #[test]
+    fn error_display_backend_error() {
+        let e = SynapseError::BackendError("timeout".into());
+        assert_eq!(e.to_string(), "Backend error: timeout");
+    }
+
+    #[test]
+    fn error_display_download() {
+        let e = SynapseError::DownloadError("connection refused".into());
+        assert_eq!(e.to_string(), "Download failed: connection refused");
+    }
+
+    #[test]
+    fn error_display_training() {
+        let e = SynapseError::TrainingError("OOM".into());
+        assert_eq!(e.to_string(), "Training error: OOM");
+    }
+
+    #[test]
+    fn error_display_bridge() {
+        let e = SynapseError::BridgeError("disconnected".into());
+        assert_eq!(e.to_string(), "Bridge error: disconnected");
+    }
+
+    #[test]
+    fn error_display_config() {
+        let e = SynapseError::ConfigError("missing field".into());
+        assert_eq!(e.to_string(), "Configuration error: missing field");
+    }
+
+    #[test]
+    fn error_display_storage() {
+        let e = SynapseError::StorageError("db locked".into());
+        assert_eq!(e.to_string(), "Storage error: db locked");
+    }
+
+    #[test]
+    fn error_display_hardware() {
+        let e = SynapseError::HardwareError("no GPU".into());
+        assert_eq!(e.to_string(), "Hardware error: no GPU");
+    }
+
+    #[test]
+    fn error_display_eval() {
+        let e = SynapseError::EvalError("benchmark failed".into());
+        assert_eq!(e.to_string(), "Evaluation error: benchmark failed");
+    }
+
+    #[test]
+    fn error_display_marketplace() {
+        let e = SynapseError::MarketplaceError("not published".into());
+        assert_eq!(e.to_string(), "Marketplace error: not published");
+    }
+
+    #[test]
+    fn error_display_distributed() {
+        let e = SynapseError::DistributedError("worker lost".into());
+        assert_eq!(e.to_string(), "Distributed training error: worker lost");
+    }
+
+    #[test]
+    fn error_display_rag() {
+        let e = SynapseError::RagError("embedding failed".into());
+        assert_eq!(e.to_string(), "RAG pipeline error: embedding failed");
+    }
+
+    #[test]
+    fn error_display_other() {
+        let e = SynapseError::Other("unknown".into());
+        assert_eq!(e.to_string(), "unknown");
+    }
+
+    #[test]
+    fn error_debug_format() {
+        let e = SynapseError::ModelNotFound("test".into());
+        let debug = format!("{:?}", e);
+        assert!(debug.contains("ModelNotFound"));
+    }
+
+    #[test]
+    fn error_from_io_kind_preserved() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+        let e: SynapseError = io_err.into();
+        assert!(e.to_string().contains("denied"));
+    }
+
+    #[test]
+    fn error_integrity_includes_both_hashes() {
+        let e = SynapseError::IntegrityError {
+            expected: "aaa111".into(),
+            actual: "bbb222".into(),
+        };
+        let msg = e.to_string();
+        assert!(msg.contains("aaa111"));
+        assert!(msg.contains("bbb222"));
+    }
+
+    #[test]
+    fn error_insufficient_memory_includes_values() {
+        let e = SynapseError::InsufficientMemory {
+            required_mb: 16384,
+            available_mb: 8192,
+        };
+        let msg = e.to_string();
+        assert!(msg.contains("16384"));
+        assert!(msg.contains("8192"));
+    }
 }

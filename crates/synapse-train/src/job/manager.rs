@@ -295,4 +295,115 @@ mod tests {
         let manager = JobManager::new(ExecutorKind::Subprocess, None, 3);
         assert_eq!(manager.max_concurrent(), 3);
     }
+
+    #[tokio::test]
+    async fn create_job_invalid_hyperparams() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 2);
+        let mut config = test_config();
+        config.hyperparams.learning_rate = 0.0; // invalid
+        let result = manager.create_job(config).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn create_job_zero_batch_size() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 2);
+        let mut config = test_config();
+        config.hyperparams.batch_size = 0;
+        let result = manager.create_job(config).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn update_progress_nonexistent_job() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 2);
+        // Should not panic, just no-op
+        manager
+            .update_progress(uuid::Uuid::new_v4(), 10, 0.5, 0.3)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn list_jobs_empty() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 2);
+        assert!(manager.list_jobs(None).await.is_empty());
+        assert!(
+            manager
+                .list_jobs(Some(TrainingStatus::Running))
+                .await
+                .is_empty()
+        );
+    }
+
+    // -- Concurrent access tests --
+
+    #[tokio::test]
+    async fn concurrent_create_and_list() {
+        let manager = std::sync::Arc::new(JobManager::new(ExecutorKind::Subprocess, None, 100));
+        let mut handles = vec![];
+
+        // Spawn 20 concurrent job creations
+        for _ in 0..20 {
+            let manager = manager.clone();
+            handles.push(tokio::spawn(async move {
+                manager.create_job(test_config()).await.unwrap();
+            }));
+        }
+
+        // Concurrently list and count
+        for _ in 0..20 {
+            let manager = manager.clone();
+            handles.push(tokio::spawn(async move {
+                let _ = manager.list_jobs(None).await;
+                let _ = manager.running_count().await;
+            }));
+        }
+
+        for h in handles {
+            h.await.unwrap();
+        }
+        assert_eq!(manager.list_jobs(None).await.len(), 20);
+    }
+
+    #[tokio::test]
+    async fn concurrent_create_and_update_progress() {
+        let manager = std::sync::Arc::new(JobManager::new(ExecutorKind::Subprocess, None, 100));
+        let mut ids = vec![];
+
+        for _ in 0..10 {
+            ids.push(manager.create_job(test_config()).await.unwrap());
+        }
+
+        let mut handles = vec![];
+
+        // Update progress concurrently
+        for (i, &id) in ids.iter().enumerate() {
+            let manager = manager.clone();
+            handles.push(tokio::spawn(async move {
+                for step in 0..10u64 {
+                    manager
+                        .update_progress(id, step, (i as f32) * 0.1, 0.5 - step as f64 * 0.01)
+                        .await;
+                }
+            }));
+        }
+
+        // Concurrently read state
+        for &id in &ids {
+            let manager = manager.clone();
+            handles.push(tokio::spawn(async move {
+                let _ = manager.get_job(id).await;
+            }));
+        }
+
+        for h in handles {
+            h.await.unwrap();
+        }
+
+        // All jobs should still exist with progress
+        for &id in &ids {
+            let job = manager.get_job(id).await.unwrap();
+            assert_eq!(job.current_step, 9);
+        }
+    }
 }

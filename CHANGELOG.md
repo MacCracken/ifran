@@ -5,6 +5,30 @@ All notable changes to Synapse will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 
+## [2026.3.14]
+
+### Added
+
+#### Milestone 6 — 80% Hardening
+- `proptest` added to workspace dependencies for property-based testing
+- `synapse-types/model`: Property-based tests — `ModelFormat`, `QuantLevel`, and `ModelInfo` serde roundtrip invariants; invalid JSON rejection tests
+- `synapse-types/backend`: Property-based tests — `AcceleratorType`, `BackendId`, `DeviceConfig` serde roundtrip invariants; invalid JSON rejection
+- `synapse-types/inference`: Property-based tests — `FinishReason`, `TokenUsage`, `InferenceRequest`, `StreamChunk` serde roundtrip invariants; invalid JSON rejection
+- `synapse-types/training`: Property-based tests — `TrainingMethod`, `TrainingStatus`, `DatasetFormat` roundtrips; `HyperParams` validation (valid params always pass); invalid JSON rejection; comprehensive validation edge cases (zero lr, zero epochs, zero batch, zero seq_len)
+- `synapse-types/eval`: Property-based tests — `BenchmarkKind`, `EvalStatus` roundtrips; `EvalResult` score/samples preservation; invalid JSON rejection; dataset path and no-details edge cases
+- `synapse-types/error`: Display tests for all remaining error variants (BackendError, DownloadError, TrainingError, BridgeError, ConfigError, StorageError, HardwareError, EvalError, MarketplaceError, DistributedError, RagError, Other); debug format, IO kind preservation, structured error field inclusion
+- `synapse-backends/router`: Concurrent DashMap access tests — register+read (20 writers + 20 readers), register+unregister (concurrent mutation + selection), concurrent select with preference; edge cases (overwrite same ID, unregister nonexistent, select_with_id no match)
+- `synapse-core/lifecycle/manager`: Concurrent RwLock access tests — register+list (20 concurrent registrations + reads), register+unregister (concurrent mutation + queries); edge cases (unregister not found, overwrite same ID, empty vram)
+- `synapse-train/job/manager`: Concurrent RwLock access tests — create+list (20 concurrent job creations + reads), create+update_progress (10 jobs × 10 steps concurrent updates); error paths (invalid hyperparams, zero batch size, nonexistent job progress update, empty list)
+- `synapse-api` integration tests: eval extended (create+get, list after create, create with dataset path, all benchmark kinds); bridge extended (heartbeat interval, no endpoint when disabled, connect+status); inference error paths (no model loaded, stream no model, invalid JSON); training error paths (invalid hyperparams, create+list); model edge cases (invalid UUID fallthrough); OpenAI error path (completions no model); marketplace error (publish nonexistent); distributed error (assign worker not found); method not allowed
+- CI coverage threshold raised from 60% to 80%
+- 100+ new tests across all crates (640+ total)
+
+### Changed
+- Workspace version bumped to 2026.3.14
+
+---
+
 ## [2026.3.13] — (in progress)
 
 ### Added

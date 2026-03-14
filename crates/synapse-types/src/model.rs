@@ -209,4 +209,105 @@ mod tests {
         set.insert(QuantLevel::Q4KM);
         assert_eq!(set.len(), 1);
     }
+
+    #[test]
+    fn model_format_invalid_json() {
+        let result = serde_json::from_str::<ModelFormat>("\"invalid\"");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn quant_level_invalid_json() {
+        let result = serde_json::from_str::<QuantLevel>("\"invalid\"");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn model_info_missing_required_fields() {
+        let result = serde_json::from_str::<ModelInfo>(r#"{"name":"test"}"#);
+        assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn arb_model_format() -> impl Strategy<Value = ModelFormat> {
+        prop_oneof![
+            Just(ModelFormat::Gguf),
+            Just(ModelFormat::SafeTensors),
+            Just(ModelFormat::Onnx),
+            Just(ModelFormat::TensorRt),
+            Just(ModelFormat::PyTorch),
+            Just(ModelFormat::Bin),
+        ]
+    }
+
+    fn arb_quant_level() -> impl Strategy<Value = QuantLevel> {
+        prop_oneof![
+            Just(QuantLevel::F32),
+            Just(QuantLevel::F16),
+            Just(QuantLevel::Bf16),
+            Just(QuantLevel::Q8_0),
+            Just(QuantLevel::Q6K),
+            Just(QuantLevel::Q5KM),
+            Just(QuantLevel::Q5KS),
+            Just(QuantLevel::Q4KM),
+            Just(QuantLevel::Q4KS),
+            Just(QuantLevel::Q4_0),
+            Just(QuantLevel::Q3KM),
+            Just(QuantLevel::Q3KS),
+            Just(QuantLevel::Q2K),
+            Just(QuantLevel::Iq4Xs),
+            Just(QuantLevel::Iq3Xxs),
+            Just(QuantLevel::None),
+        ]
+    }
+
+    proptest! {
+        #[test]
+        fn model_format_roundtrips(fmt in arb_model_format()) {
+            let json = serde_json::to_string(&fmt).unwrap();
+            let back: ModelFormat = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(fmt, back);
+        }
+
+        #[test]
+        fn quant_level_roundtrips(q in arb_quant_level()) {
+            let json = serde_json::to_string(&q).unwrap();
+            let back: QuantLevel = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(q, back);
+        }
+
+        #[test]
+        fn model_info_roundtrips(
+            name in "[a-z][a-z0-9-]{0,20}",
+            size in 0u64..100_000_000_000u64,
+            fmt in arb_model_format(),
+            q in arb_quant_level(),
+        ) {
+            let info = ModelInfo {
+                id: Uuid::new_v4(),
+                name: name.clone(),
+                repo_id: None,
+                format: fmt,
+                quant: q,
+                size_bytes: size,
+                parameter_count: None,
+                architecture: None,
+                license: None,
+                local_path: "/tmp/test".into(),
+                sha256: None,
+                pulled_at: chrono::Utc::now(),
+            };
+            let json = serde_json::to_string(&info).unwrap();
+            let back: ModelInfo = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(info.name, back.name);
+            prop_assert_eq!(info.format, back.format);
+            prop_assert_eq!(info.quant, back.quant);
+            prop_assert_eq!(info.size_bytes, back.size_bytes);
+        }
+    }
 }

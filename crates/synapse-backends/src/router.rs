@@ -378,4 +378,134 @@ mod tests {
         let router = BackendRouter::default();
         assert_eq!(router.count(), 0);
     }
+
+    #[test]
+    fn register_overwrites_same_id() {
+        let router = BackendRouter::new();
+        router.register(Arc::new(MockBackend {
+            name: "a",
+            formats: vec![ModelFormat::Gguf],
+        }));
+        router.register(Arc::new(MockBackend {
+            name: "a",
+            formats: vec![ModelFormat::Onnx],
+        }));
+        assert_eq!(router.count(), 1);
+        // The second registration should overwrite
+        let backend = router.get(&BackendId("a".into())).unwrap();
+        assert!(backend.supported_formats().contains(&ModelFormat::Onnx));
+    }
+
+    #[test]
+    fn select_with_id_no_match() {
+        let router = BackendRouter::new();
+        assert!(router.select_with_id(ModelFormat::Gguf, None).is_none());
+    }
+
+    #[test]
+    fn unregister_nonexistent() {
+        let router = BackendRouter::new();
+        // Should not panic
+        router.unregister(&BackendId("nonexistent".into()));
+        assert_eq!(router.count(), 0);
+    }
+
+    // -- Concurrent access tests --
+
+    #[tokio::test]
+    async fn concurrent_register_and_read() {
+        let router = Arc::new(BackendRouter::new());
+        let mut handles = vec![];
+
+        // Spawn 10 concurrent writers
+        for i in 0..10 {
+            let router = router.clone();
+            handles.push(tokio::spawn(async move {
+                let name: &'static str = Box::leak(format!("be-{i}").into_boxed_str());
+                router.register(Arc::new(MockBackend {
+                    name,
+                    formats: vec![ModelFormat::Gguf],
+                }));
+            }));
+        }
+
+        // Spawn 10 concurrent readers
+        for _ in 0..10 {
+            let router = router.clone();
+            handles.push(tokio::spawn(async move {
+                let _ = router.list_backends();
+                let _ = router.count();
+                let _ = router.supports_format(ModelFormat::Gguf);
+            }));
+        }
+
+        for h in handles {
+            h.await.unwrap();
+        }
+        assert_eq!(router.count(), 10);
+    }
+
+    #[tokio::test]
+    async fn concurrent_register_and_unregister() {
+        let router = Arc::new(BackendRouter::new());
+
+        // Pre-populate
+        for i in 0..20 {
+            let name: &'static str = Box::leak(format!("be-{i}").into_boxed_str());
+            router.register(Arc::new(MockBackend {
+                name,
+                formats: vec![ModelFormat::Gguf],
+            }));
+        }
+
+        let mut handles = vec![];
+
+        // Unregister even-numbered backends concurrently
+        for i in (0..20).step_by(2) {
+            let router = router.clone();
+            handles.push(tokio::spawn(async move {
+                router.unregister(&BackendId(format!("be-{i}")));
+            }));
+        }
+
+        // Concurrently select backends
+        for _ in 0..10 {
+            let router = router.clone();
+            handles.push(tokio::spawn(async move {
+                let _ = router.select(ModelFormat::Gguf, None);
+            }));
+        }
+
+        for h in handles {
+            h.await.unwrap();
+        }
+        assert_eq!(router.count(), 10);
+    }
+
+    #[tokio::test]
+    async fn concurrent_select_with_preference() {
+        let router = Arc::new(BackendRouter::new());
+        for i in 0..5 {
+            let name: &'static str = Box::leak(format!("be-{i}").into_boxed_str());
+            router.register(Arc::new(MockBackend {
+                name,
+                formats: vec![ModelFormat::Gguf],
+            }));
+        }
+
+        let mut handles = vec![];
+        for i in 0..20 {
+            let router = router.clone();
+            handles.push(tokio::spawn(async move {
+                let pref = format!("be-{}", i % 5);
+                let result = router.select(ModelFormat::Gguf, Some(&pref));
+                assert!(result.is_some());
+                assert_eq!(result.unwrap().id().0, pref);
+            }));
+        }
+
+        for h in handles {
+            h.await.unwrap();
+        }
+    }
 }

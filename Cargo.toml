@@ -12,7 +12,7 @@ members = [
 ]
 
 [workspace.package]
-version = "2026.3.13"
+version = "2026.3.14"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/MacCracken/synapse"
@@ -73,6 +73,9 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # Indicatif for progress bars
 indicatif = "0.17"
+
+# Property-based testing
+proptest = "1"
 
 [profile.release]
 opt-level = 3

@@ -26,6 +26,7 @@ futures = { workspace = true }
 tempfile = "3"
 mockito = "1"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+proptest = { workspace = true }
 
 [lints]
 workspace = true

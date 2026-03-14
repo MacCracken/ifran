@@ -113,4 +113,82 @@ mod tests {
         assert_eq!(back.device_ids, vec![0, 1]);
         assert_eq!(back.memory_limit_mb, Some(16384));
     }
+
+    #[test]
+    fn backend_id_serde_roundtrip() {
+        let id = BackendId("test-backend".into());
+        let json = serde_json::to_string(&id).unwrap();
+        let back: BackendId = serde_json::from_str(&json).unwrap();
+        assert_eq!(id, back);
+    }
+
+    #[test]
+    fn device_config_no_memory_limit() {
+        let cfg = DeviceConfig {
+            accelerator: AcceleratorType::Cpu,
+            device_ids: vec![],
+            memory_limit_mb: None,
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let back: DeviceConfig = serde_json::from_str(&json).unwrap();
+        assert!(back.memory_limit_mb.is_none());
+        assert!(back.device_ids.is_empty());
+    }
+
+    #[test]
+    fn accelerator_type_invalid_json() {
+        let result = serde_json::from_str::<AcceleratorType>("\"invalid\"");
+        assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn arb_accelerator() -> impl Strategy<Value = AcceleratorType> {
+        prop_oneof![
+            Just(AcceleratorType::Cuda),
+            Just(AcceleratorType::Rocm),
+            Just(AcceleratorType::Metal),
+            Just(AcceleratorType::Vulkan),
+            Just(AcceleratorType::Cpu),
+        ]
+    }
+
+    proptest! {
+        #[test]
+        fn accelerator_type_roundtrips(acc in arb_accelerator()) {
+            let json = serde_json::to_string(&acc).unwrap();
+            let back: AcceleratorType = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(acc, back);
+        }
+
+        #[test]
+        fn backend_id_roundtrips(name in "[a-z][a-z0-9-]{0,30}") {
+            let id = BackendId(name.clone());
+            let json = serde_json::to_string(&id).unwrap();
+            let back: BackendId = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(id, back);
+        }
+
+        #[test]
+        fn device_config_roundtrips(
+            acc in arb_accelerator(),
+            n_devices in 0usize..8,
+            mem in proptest::option::of(0u64..100_000),
+        ) {
+            let device_ids: Vec<u32> = (0..n_devices as u32).collect();
+            let cfg = DeviceConfig {
+                accelerator: acc,
+                device_ids: device_ids.clone(),
+                memory_limit_mb: mem,
+            };
+            let json = serde_json::to_string(&cfg).unwrap();
+            let back: DeviceConfig = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(cfg.device_ids, back.device_ids);
+            prop_assert_eq!(cfg.memory_limit_mb, back.memory_limit_mb);
+        }
+    }
 }

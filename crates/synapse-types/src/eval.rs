@@ -125,4 +125,109 @@ mod tests {
         assert!((back.score - 0.85).abs() < f64::EPSILON);
         assert!(back.details.is_some());
     }
+
+    #[test]
+    fn benchmark_kind_invalid_json() {
+        let result = serde_json::from_str::<BenchmarkKind>("\"invalid\"");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn eval_status_invalid_json() {
+        let result = serde_json::from_str::<EvalStatus>("\"invalid\"");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn eval_config_with_dataset_path() {
+        let config = EvalConfig {
+            model_name: "test".into(),
+            benchmarks: vec![BenchmarkKind::Custom],
+            sample_limit: None,
+            dataset_path: Some("/data/eval.jsonl".into()),
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let back: EvalConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.dataset_path, Some("/data/eval.jsonl".into()));
+    }
+
+    #[test]
+    fn eval_result_no_details() {
+        let result = EvalResult {
+            run_id: Uuid::new_v4(),
+            model_name: "test".into(),
+            benchmark: BenchmarkKind::Perplexity,
+            score: 12.5,
+            details: None,
+            samples_evaluated: 100,
+            duration_secs: 30.0,
+            evaluated_at: Utc::now(),
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        let back: EvalResult = serde_json::from_str(&json).unwrap();
+        assert!(back.details.is_none());
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn arb_benchmark_kind() -> impl Strategy<Value = BenchmarkKind> {
+        prop_oneof![
+            Just(BenchmarkKind::Perplexity),
+            Just(BenchmarkKind::Mmlu),
+            Just(BenchmarkKind::HellaSwag),
+            Just(BenchmarkKind::HumanEval),
+            Just(BenchmarkKind::Custom),
+        ]
+    }
+
+    fn arb_eval_status() -> impl Strategy<Value = EvalStatus> {
+        prop_oneof![
+            Just(EvalStatus::Queued),
+            Just(EvalStatus::Running),
+            Just(EvalStatus::Completed),
+            Just(EvalStatus::Failed),
+        ]
+    }
+
+    proptest! {
+        #[test]
+        fn benchmark_kind_roundtrips(k in arb_benchmark_kind()) {
+            let json = serde_json::to_string(&k).unwrap();
+            let back: BenchmarkKind = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(k, back);
+        }
+
+        #[test]
+        fn eval_status_roundtrips(s in arb_eval_status()) {
+            let json = serde_json::to_string(&s).unwrap();
+            let back: EvalStatus = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(s, back);
+        }
+
+        #[test]
+        fn eval_result_score_preserved(
+            score in -1000.0f64..1000.0,
+            samples in 0u64..1_000_000,
+        ) {
+            let result = EvalResult {
+                run_id: Uuid::new_v4(),
+                model_name: "test".into(),
+                benchmark: BenchmarkKind::Custom,
+                score,
+                details: None,
+                samples_evaluated: samples,
+                duration_secs: 0.0,
+                evaluated_at: Utc::now(),
+            };
+            let json = serde_json::to_string(&result).unwrap();
+            let back: EvalResult = serde_json::from_str(&json).unwrap();
+            // JSON roundtrip may introduce tiny floating-point drift
+            prop_assert!((result.score - back.score).abs() < 1e-10);
+            prop_assert_eq!(result.samples_evaluated, back.samples_evaluated);
+        }
+    }
 }

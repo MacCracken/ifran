@@ -32,6 +32,7 @@ mockito = "1"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 uuid = { workspace = true }
 chrono = { workspace = true }
+proptest = { workspace = true }
 
 [lints]
 workspace = true

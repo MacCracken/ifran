@@ -152,4 +152,83 @@ mod tests {
         assert!(back.done);
         assert_eq!(back.usage.unwrap().total_tokens, 30);
     }
+
+    #[test]
+    fn finish_reason_invalid_json() {
+        let result = serde_json::from_str::<FinishReason>("\"invalid\"");
+        assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn arb_finish_reason() -> impl Strategy<Value = FinishReason> {
+        prop_oneof![
+            Just(FinishReason::Stop),
+            Just(FinishReason::MaxTokens),
+            Just(FinishReason::StopSequence),
+        ]
+    }
+
+    proptest! {
+        #[test]
+        fn finish_reason_roundtrips(fr in arb_finish_reason()) {
+            let json = serde_json::to_string(&fr).unwrap();
+            let back: FinishReason = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(format!("{:?}", fr), format!("{:?}", back));
+        }
+
+        #[test]
+        fn token_usage_roundtrips(
+            prompt in 0u32..10000,
+            completion in 0u32..10000,
+        ) {
+            let usage = TokenUsage {
+                prompt_tokens: prompt,
+                completion_tokens: completion,
+                total_tokens: prompt + completion,
+            };
+            let json = serde_json::to_string(&usage).unwrap();
+            let back: TokenUsage = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(usage.prompt_tokens, back.prompt_tokens);
+            prop_assert_eq!(usage.completion_tokens, back.completion_tokens);
+            prop_assert_eq!(usage.total_tokens, back.total_tokens);
+        }
+
+        #[test]
+        fn inference_request_roundtrips(
+            prompt in ".{1,100}",
+            max_tokens in proptest::option::of(1u32..10000),
+            temp in proptest::option::of(0.0f32..2.0),
+        ) {
+            let req = InferenceRequest {
+                prompt: prompt.clone(),
+                max_tokens,
+                temperature: temp,
+                top_p: None,
+                top_k: None,
+                stop_sequences: None,
+                system_prompt: None,
+            };
+            let json = serde_json::to_string(&req).unwrap();
+            let back: InferenceRequest = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(req.prompt, back.prompt);
+            prop_assert_eq!(req.max_tokens, back.max_tokens);
+        }
+
+        #[test]
+        fn stream_chunk_roundtrips(
+            text in ".{0,50}",
+            done in proptest::bool::ANY,
+        ) {
+            let chunk = StreamChunk { text: text.clone(), done, usage: None };
+            let json = serde_json::to_string(&chunk).unwrap();
+            let back: StreamChunk = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(chunk.text, back.text);
+            prop_assert_eq!(chunk.done, back.done);
+        }
+    }
 }
