@@ -10,9 +10,15 @@ use axum::Router;
 use axum::middleware as axum_mw;
 use axum::routing::{delete, get, post};
 use tower_http::cors::CorsLayer;
+use tower_http::limit::RequestBodyLimitLayer;
 
 /// Build the complete API router with all routes and middleware.
 pub fn build(state: AppState) -> Router {
+    let limiter = middleware::rate_limit::build_limiter(
+        state.config.security.rate_limit_per_second,
+        state.config.security.rate_limit_burst,
+    );
+
     Router::new()
         // System
         .route("/health", get(system::health))
@@ -117,10 +123,73 @@ pub fn build(state: AppState) -> Router {
             "/v1/chat/completions",
             post(openai_compat::chat_completions),
         )
-        // Middleware (order: outermost first — auth runs before telemetry)
+        // Middleware stack (axum applies bottom-up: last .layer() runs first)
+        // 1. Auth (innermost — runs last on request, first on response)
         .layer(axum_mw::from_fn(middleware::auth::require_auth))
-        .layer(CorsLayer::permissive())
+        // 2. CORS
+        .layer(build_cors_layer(
+            &state.config.security.cors_allowed_origins,
+        ))
+        // 3. Body size limit
+        .layer(RequestBodyLimitLayer::new(
+            state.config.security.max_body_size_bytes,
+        ))
+        // 4. Telemetry
         .layer(middleware::telemetry::layer())
+        // 5. Rate limiting (outermost — runs first, protects against flood)
+        .layer(axum_mw::from_fn_with_state(
+            limiter,
+            middleware::rate_limit::rate_limit,
+        ))
         // State
         .with_state(state)
+}
+
+/// Build a CORS layer from configured allowed origins.
+///
+/// - Empty list = permissive (backward compatible with dev setups)
+/// - `["*"]` = permissive (explicit wildcard)
+/// - Specific origins = restrictive
+fn build_cors_layer(origins: &[String]) -> CorsLayer {
+    if origins.is_empty() || (origins.len() == 1 && origins[0] == "*") {
+        return CorsLayer::permissive();
+    }
+
+    let parsed: Vec<axum::http::HeaderValue> =
+        origins.iter().filter_map(|o| o.parse().ok()).collect();
+
+    CorsLayer::new()
+        .allow_origin(parsed)
+        .allow_methods(tower_http::cors::Any)
+        .allow_headers(tower_http::cors::Any)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cors_empty_is_permissive() {
+        // Should not panic
+        let _layer = build_cors_layer(&[]);
+    }
+
+    #[test]
+    fn cors_wildcard_is_permissive() {
+        let _layer = build_cors_layer(&["*".into()]);
+    }
+
+    #[test]
+    fn cors_specific_origins() {
+        let _layer = build_cors_layer(&[
+            "https://app.example.com".into(),
+            "https://admin.example.com".into(),
+        ]);
+    }
+
+    #[test]
+    fn cors_invalid_origin_skipped() {
+        // Invalid origins are silently filtered out
+        let _layer = build_cors_layer(&["\x00invalid".into(), "https://valid.com".into()]);
+    }
 }

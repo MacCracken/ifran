@@ -12,6 +12,7 @@ ADRs document significant architectural decisions made during development.
 - [ADR-006: Tauri for desktop](006-tauri-desktop.md)
 - [ADR-007: rustls over OpenSSL](007-rustls-tls.md)
 - [ADR-008: Agnosticos system integration](008-agnosticos-integration.md)
+- [ADR-009: API security hardening](009-security-hardening.md)
 
 ## Format
 

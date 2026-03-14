@@ -42,6 +42,7 @@ fn test_config(tmp: &tempfile::TempDir) -> SynapseConfig {
         hardware: HardwareConfig {
             gpu_memory_reserve_mb: 512,
         },
+        security: SecurityConfig::default(),
     }
 }
 

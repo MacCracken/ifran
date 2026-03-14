@@ -43,3 +43,16 @@ heartbeat_interval_secs = 10
 [hardware]
 # Reserve VRAM (MB) for system use when loading models
 gpu_memory_reserve_mb = 512
+
+[security]
+# Require SYNAPSE_API_KEY to be set (recommended for production)
+auth_required = true
+# Max request body size in bytes (10 MB)
+max_body_size_bytes = 10485760
+# Max prompt length in characters
+max_prompt_length = 100000
+# Rate limiting: requests per second / burst
+rate_limit_per_second = 60
+rate_limit_burst = 120
+# CORS: restrict to specific origins in production
+# cors_allowed_origins = ["https://your-domain.com"]

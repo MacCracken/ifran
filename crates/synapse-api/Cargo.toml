@@ -24,6 +24,7 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
 async-stream = "0.3"
+governor = { workspace = true }
 tokio-util = { workspace = true }
 
 [dev-dependencies]

@@ -7,6 +7,20 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let config = SynapseConfig::discover();
+
+    // Enforce auth-required: refuse to start without an API key
+    if config.security.auth_required {
+        let has_key = std::env::var("SYNAPSE_API_KEY")
+            .ok()
+            .filter(|k| !k.is_empty())
+            .is_some();
+        if !has_key {
+            eprintln!("ERROR: security.auth_required is true but SYNAPSE_API_KEY is not set.");
+            eprintln!("Set SYNAPSE_API_KEY or set [security] auth_required = false in config.");
+            std::process::exit(1);
+        }
+    }
+
     let bind_addr = config.server.bind.clone();
     let bridge_enabled = config.bridge.enabled;
     let grpc_bind = config.server.grpc_bind.clone();

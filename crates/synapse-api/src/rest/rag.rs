@@ -6,6 +6,7 @@ use axum::response::Json;
 use serde::Deserialize;
 use synapse_types::rag::{RagPipelineConfig, RagPipelineId, RagQuery, RagSource};
 
+use crate::middleware::validation::validate_filename;
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -130,6 +131,8 @@ pub async fn ingest_document(
     Path(id): Path<RagPipelineId>,
     Json(req): Json<IngestRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, String)> {
+    validate_filename(&req.filename)?;
+
     let store = state.rag_store.as_ref().ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
         "RAG store not initialized".into(),

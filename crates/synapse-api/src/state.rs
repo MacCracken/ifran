@@ -146,6 +146,7 @@ mod tests {
             hardware: HardwareConfig {
                 gpu_memory_reserve_mb: 512,
             },
+            security: SecurityConfig::default(),
         }
     }
 

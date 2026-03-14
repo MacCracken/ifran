@@ -1,5 +1,6 @@
 //! REST handlers for inference requests (generate with optional streaming).
 
+use crate::middleware::validation::{validate_model_name, validate_prompt_length};
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::State;
@@ -32,6 +33,9 @@ pub async fn inference(
     State(state): State<AppState>,
     Json(body): Json<InferenceBody>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    validate_model_name(&body.model)?;
+    validate_prompt_length(&body.prompt, state.config.security.max_prompt_length)?;
+
     let loaded = state.model_manager.list_loaded().await;
     let loaded_model = loaded
         .iter()
@@ -87,6 +91,9 @@ pub async fn inference_stream(
     Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>>,
     (StatusCode, String),
 > {
+    validate_model_name(&body.model)?;
+    validate_prompt_length(&body.prompt, state.config.security.max_prompt_length)?;
+
     let loaded = state.model_manager.list_loaded().await;
     let loaded_model = loaded
         .iter()
@@ -169,6 +176,7 @@ mod tests {
             hardware: HardwareConfig {
                 gpu_memory_reserve_mb: 512,
             },
+            security: SecurityConfig::default(),
         };
         AppState::new(config).unwrap()
     }

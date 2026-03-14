@@ -23,11 +23,51 @@ You should receive an acknowledgment within 48 hours. We will work with you to u
 
 ### API Authentication
 
-Synapse supports optional Bearer token authentication via the `SYNAPSE_API_KEY` environment variable. When deployed in production:
+Synapse supports Bearer token authentication via the `SYNAPSE_API_KEY` environment variable. When deployed in production:
 
 - Always set `SYNAPSE_API_KEY` to a strong, random token
+- Set `auth_required = true` in `[security]` config — the server will refuse to start without an API key
 - Use TLS termination (reverse proxy) in front of the API server
 - Bind to `127.0.0.1` instead of `0.0.0.0` if only local access is needed
+
+### Rate Limiting
+
+The API enforces global rate limiting via the `governor` crate:
+
+- Default: 60 requests/second with burst of 120
+- Returns HTTP 429 Too Many Requests when exceeded
+- Configure via `[security]` in `synapse.toml`:
+  ```toml
+  [security]
+  rate_limit_per_second = 30
+  rate_limit_burst = 60
+  ```
+
+### Request Size Limits
+
+- Request bodies are capped at `max_body_size_bytes` (default 10 MB)
+- Oversized payloads return HTTP 413 Payload Too Large
+- Prompts are capped at `max_prompt_length` characters (default 100,000)
+
+### CORS
+
+CORS is configurable via `cors_allowed_origins`:
+
+- Empty list (default) = permissive (backward compatible for development)
+- `["*"]` = permissive (explicit wildcard)
+- `["https://your-domain.com"]` = restrictive (recommended for production)
+
+```toml
+[security]
+cors_allowed_origins = ["https://app.example.com"]
+```
+
+### Input Validation
+
+- Model names are validated: alphanumeric, hyphens, underscores, slashes, dots only. Path traversal (`..`) is rejected.
+- Filenames for RAG ingestion reject path separators, hidden files, and traversal sequences.
+- All SQL queries use parameterized statements (no SQL injection).
+- Subprocess commands use `Command::new().args()` — no shell expansion (no command injection).
 
 ### Systemd Hardening
 

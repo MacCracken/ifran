@@ -4,6 +4,7 @@
 //! - POST /v1/chat/completions
 //! - GET /v1/models
 
+use crate::middleware::validation::{validate_model_name, validate_prompt_length};
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::State;
@@ -69,6 +70,12 @@ pub async fn chat_completions(
     State(state): State<AppState>,
     Json(body): Json<ChatCompletionRequest>,
 ) -> Result<axum::response::Response, (StatusCode, String)> {
+    validate_model_name(&body.model)?;
+    // Validate all message contents against prompt length limit
+    for msg in &body.messages {
+        validate_prompt_length(&msg.content, state.config.security.max_prompt_length)?;
+    }
+
     let loaded = state.model_manager.list_loaded().await;
     let loaded_model = loaded
         .iter()
@@ -229,6 +236,7 @@ mod tests {
             hardware: HardwareConfig {
                 gpu_memory_reserve_mb: 512,
             },
+            security: SecurityConfig::default(),
         };
         AppState::new(config).unwrap()
     }

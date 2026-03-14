@@ -9,6 +9,18 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 
 ### Added
 
+#### Security Hardening (ADR-009)
+- Rate limiting middleware via `governor` crate (configurable per-second + burst, HTTP 429)
+- Request body size limit via `RequestBodyLimitLayer` (default 10 MB, HTTP 413)
+- Prompt length validation with configurable max (default 100K chars, HTTP 413)
+- Configurable CORS origins — replaces `CorsLayer::permissive()` with `[security] cors_allowed_origins`
+- Input validation for model names and filenames (path traversal prevention, HTTP 400)
+- Auth-required mode: server refuses to start without `SYNAPSE_API_KEY` when `auth_required = true`
+- New `[security]` config section with `#[serde(default)]` for full backward compatibility
+- `middleware::validation` module with `validate_prompt_length`, `validate_model_name`, `validate_filename`
+- `middleware::rate_limit` module wrapping `governor::RateLimiter`
+
+
 #### Milestone 6 — 80% Hardening
 - `proptest` added to workspace dependencies for property-based testing
 - `synapse-types/model`: Property-based tests — `ModelFormat`, `QuantLevel`, and `ModelInfo` serde roundtrip invariants; invalid JSON rejection tests

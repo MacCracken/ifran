@@ -10,6 +10,8 @@ pub struct SynapseConfig {
     pub training: TrainingConfig,
     pub bridge: BridgeConfig,
     pub hardware: HardwareConfig,
+    #[serde(default)]
+    pub security: SecurityConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +53,56 @@ pub struct HardwareConfig {
     pub gpu_memory_reserve_mb: u64,
 }
 
+/// Security settings for the API server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityConfig {
+    /// Maximum request body size in bytes (default: 10 MB).
+    #[serde(default = "default_max_body_size")]
+    pub max_body_size_bytes: usize,
+    /// Maximum prompt length in characters (default: 100,000).
+    #[serde(default = "default_max_prompt_length")]
+    pub max_prompt_length: usize,
+    /// Rate limit: max requests per second per IP (default: 60).
+    #[serde(default = "default_rate_limit_per_second")]
+    pub rate_limit_per_second: u64,
+    /// Rate limit burst size (default: 120).
+    #[serde(default = "default_rate_limit_burst")]
+    pub rate_limit_burst: u64,
+    /// CORS allowed origins. Empty = permissive (backward compat).
+    /// Use `["https://your-domain.com"]` in production.
+    #[serde(default)]
+    pub cors_allowed_origins: Vec<String>,
+    /// When true, server refuses to start without `SYNAPSE_API_KEY`.
+    #[serde(default)]
+    pub auth_required: bool,
+}
+
+fn default_max_body_size() -> usize {
+    10 * 1024 * 1024
+}
+fn default_max_prompt_length() -> usize {
+    100_000
+}
+fn default_rate_limit_per_second() -> u64 {
+    60
+}
+fn default_rate_limit_burst() -> u64 {
+    120
+}
+
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self {
+            max_body_size_bytes: default_max_body_size(),
+            max_prompt_length: default_max_prompt_length(),
+            rate_limit_per_second: default_rate_limit_per_second(),
+            rate_limit_burst: default_rate_limit_burst(),
+            cors_allowed_origins: Vec::new(),
+            auth_required: false,
+        }
+    }
+}
+
 impl Default for SynapseConfig {
     fn default() -> Self {
         let home = std::env::var("HOME")
@@ -86,6 +138,7 @@ impl Default for SynapseConfig {
             hardware: HardwareConfig {
                 gpu_memory_reserve_mb: 512,
             },
+            security: SecurityConfig::default(),
         }
     }
 }
@@ -239,5 +292,101 @@ gpu_memory_reserve_mb = 1024
     fn load_missing_file_returns_error() {
         let result = SynapseConfig::load(std::path::Path::new("/nonexistent/config.toml"));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn security_config_defaults() {
+        let sec = SecurityConfig::default();
+        assert_eq!(sec.max_body_size_bytes, 10 * 1024 * 1024);
+        assert_eq!(sec.max_prompt_length, 100_000);
+        assert_eq!(sec.rate_limit_per_second, 60);
+        assert_eq!(sec.rate_limit_burst, 120);
+        assert!(sec.cors_allowed_origins.is_empty());
+        assert!(!sec.auth_required);
+    }
+
+    #[test]
+    fn toml_without_security_section_loads_defaults() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let toml_content = r#"
+[server]
+bind = "127.0.0.1:9000"
+grpc_bind = "127.0.0.1:9001"
+
+[storage]
+models_dir = "/tmp/models"
+database = "/tmp/test.db"
+cache_dir = "/tmp/cache"
+
+[backends]
+default = "llamacpp"
+enabled = ["llamacpp"]
+
+[training]
+executor = "subprocess"
+max_concurrent_jobs = 2
+checkpoints_dir = "/tmp/checkpoints"
+
+[bridge]
+enabled = false
+heartbeat_interval_secs = 10
+
+[hardware]
+gpu_memory_reserve_mb = 512
+"#;
+        std::fs::write(tmp.path(), toml_content).unwrap();
+        let cfg = SynapseConfig::load(tmp.path()).unwrap();
+        assert_eq!(cfg.security.max_body_size_bytes, 10 * 1024 * 1024);
+        assert!(!cfg.security.auth_required);
+    }
+
+    #[test]
+    fn toml_with_security_section() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let toml_content = r#"
+[server]
+bind = "127.0.0.1:9000"
+grpc_bind = "127.0.0.1:9001"
+
+[storage]
+models_dir = "/tmp/models"
+database = "/tmp/test.db"
+cache_dir = "/tmp/cache"
+
+[backends]
+default = "llamacpp"
+enabled = ["llamacpp"]
+
+[training]
+executor = "subprocess"
+max_concurrent_jobs = 2
+checkpoints_dir = "/tmp/checkpoints"
+
+[bridge]
+enabled = false
+heartbeat_interval_secs = 10
+
+[hardware]
+gpu_memory_reserve_mb = 512
+
+[security]
+auth_required = true
+max_body_size_bytes = 5242880
+max_prompt_length = 50000
+rate_limit_per_second = 30
+rate_limit_burst = 60
+cors_allowed_origins = ["https://app.example.com"]
+"#;
+        std::fs::write(tmp.path(), toml_content).unwrap();
+        let cfg = SynapseConfig::load(tmp.path()).unwrap();
+        assert!(cfg.security.auth_required);
+        assert_eq!(cfg.security.max_body_size_bytes, 5242880);
+        assert_eq!(cfg.security.max_prompt_length, 50000);
+        assert_eq!(cfg.security.rate_limit_per_second, 30);
+        assert_eq!(cfg.security.rate_limit_burst, 60);
+        assert_eq!(
+            cfg.security.cors_allowed_origins,
+            vec!["https://app.example.com"]
+        );
     }
 }
