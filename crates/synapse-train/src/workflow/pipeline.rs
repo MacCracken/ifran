@@ -210,4 +210,43 @@ mod tests {
             assert_eq!(t, back);
         }
     }
+
+    #[test]
+    fn parallel_steps() {
+        // Two steps with no dependencies — both should be ready.
+        let s1 = step("curate-a", StepType::Curate, vec![]);
+        let s2 = step("curate-b", StepType::Curate, vec![]);
+        let pipeline = Pipeline {
+            name: "p".into(),
+            steps: vec![s1.clone(), s2.clone()],
+        };
+        let ready = ready_steps(&pipeline);
+        assert_eq!(ready.len(), 2);
+        assert!(ready.contains(&s1.id));
+        assert!(ready.contains(&s2.id));
+    }
+
+    #[test]
+    fn all_completed_nothing_ready() {
+        let mut s1 = step("curate", StepType::Curate, vec![]);
+        s1.status = StepStatus::Completed;
+        let mut s2 = step("train", StepType::Train, vec![s1.id]);
+        s2.status = StepStatus::Completed;
+        let pipeline = Pipeline {
+            name: "p".into(),
+            steps: vec![s1, s2],
+        };
+        let ready = ready_steps(&pipeline);
+        assert!(ready.is_empty());
+    }
+
+    #[test]
+    fn empty_pipeline_valid() {
+        let pipeline = Pipeline {
+            name: "empty".into(),
+            steps: vec![],
+        };
+        assert!(validate_dag(&pipeline).is_ok());
+        assert!(ready_steps(&pipeline).is_empty());
+    }
 }

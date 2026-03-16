@@ -122,7 +122,7 @@ impl LineageStore {
         let parent_ids = self.get_parent_ids(id)?;
 
         Ok(LineageNode {
-            id: Uuid::parse_str(&node.0).unwrap(),
+            id: Uuid::parse_str(&node.0).unwrap_or_default(),
             stage: serde_json::from_str(&format!("\"{}\"", node.1))
                 .unwrap_or(PipelineStage::Dataset),
             name: node.2,
@@ -397,5 +397,67 @@ mod tests {
         let store = LineageStore::open_in_memory().unwrap();
         let result = store.get(Uuid::new_v4(), &default_tenant());
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn record_duplicate_id_fails() {
+        let store = LineageStore::open_in_memory().unwrap();
+        let node = make_node(PipelineStage::Dataset, "d1", "/d1", vec![]);
+        store.record(&node, &default_tenant()).unwrap();
+        // Inserting the same node again should fail (PRIMARY KEY constraint).
+        let result = store.record(&node, &default_tenant());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn get_ancestry_with_diamond() {
+        let store = LineageStore::open_in_memory().unwrap();
+        let t = default_tenant();
+
+        // A -> B, A -> C, B -> D, C -> D  (diamond shape)
+        let a = make_node(PipelineStage::Dataset, "A", "a", vec![]);
+        store.record(&a, &t).unwrap();
+
+        let b = make_node(PipelineStage::Training, "B", "b", vec![a.id]);
+        store.record(&b, &t).unwrap();
+
+        let c = make_node(PipelineStage::Training, "C", "c", vec![a.id]);
+        store.record(&c, &t).unwrap();
+
+        let d = make_node(PipelineStage::Evaluation, "D", "d", vec![b.id, c.id]);
+        store.record(&d, &t).unwrap();
+
+        let ancestry = store.get_ancestry(d.id, &t).unwrap();
+        // D, B, C, A — all 4 nodes reachable, each visited once.
+        assert_eq!(ancestry.len(), 4);
+    }
+
+    #[test]
+    fn find_by_artifact_multiple_matches() {
+        let store = LineageStore::open_in_memory().unwrap();
+        let t = default_tenant();
+
+        let shared_ref = "shared-artifact";
+        store
+            .record(
+                &make_node(PipelineStage::Training, "run-1", shared_ref, vec![]),
+                &t,
+            )
+            .unwrap();
+        store
+            .record(
+                &make_node(PipelineStage::Training, "run-2", shared_ref, vec![]),
+                &t,
+            )
+            .unwrap();
+        store
+            .record(
+                &make_node(PipelineStage::Training, "run-3", "other-artifact", vec![]),
+                &t,
+            )
+            .unwrap();
+
+        let found = store.find_by_artifact(shared_ref, &t).unwrap();
+        assert_eq!(found.len(), 2);
     }
 }

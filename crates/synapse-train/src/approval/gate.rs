@@ -184,4 +184,23 @@ mod tests {
             assert_eq!(s, back);
         }
     }
+
+    #[test]
+    fn reject_already_rejected_noop() {
+        let mut gate = ApprovalGate::new();
+        let req = gate.request_approval("p", "deploy", "model");
+        gate.reject(req.id, "reviewer1", Some("No"));
+        // Second reject is a no-op since status is already Rejected (not Pending).
+        gate.reject(req.id, "reviewer2", Some("Also no"));
+        let fetched = gate.get(req.id).unwrap();
+        assert_eq!(fetched.status, ApprovalStatus::Rejected);
+        // Original reviewer unchanged.
+        assert_eq!(fetched.reviewer.as_deref(), Some("reviewer1"));
+    }
+
+    #[test]
+    fn is_approved_unknown_id() {
+        let gate = ApprovalGate::new();
+        assert!(!gate.is_approved(Uuid::new_v4()));
+    }
 }

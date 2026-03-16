@@ -278,6 +278,9 @@ impl SynapseBridge for SynapseBridgeService {
         request: Request<InferenceRequest>,
     ) -> Result<Response<InferenceResponse>, Status> {
         let req = request.into_inner();
+        if req.prompt.len() > 500_000 {
+            return Err(Status::invalid_argument("Prompt too long (max 500KB)"));
+        }
         info!(model = %req.model, "Received RunInference request");
 
         let loaded = self.model_manager.list_loaded().await;
@@ -321,6 +324,9 @@ impl SynapseBridge for SynapseBridgeService {
         request: Request<InferenceRequest>,
     ) -> Result<Response<Self::StreamInferenceStream>, Status> {
         let req = request.into_inner();
+        if req.prompt.len() > 500_000 {
+            return Err(Status::invalid_argument("Prompt too long (max 500KB)"));
+        }
         info!(model = %req.model, "Received StreamInference request");
 
         let loaded = self.model_manager.list_loaded().await;

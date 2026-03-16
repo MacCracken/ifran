@@ -18,6 +18,7 @@ pub struct Allocation {
     pub id: AllocationId,
     pub device_ids: Vec<u32>,
     pub memory_mb: u64,
+    pub memory_per_device_mb: u64,
     pub job_label: String,
 }
 
@@ -116,6 +117,7 @@ impl DeviceAllocator {
             id: uuid::Uuid::new_v4(),
             device_ids,
             memory_mb: memory_per_device_mb * count as u64,
+            memory_per_device_mb,
             job_label: job_label.to_string(),
         };
 
@@ -130,11 +132,7 @@ impl DeviceAllocator {
             SynapseError::HardwareError(format!("Allocation {allocation_id} not found"))
         })?;
 
-        let per_device_mb = if alloc.device_ids.is_empty() {
-            0
-        } else {
-            alloc.memory_mb / alloc.device_ids.len() as u64
-        };
+        let per_device_mb = alloc.memory_per_device_mb;
 
         let mut devices = self.devices.write().await;
         for &dev_id in &alloc.device_ids {

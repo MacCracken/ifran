@@ -193,4 +193,40 @@ mod tests {
         let report = compute_report("model", &samples);
         assert!((report.fairness.disparate_impact_ratio - 0.5).abs() < 0.01);
     }
+
+    #[test]
+    fn three_cohorts() {
+        let samples = vec![
+            // Cohort A: 2/2 = 100%
+            sample("A", true),
+            sample("A", true),
+            // Cohort B: 1/2 = 50%
+            sample("B", true),
+            sample("B", false),
+            // Cohort C: 0/2 = 0%
+            sample("C", false),
+            sample("C", false),
+        ];
+        let report = compute_report("model", &samples);
+        assert_eq!(report.cohort_metrics.len(), 3);
+        // Gap between best (100%) and worst (0%) = 1.0
+        assert!((report.fairness.demographic_parity_gap - 1.0).abs() < 0.01);
+        // 80% rule: min/max = 0/1 = 0 < 0.8
+        assert!(!report.fairness.passes_80_percent_rule);
+    }
+
+    #[test]
+    fn all_correct() {
+        let samples = vec![
+            sample("A", true),
+            sample("A", true),
+            sample("B", true),
+            sample("B", true),
+        ];
+        let report = compute_report("model", &samples);
+        assert_eq!(report.overall_accuracy, 1.0);
+        assert!(report.fairness.passes_80_percent_rule);
+        assert!(report.fairness.demographic_parity_gap < f64::EPSILON);
+        assert!((report.fairness.disparate_impact_ratio - 1.0).abs() < f64::EPSILON);
+    }
 }

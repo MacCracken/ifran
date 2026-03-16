@@ -194,4 +194,48 @@ mod tests {
             assert_eq!(v, back);
         }
     }
+
+    #[test]
+    fn parse_verdict_case_insensitive() {
+        // Lowercase
+        assert_eq!(parse_verdict("verdict: a"), Verdict::WinA);
+        // Mixed case
+        assert_eq!(parse_verdict("VERDICT: B"), Verdict::WinB);
+        // With surrounding text
+        assert_eq!(
+            parse_verdict("After careful analysis, Verdict: A is the winner."),
+            Verdict::WinA
+        );
+    }
+
+    #[test]
+    fn judge_result_win_rates() {
+        let verdicts = vec![
+            Verdict::WinA,
+            Verdict::WinA,
+            Verdict::WinA,
+            Verdict::WinB,
+            Verdict::Tie,
+        ];
+        let result = aggregate_verdicts("model-x", "model-y", &verdicts);
+        assert_eq!(result.total, 5);
+        // win_rate_a = 3/5 = 0.6
+        assert!((result.win_rate_a() - 0.6).abs() < f64::EPSILON);
+        // win_rate_b = 1/5 = 0.2
+        assert!((result.win_rate_b() - 0.2).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn rubric_custom() {
+        let rubric = JudgeRubric {
+            criteria: vec!["Creativity".into(), "Factual accuracy".into()],
+            scale: "1-10".into(),
+            system_prompt: "You are an expert judge.".into(),
+        };
+        let prompt = build_judge_prompt(&rubric, "prompt", "resp_a", "resp_b");
+        assert!(prompt.contains("Creativity"));
+        assert!(prompt.contains("Factual accuracy"));
+        assert!(prompt.contains("1-10"));
+        assert!(prompt.contains("expert judge"));
+    }
 }

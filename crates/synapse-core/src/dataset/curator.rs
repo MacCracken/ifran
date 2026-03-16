@@ -240,4 +240,26 @@ mod tests {
         c.register(&make_dataset("d"), &t2).unwrap();
         assert_eq!(c.list(&t1).unwrap().len(), 1);
     }
+
+    #[test]
+    fn get_not_found() {
+        let c = DatasetCurator::open_in_memory().unwrap();
+        let result = c.get(uuid::Uuid::new_v4(), &t());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn register_same_name_different_version() {
+        let c = DatasetCurator::open_in_memory().unwrap();
+        let mut d1 = make_dataset("train-data");
+        d1.version = 1;
+        c.register(&d1, &t()).unwrap();
+
+        let mut d2 = make_dataset("train-data");
+        d2.version = 2;
+        // Different UUID so it's a different row — should succeed.
+        let result = c.register(&d2, &t());
+        assert!(result.is_ok());
+        assert_eq!(c.list(&t()).unwrap().len(), 2);
+    }
 }

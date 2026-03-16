@@ -74,10 +74,16 @@ impl RetrievalOptimizer {
 
     /// Select the best strategy via Thompson Sampling.
     pub fn select(&self) -> Option<String> {
-        self.arms
+        // Sample each arm once, then pick the max
+        let samples: Vec<(String, f64)> = self
+            .arms
             .iter()
-            .max_by(|a, b| a.1.sample().partial_cmp(&b.1.sample()).unwrap())
-            .map(|(name, _)| name.clone())
+            .map(|(name, arm)| (name.clone(), arm.sample()))
+            .collect();
+        samples
+            .into_iter()
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(name, _)| name)
     }
 
     /// Record a reward (1.0 = relevant result, 0.0 = irrelevant).
@@ -101,7 +107,7 @@ impl RetrievalOptimizer {
             .max_by(|a, b| {
                 a.1.expected_value()
                     .partial_cmp(&b.1.expected_value())
-                    .unwrap()
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
             .map(|(name, arm)| (name.clone(), arm.expected_value()))
     }
@@ -201,5 +207,40 @@ mod tests {
         let back: ArmState = serde_json::from_str(&json).unwrap();
         assert_eq!(back.alpha, 5.0);
         assert_eq!(back.pulls, 7);
+    }
+
+    #[test]
+    fn three_strategies_reward_convergence() {
+        let mut opt = RetrievalOptimizer::new();
+        opt.add_strategy("cosine");
+        opt.add_strategy("bm25");
+        opt.add_strategy("hybrid");
+
+        // Heavily reward "hybrid"
+        for _ in 0..100 {
+            opt.record_reward("hybrid", 1.0);
+            opt.record_reward("cosine", 0.3);
+            opt.record_reward("bm25", 0.1);
+        }
+
+        let (best, ev) = opt.best_strategy().unwrap();
+        assert_eq!(best, "hybrid");
+        assert!(ev > 0.8); // expected value should be high
+    }
+
+    #[test]
+    fn arm_expected_value_after_rewards() {
+        let mut opt = RetrievalOptimizer::new();
+        opt.add_strategy("s1");
+
+        // 10 rewards of 1.0 => alpha = 1 + 10 = 11, beta stays 1 + 0 = 1
+        for _ in 0..10 {
+            opt.record_reward("s1", 1.0);
+        }
+        let arm = &opt.arm_states()["s1"];
+        assert_eq!(arm.alpha, 11.0);
+        assert_eq!(arm.beta, 1.0);
+        // expected_value = 11 / (11 + 1) = 11/12
+        assert!((arm.expected_value() - 11.0 / 12.0).abs() < 0.001);
     }
 }

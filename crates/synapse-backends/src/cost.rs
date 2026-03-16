@@ -37,7 +37,9 @@ impl CostConfig {
             .min_by(|a, b| {
                 let cost_a = self.costs.get(**a).copied().unwrap_or(f64::MAX);
                 let cost_b = self.costs.get(**b).copied().unwrap_or(f64::MAX);
-                cost_a.partial_cmp(&cost_b).unwrap()
+                cost_a
+                    .partial_cmp(&cost_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
             .copied()
     }
@@ -120,5 +122,43 @@ mod tests {
         config.set_cost("vllm", 0.005);
         assert_eq!(config.get_cost("vllm"), Some(0.005));
         assert_eq!(config.get_cost("nonexistent"), None);
+    }
+
+    #[test]
+    fn nan_costs_do_not_panic() {
+        let mut config = CostConfig::new();
+        config.set_cost("a", f64::NAN);
+        config.set_cost("b", 0.01);
+        config.set_cost("c", f64::NAN);
+
+        // Should not panic, and should return a valid result
+        let result = config.cheapest(&["a", "b", "c"]);
+        assert!(result.is_some());
+
+        let result = config.select_within_budget(&["a", "b", "c"], 0.05);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn set_cost_overwrite() {
+        let mut config = CostConfig::new();
+        config.set_cost("vllm", 0.01);
+        assert_eq!(config.get_cost("vllm"), Some(0.01));
+        config.set_cost("vllm", 0.05);
+        assert_eq!(config.get_cost("vllm"), Some(0.05));
+    }
+
+    #[test]
+    fn select_within_budget_all_free() {
+        let mut config = CostConfig::new();
+        config.set_cost("a", 0.0);
+        config.set_cost("b", 0.0);
+        config.set_cost("c", 0.0);
+
+        // All costs are 0, any budget works.
+        let selected = config.select_within_budget(&["a", "b", "c"], 0.001);
+        assert!(selected.is_some());
+        let s = selected.unwrap();
+        assert!(s == "a" || s == "b" || s == "c");
     }
 }

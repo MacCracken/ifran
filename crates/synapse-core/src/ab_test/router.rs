@@ -70,4 +70,17 @@ mod tests {
         // Just verify it returns one of the two
         assert!(variant == "model-a" || variant == "model-b");
     }
+
+    #[test]
+    fn select_variant_returns_valid() {
+        let test = make_test(0.5);
+        // Run many iterations — every result must be one of the two models.
+        for _ in 0..100 {
+            let variant = select_variant(&test);
+            assert!(
+                variant == "model-a" || variant == "model-b",
+                "unexpected variant: {variant}"
+            );
+        }
+    }
 }

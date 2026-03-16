@@ -311,4 +311,42 @@ mod tests {
         let fetched = store.get(v.id, &t()).unwrap();
         assert_eq!(fetched.consumer, Some("support-bot".into()));
     }
+
+    #[test]
+    fn duplicate_family_tag_fails() {
+        let store = VersionStore::open_in_memory().unwrap();
+        store.create(&make_version("llama-8b", "v1"), &t()).unwrap();
+        // Same tenant + family + tag should violate the unique index.
+        let result = store.create(&make_version("llama-8b", "v1"), &t());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn list_all_tenants_isolated() {
+        let store = VersionStore::open_in_memory().unwrap();
+        let t1 = TenantId("t1".into());
+        let t2 = TenantId("t2".into());
+
+        store.create(&make_version("m", "v1"), &t1).unwrap();
+        store.create(&make_version("m", "v2"), &t1).unwrap();
+        store.create(&make_version("m", "v1"), &t2).unwrap();
+
+        // list returns only the tenant's data
+        let t1_versions = store.list(&t1).unwrap();
+        let t2_versions = store.list(&t2).unwrap();
+        assert_eq!(t1_versions.len(), 2);
+        assert_eq!(t2_versions.len(), 1);
+    }
+
+    #[test]
+    fn get_lineage_single_node() {
+        let store = VersionStore::open_in_memory().unwrap();
+        let v = make_version("llama-8b", "v1");
+        store.create(&v, &t()).unwrap();
+
+        // A node with no parent returns a chain of just itself.
+        let chain = store.get_lineage(v.id, &t()).unwrap();
+        assert_eq!(chain.len(), 1);
+        assert_eq!(chain[0].version_tag, "v1");
+    }
 }

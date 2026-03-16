@@ -134,13 +134,22 @@ impl PreferenceStore {
         Ok(c as u64)
     }
 
-    /// Add multiple pairs in a batch.
+    /// Add multiple pairs in a batch, wrapped in a transaction for atomicity.
     pub fn add_batch(&self, pairs: &[PreferencePair], tenant_id: &TenantId) -> Result<u64> {
-        let mut count = 0;
+        self.conn
+            .execute_batch("BEGIN")
+            .map_err(|e| SynapseError::StorageError(e.to_string()))?;
+        let mut count = 0u64;
         for pair in pairs {
-            self.add(pair, tenant_id)?;
+            if let Err(e) = self.add(pair, tenant_id) {
+                let _ = self.conn.execute_batch("ROLLBACK");
+                return Err(e);
+            }
             count += 1;
         }
+        self.conn
+            .execute_batch("COMMIT")
+            .map_err(|e| SynapseError::StorageError(e.to_string()))?;
         Ok(count)
     }
 }
@@ -224,5 +233,42 @@ mod tests {
         s.add(&make_pair("Q"), &TenantId("a".into())).unwrap();
         s.add(&make_pair("Q"), &TenantId("b".into())).unwrap();
         assert_eq!(s.count(&TenantId("a".into())).unwrap(), 1);
+    }
+
+    #[test]
+    fn list_respects_limit() {
+        let s = PreferenceStore::open_in_memory().unwrap();
+        for i in 0..5 {
+            s.add(&make_pair(&format!("Q{i}")), &t()).unwrap();
+        }
+        let pairs = s.list(&t(), 2).unwrap();
+        assert_eq!(pairs.len(), 2);
+    }
+
+    #[test]
+    fn export_empty() {
+        let s = PreferenceStore::open_in_memory().unwrap();
+        let export = s.export_dpo(&t()).unwrap();
+        assert!(export.is_empty());
+    }
+
+    #[test]
+    fn pair_fields_roundtrip() {
+        let s = PreferenceStore::open_in_memory().unwrap();
+        let mut pair = make_pair("Tell me about Rust");
+        pair.chosen = "Rust is a systems programming language.".into();
+        pair.rejected = "I don't know.".into();
+        pair.source = "human_eval".into();
+        pair.score_delta = Some(0.75);
+        s.add(&pair, &t()).unwrap();
+
+        let pairs = s.list(&t(), 10).unwrap();
+        assert_eq!(pairs.len(), 1);
+        let fetched = &pairs[0];
+        assert_eq!(fetched.prompt, "Tell me about Rust");
+        assert_eq!(fetched.chosen, "Rust is a systems programming language.");
+        assert_eq!(fetched.rejected, "I don't know.");
+        assert_eq!(fetched.source, "human_eval");
+        assert_eq!(fetched.score_delta, Some(0.75));
     }
 }

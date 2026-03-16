@@ -81,11 +81,10 @@ impl BudgetChecker {
 
     /// Query hoosh accounting service for tenant's GPU budget.
     async fn query_hoosh(&self, tenant_id: &TenantId) -> Result<BudgetStatus> {
-        let url = format!("{}/v1/budget/gpu?tenant={}", self.endpoint, tenant_id);
-
         let resp = self
             .client
-            .get(&url)
+            .get(format!("{}/v1/budget/gpu", self.endpoint))
+            .query(&[("tenant", &tenant_id.to_string())])
             .send()
             .await
             .map_err(|e| SynapseError::HardwareError(format!("Hoosh query failed: {e}")))?;

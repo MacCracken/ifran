@@ -50,7 +50,7 @@ pub async fn register_adapter(
 
 /// Build an Ollama Modelfile for a LoRA adapter.
 pub fn build_modelfile(base_model: &str, adapter_path: &str) -> String {
-    format!("FROM {base_model}\nADAPTER {adapter_path}\n")
+    format!("FROM {base_model}\nADAPTER \"{adapter_path}\"\n")
 }
 
 /// Check if Ollama is available at the given endpoint.
@@ -78,7 +78,7 @@ mod tests {
     fn modelfile_format() {
         let mf = build_modelfile("llama3.1", "/adapters/lora-v1");
         assert!(mf.contains("FROM llama3.1"));
-        assert!(mf.contains("ADAPTER /adapters/lora-v1"));
+        assert!(mf.contains("ADAPTER \"/adapters/lora-v1\""));
     }
 
     #[tokio::test]
@@ -92,5 +92,13 @@ mod tests {
         let result =
             register_adapter("http://127.0.0.1:19999", "test", "llama3.1", "/adapters/v1").await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn modelfile_with_spaces_in_path() {
+        let mf = build_modelfile("llama3.1", "/path/with spaces/adapter v2");
+        assert!(mf.contains("FROM llama3.1"));
+        // The adapter path is quoted in the modelfile.
+        assert!(mf.contains("/path/with spaces/adapter v2"));
     }
 }

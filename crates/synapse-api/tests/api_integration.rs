@@ -1996,3 +1996,282 @@ async fn eval_get_nonexistent_run() {
 
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
+
+// -- Lineage --
+
+#[tokio::test]
+async fn lineage_record_and_get() {
+    let (app, _tmp) = test_app();
+
+    let body = serde_json::json!({
+        "stage": "dataset",
+        "name": "train.jsonl",
+        "artifact_ref": "/data/train.jsonl"
+    });
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post("/lineage")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let rbody = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
+    let id = json["id"].as_str().unwrap().to_string();
+
+    // GET it back
+    let resp = app
+        .oneshot(
+            Request::get(format!("/lineage/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let rbody = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
+    assert_eq!(json["name"], "train.jsonl");
+    assert_eq!(json["artifact_ref"], "/data/train.jsonl");
+}
+
+#[tokio::test]
+async fn lineage_list_empty() {
+    let (app, _tmp) = test_app();
+
+    let resp = app
+        .oneshot(Request::get("/lineage").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json.as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn lineage_ancestry() {
+    let (app, _tmp) = test_app();
+
+    // Create node A (dataset)
+    let body_a = serde_json::json!({
+        "stage": "dataset",
+        "name": "data",
+        "artifact_ref": "/data"
+    });
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post("/lineage")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body_a).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let rbody = resp.into_body().collect().await.unwrap().to_bytes();
+    let json_a: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
+    let id_a = json_a["id"].as_str().unwrap().to_string();
+
+    // Create node B (training) with parent A
+    let body_b = serde_json::json!({
+        "stage": "training",
+        "name": "lora-run",
+        "artifact_ref": "job-1",
+        "parent_ids": [id_a]
+    });
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post("/lineage")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body_b).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let rbody = resp.into_body().collect().await.unwrap().to_bytes();
+    let json_b: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
+    let id_b = json_b["id"].as_str().unwrap().to_string();
+
+    // GET ancestry of B — should include B and A
+    let resp = app
+        .oneshot(
+            Request::get(format!("/lineage/{id_b}/ancestry"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let rbody = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
+    assert_eq!(json.as_array().unwrap().len(), 2);
+}
+
+// -- Versions --
+
+#[tokio::test]
+async fn version_create_and_get() {
+    let (app, _tmp) = test_app();
+
+    let body = serde_json::json!({
+        "model_family": "llama-8b",
+        "version_tag": "v1"
+    });
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post("/versions")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let rbody = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
+    let id = json["id"].as_str().unwrap().to_string();
+    assert_eq!(json["model_family"], "llama-8b");
+
+    // GET it back
+    let resp = app
+        .oneshot(
+            Request::get(format!("/versions/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let rbody = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
+    assert_eq!(json["version_tag"], "v1");
+}
+
+#[tokio::test]
+async fn version_list_by_family() {
+    let (app, _tmp) = test_app();
+
+    // Create two versions in the same family
+    for tag in ["v1", "v2"] {
+        let body = serde_json::json!({
+            "model_family": "llama-8b",
+            "version_tag": tag
+        });
+        app.clone()
+            .oneshot(
+                Request::post("/versions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_string(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+
+    // Create one in a different family
+    let body = serde_json::json!({
+        "model_family": "mistral-7b",
+        "version_tag": "v1"
+    });
+    app.clone()
+        .oneshot(
+            Request::post("/versions")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // List by family=llama-8b
+    let resp = app
+        .oneshot(
+            Request::get("/versions?family=llama-8b")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let rbody = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
+    assert_eq!(json.as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn version_lineage_chain() {
+    let (app, _tmp) = test_app();
+
+    // Create v1 (no parent)
+    let body_v1 = serde_json::json!({
+        "model_family": "llama-8b",
+        "version_tag": "v1"
+    });
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post("/versions")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body_v1).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let rbody = resp.into_body().collect().await.unwrap().to_bytes();
+    let json_v1: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
+    let id_v1 = json_v1["id"].as_str().unwrap().to_string();
+
+    // Create v2 with parent v1
+    let body_v2 = serde_json::json!({
+        "model_family": "llama-8b",
+        "version_tag": "v2",
+        "parent_version_id": id_v1
+    });
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post("/versions")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body_v2).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let rbody = resp.into_body().collect().await.unwrap().to_bytes();
+    let json_v2: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
+    let id_v2 = json_v2["id"].as_str().unwrap().to_string();
+
+    // GET lineage of v2 — should return [v2, v1]
+    let resp = app
+        .oneshot(
+            Request::get(format!("/versions/{id_v2}/lineage"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let rbody = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
+    let chain = json.as_array().unwrap();
+    assert_eq!(chain.len(), 2);
+    assert_eq!(chain[0]["version_tag"], "v2");
+    assert_eq!(chain[1]["version_tag"], "v1");
+}

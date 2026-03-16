@@ -276,4 +276,38 @@ mod tests {
         // Zero std_dev -> z_score = 0 -> no drift
         assert!(!result.drifted);
     }
+
+    #[test]
+    fn multiple_baselines_latest_used() {
+        let det = DriftDetector::open_in_memory(2.0).unwrap();
+        // First baseline: mean ~0.5
+        det.record_baseline("m", &[0.4, 0.5, 0.6], &t()).unwrap();
+        // Second baseline: mean ~0.9  (the latest)
+        det.record_baseline("m", &[0.88, 0.90, 0.92], &t()).unwrap();
+
+        // Check drift against the latest baseline (mean ~0.9).
+        // Scores near 0.5 should drift relative to 0.9 baseline.
+        let result = det.check_drift("m", &[0.5, 0.5, 0.5], &t()).unwrap();
+        // z_score should be negative (current < baseline mean)
+        assert!(result.z_score < 0.0);
+    }
+
+    #[test]
+    fn negative_drift() {
+        let det = DriftDetector::open_in_memory(2.0).unwrap();
+        det.record_baseline("m", &[0.50, 0.55, 0.52, 0.48, 0.50], &t())
+            .unwrap();
+        // Scores much better than baseline — z-score should be positive (improvement).
+        let result = det.check_drift("m", &[0.95, 0.96, 0.97], &t()).unwrap();
+        assert!(result.z_score > 0.0); // positive = improvement
+    }
+
+    #[test]
+    fn single_sample_baseline() {
+        let det = DriftDetector::open_in_memory(2.0).unwrap();
+        let baseline = det.record_baseline("m", &[0.75], &t()).unwrap();
+        // Single sample => variance = 0, std_dev = 0
+        assert_eq!(baseline.sample_count, 1);
+        assert_eq!(baseline.std_dev, 0.0);
+    }
 }

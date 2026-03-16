@@ -264,17 +264,19 @@ impl BridgeClient {
             "Requesting worker assignment from SY"
         );
         if let Some(mut client) = self.get_client().await? {
-            let devices_str = device_ids
-                .iter()
-                .map(|d| d.to_string())
-                .collect::<Vec<_>>()
-                .join(",");
-            // Encode assignment request as a progress update with structured status.
-            // SY parses the "worker_assignment:<rank>:<endpoint>:<devices>" format
-            // and routes the assignment to the appropriate node.
+            // Encode assignment request as a progress update with JSON status.
+            // SY parses the structured JSON and routes the assignment to the
+            // appropriate node.
+            let status_json = serde_json::json!({
+                "type": "worker_assignment",
+                "rank": rank,
+                "endpoint": endpoint,
+                "device_ids": device_ids,
+            })
+            .to_string();
             let update = ProgressUpdate {
                 job_id: job_id.to_string(),
-                status: format!("worker_assignment:{rank}:{endpoint}:{devices_str}"),
+                status: status_json,
                 loss: 0.0,
                 step: 0,
             };
@@ -306,11 +308,17 @@ impl BridgeClient {
             rank, checkpoint_path, "Notifying SY of checkpoint ready for sync"
         );
         if let Some(mut client) = self.get_client().await? {
-            // Encode checkpoint sync as a progress update with structured status.
-            // SY parses "checkpoint_sync:<rank>:<path>" and coordinates transfer.
+            // Encode checkpoint sync as a progress update with JSON status.
+            // SY parses the structured JSON and coordinates transfer.
+            let status_json = serde_json::json!({
+                "type": "checkpoint_sync",
+                "rank": rank,
+                "checkpoint_path": checkpoint_path,
+            })
+            .to_string();
             let update = ProgressUpdate {
                 job_id: job_id.to_string(),
-                status: format!("checkpoint_sync:{rank}:{checkpoint_path}"),
+                status: status_json,
                 loss: 0.0,
                 step: 0,
             };

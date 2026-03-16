@@ -233,4 +233,47 @@ mod tests {
         let score = score_coherence("the the the the the the the");
         assert!(score < 0.5);
     }
+
+    #[test]
+    fn very_long_response_penalized() {
+        let prompt = "What is AI?";
+        // Response about 10x the prompt word count (well beyond 5x threshold)
+        let long_response = "word ".repeat(100);
+        let score = score_response(prompt, &long_response);
+        let length_criterion = score
+            .criteria
+            .iter()
+            .find(|c| c.name == "length_adequacy")
+            .unwrap();
+        assert!(length_criterion.score < 1.0);
+    }
+
+    #[test]
+    fn perfect_response() {
+        let score = score_response(
+            "What is Rust?",
+            "Rust is a systems programming language that emphasizes safety, performance, and concurrency without a garbage collector.",
+        );
+        // Well-formed, good length, no repetition, ends with punctuation.
+        assert!(score.overall > 0.7);
+    }
+
+    #[test]
+    fn single_word_response() {
+        let score = score_response("Explain quantum computing in detail.", "Yes.");
+        // Very short relative to prompt — length should be penalized.
+        let length = score
+            .criteria
+            .iter()
+            .find(|c| c.name == "length_adequacy")
+            .unwrap();
+        assert!(length.score < 1.0);
+        // But completeness should be fine (ends with period).
+        let completeness = score
+            .criteria
+            .iter()
+            .find(|c| c.name == "completeness")
+            .unwrap();
+        assert_eq!(completeness.score, 1.0);
+    }
 }
