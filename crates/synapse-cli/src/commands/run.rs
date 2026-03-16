@@ -43,6 +43,7 @@ pub async fn execute(model: &str) -> Result<()> {
             handle.0.clone(),
             "llamacpp".into(),
             0,
+            synapse_types::TenantId::default_tenant(),
         )
         .await;
 

@@ -19,6 +19,8 @@ impl DriftDetector {
             std::fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(path).map_err(|e| SynapseError::StorageError(e.to_string()))?;
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")
+            .map_err(|e| SynapseError::StorageError(e.to_string()))?;
         let det = Self { conn, threshold };
         det.migrate()?;
         Ok(det)

@@ -6,6 +6,7 @@ use crate::job::store::JobStore;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use synapse_types::SynapseError;
+use synapse_types::TenantId;
 use synapse_types::error::Result;
 use synapse_types::training::{TrainingJobConfig, TrainingJobId, TrainingStatus};
 use tokio::sync::RwLock;
@@ -114,11 +115,15 @@ impl JobManager {
     }
 
     /// Create and enqueue a new training job.
-    pub async fn create_job(&self, config: TrainingJobConfig) -> Result<TrainingJobId> {
+    pub async fn create_job(
+        &self,
+        config: TrainingJobConfig,
+        tenant_id: TenantId,
+    ) -> Result<TrainingJobId> {
         config.hyperparams.validate()?;
         let id = uuid::Uuid::new_v4();
         let total_steps = estimate_total_steps(&config);
-        let state = JobState::new(id, config, total_steps);
+        let state = JobState::new(id, tenant_id, config, total_steps);
 
         self.persist(&state);
         info!(job_id = %id, "Created training job");
@@ -186,16 +191,20 @@ impl JobManager {
     }
 
     /// Cancel a running or queued job.
-    pub async fn cancel_job(&self, id: TrainingJobId) -> Result<()> {
-        // Validate the job exists and is cancellable, then release the lock
-        // before calling executor.cancel() to avoid holding the write lock
-        // during a potentially long async operation (which could deadlock
-        // if the executor also needs lock access).
+    pub async fn cancel_job(&self, id: TrainingJobId, tenant_id: &TenantId) -> Result<()> {
+        // Validate the job exists, belongs to tenant, and is cancellable,
+        // then release the lock before calling executor.cancel() to avoid
+        // holding the write lock during a potentially long async operation
+        // (which could deadlock if the executor also needs lock access).
         {
             let jobs = self.jobs.read().await;
             let state = jobs
                 .get(&id)
                 .ok_or_else(|| SynapseError::TrainingError(format!("Job {id} not found")))?;
+
+            if &state.tenant_id != tenant_id {
+                return Err(SynapseError::TrainingError(format!("Job {id} not found")));
+            }
 
             if state.is_terminal() {
                 return Err(SynapseError::TrainingError(format!(
@@ -220,19 +229,31 @@ impl JobManager {
     }
 
     /// Get a job's current state.
-    pub async fn get_job(&self, id: TrainingJobId) -> Result<JobState> {
-        self.jobs
+    pub async fn get_job(&self, id: TrainingJobId, tenant_id: &TenantId) -> Result<JobState> {
+        let job = self
+            .jobs
             .read()
             .await
             .get(&id)
             .cloned()
-            .ok_or_else(|| SynapseError::TrainingError(format!("Job {id} not found")))
+            .ok_or_else(|| SynapseError::TrainingError(format!("Job {id} not found")))?;
+
+        if &job.tenant_id != tenant_id {
+            return Err(SynapseError::TrainingError(format!("Job {id} not found")));
+        }
+
+        Ok(job)
     }
 
-    /// List all jobs, optionally filtered by status.
-    pub async fn list_jobs(&self, status_filter: Option<TrainingStatus>) -> Vec<JobState> {
+    /// List all jobs, optionally filtered by status, scoped to a tenant.
+    pub async fn list_jobs(
+        &self,
+        status_filter: Option<TrainingStatus>,
+        tenant_id: &TenantId,
+    ) -> Vec<JobState> {
         let jobs = self.jobs.read().await;
         jobs.values()
+            .filter(|j| &j.tenant_id == tenant_id)
             .filter(|j| status_filter.is_none() || Some(j.status) == status_filter)
             .cloned()
             .collect()
@@ -274,6 +295,7 @@ fn estimate_total_steps(config: &TrainingJobConfig) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use synapse_types::TenantId;
     use synapse_types::training::*;
 
     fn test_config() -> TrainingJobConfig {
@@ -305,8 +327,12 @@ mod tests {
     #[tokio::test]
     async fn create_and_get_job() {
         let manager = JobManager::new(ExecutorKind::Subprocess, None, 2);
-        let id = manager.create_job(test_config()).await.unwrap();
-        let job = manager.get_job(id).await.unwrap();
+        let tenant = TenantId::default_tenant();
+        let id = manager
+            .create_job(test_config(), tenant.clone())
+            .await
+            .unwrap();
+        let job = manager.get_job(id, &tenant).await.unwrap();
         assert_eq!(job.status, TrainingStatus::Queued);
         assert_eq!(job.id, id);
     }
@@ -314,26 +340,43 @@ mod tests {
     #[tokio::test]
     async fn list_jobs_all() {
         let manager = JobManager::new(ExecutorKind::Subprocess, None, 2);
-        manager.create_job(test_config()).await.unwrap();
-        manager.create_job(test_config()).await.unwrap();
-        let all = manager.list_jobs(None).await;
+        let tenant = TenantId::default_tenant();
+        manager
+            .create_job(test_config(), tenant.clone())
+            .await
+            .unwrap();
+        manager
+            .create_job(test_config(), tenant.clone())
+            .await
+            .unwrap();
+        let all = manager.list_jobs(None, &tenant).await;
         assert_eq!(all.len(), 2);
     }
 
     #[tokio::test]
     async fn list_jobs_filtered() {
         let manager = JobManager::new(ExecutorKind::Subprocess, None, 2);
-        manager.create_job(test_config()).await.unwrap();
-        let queued = manager.list_jobs(Some(TrainingStatus::Queued)).await;
+        let tenant = TenantId::default_tenant();
+        manager
+            .create_job(test_config(), tenant.clone())
+            .await
+            .unwrap();
+        let queued = manager
+            .list_jobs(Some(TrainingStatus::Queued), &tenant)
+            .await;
         assert_eq!(queued.len(), 1);
-        let running = manager.list_jobs(Some(TrainingStatus::Running)).await;
+        let running = manager
+            .list_jobs(Some(TrainingStatus::Running), &tenant)
+            .await;
         assert!(running.is_empty());
     }
 
     #[tokio::test]
     async fn get_job_not_found() {
         let manager = JobManager::new(ExecutorKind::Subprocess, None, 2);
-        let result = manager.get_job(uuid::Uuid::new_v4()).await;
+        let result = manager
+            .get_job(uuid::Uuid::new_v4(), &TenantId::default_tenant())
+            .await;
         assert!(result.is_err());
     }
 
@@ -346,16 +389,22 @@ mod tests {
     #[tokio::test]
     async fn cancel_not_found() {
         let manager = JobManager::new(ExecutorKind::Subprocess, None, 2);
-        let result = manager.cancel_job(uuid::Uuid::new_v4()).await;
+        let result = manager
+            .cancel_job(uuid::Uuid::new_v4(), &TenantId::default_tenant())
+            .await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn update_progress() {
         let manager = JobManager::new(ExecutorKind::Subprocess, None, 2);
-        let id = manager.create_job(test_config()).await.unwrap();
+        let tenant = TenantId::default_tenant();
+        let id = manager
+            .create_job(test_config(), tenant.clone())
+            .await
+            .unwrap();
         manager.update_progress(id, 50, 0.5, 0.42).await;
-        let job = manager.get_job(id).await.unwrap();
+        let job = manager.get_job(id, &tenant).await.unwrap();
         assert_eq!(job.current_step, 50);
         assert_eq!(job.current_loss, Some(0.42));
     }
@@ -388,7 +437,7 @@ mod tests {
         let manager = JobManager::new(ExecutorKind::Subprocess, None, 2);
         let mut config = test_config();
         config.hyperparams.learning_rate = 0.0; // invalid
-        let result = manager.create_job(config).await;
+        let result = manager.create_job(config, TenantId::default_tenant()).await;
         assert!(result.is_err());
     }
 
@@ -397,7 +446,7 @@ mod tests {
         let manager = JobManager::new(ExecutorKind::Subprocess, None, 2);
         let mut config = test_config();
         config.hyperparams.batch_size = 0;
-        let result = manager.create_job(config).await;
+        let result = manager.create_job(config, TenantId::default_tenant()).await;
         assert!(result.is_err());
     }
 
@@ -413,10 +462,11 @@ mod tests {
     #[tokio::test]
     async fn list_jobs_empty() {
         let manager = JobManager::new(ExecutorKind::Subprocess, None, 2);
-        assert!(manager.list_jobs(None).await.is_empty());
+        let tenant = TenantId::default_tenant();
+        assert!(manager.list_jobs(None, &tenant).await.is_empty());
         assert!(
             manager
-                .list_jobs(Some(TrainingStatus::Running))
+                .list_jobs(Some(TrainingStatus::Running), &tenant)
                 .await
                 .is_empty()
         );
@@ -427,21 +477,24 @@ mod tests {
     #[tokio::test]
     async fn concurrent_create_and_list() {
         let manager = std::sync::Arc::new(JobManager::new(ExecutorKind::Subprocess, None, 100));
+        let tenant = TenantId::default_tenant();
         let mut handles = vec![];
 
         // Spawn 20 concurrent job creations
         for _ in 0..20 {
             let manager = manager.clone();
+            let tenant = tenant.clone();
             handles.push(tokio::spawn(async move {
-                manager.create_job(test_config()).await.unwrap();
+                manager.create_job(test_config(), tenant).await.unwrap();
             }));
         }
 
         // Concurrently list and count
         for _ in 0..20 {
             let manager = manager.clone();
+            let tenant = tenant.clone();
             handles.push(tokio::spawn(async move {
-                let _ = manager.list_jobs(None).await;
+                let _ = manager.list_jobs(None, &tenant).await;
                 let _ = manager.running_count().await;
             }));
         }
@@ -449,16 +502,22 @@ mod tests {
         for h in handles {
             h.await.unwrap();
         }
-        assert_eq!(manager.list_jobs(None).await.len(), 20);
+        assert_eq!(manager.list_jobs(None, &tenant).await.len(), 20);
     }
 
     #[tokio::test]
     async fn concurrent_create_and_update_progress() {
         let manager = std::sync::Arc::new(JobManager::new(ExecutorKind::Subprocess, None, 100));
+        let tenant = TenantId::default_tenant();
         let mut ids = vec![];
 
         for _ in 0..10 {
-            ids.push(manager.create_job(test_config()).await.unwrap());
+            ids.push(
+                manager
+                    .create_job(test_config(), tenant.clone())
+                    .await
+                    .unwrap(),
+            );
         }
 
         let mut handles = vec![];
@@ -478,8 +537,9 @@ mod tests {
         // Concurrently read state
         for &id in &ids {
             let manager = manager.clone();
+            let tenant = tenant.clone();
             handles.push(tokio::spawn(async move {
-                let _ = manager.get_job(id).await;
+                let _ = manager.get_job(id, &tenant).await;
             }));
         }
 
@@ -489,7 +549,7 @@ mod tests {
 
         // All jobs should still exist with progress
         for &id in &ids {
-            let job = manager.get_job(id).await.unwrap();
+            let job = manager.get_job(id, &tenant).await.unwrap();
             assert_eq!(job.current_step, 9);
         }
     }

@@ -11,7 +11,7 @@ pub async fn health() -> &'static str {
 
 /// GET /system/status — detailed system information.
 pub async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
-    let loaded_models = state.model_manager.list_loaded().await;
+    let loaded_models = state.model_manager.list_loaded(None).await;
     let backends = state.backends.list_backends();
 
     let hardware = synapse_core::hardware::detect::detect()

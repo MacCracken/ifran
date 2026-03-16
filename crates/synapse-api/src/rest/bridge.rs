@@ -99,7 +99,7 @@ pub async fn connect(
     }
     let supported_formats: Vec<String> = all_formats.into_iter().collect();
 
-    let loaded = state.model_manager.list_loaded().await;
+    let loaded = state.model_manager.list_loaded(None).await;
     let loaded_models: Vec<String> = loaded.iter().map(|m| m.model_name.clone()).collect();
 
     let supported_quants: Vec<String> = vec![
@@ -156,7 +156,7 @@ pub async fn heartbeat(
         .as_ref()
         .ok_or_else(|| (StatusCode::BAD_REQUEST, "Bridge is not enabled".into()))?;
 
-    let loaded_models = state.model_manager.list_loaded().await.len() as u32;
+    let loaded_models = state.model_manager.list_loaded(None).await.len() as u32;
     let active_jobs = state.job_manager.running_count().await as u32;
 
     let gpu_free = synapse_core::hardware::detect::detect()

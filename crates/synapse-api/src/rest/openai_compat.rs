@@ -70,7 +70,7 @@ pub async fn list_models(
 /// POST /v1/chat/completions — OpenAI-compatible chat completions.
 pub async fn chat_completions(
     State(state): State<AppState>,
-    Extension(_tenant_id): Extension<TenantId>,
+    Extension(tenant_id): Extension<TenantId>,
     Json(body): Json<ChatCompletionRequest>,
 ) -> Result<axum::response::Response, (StatusCode, String)> {
     validate_model_name(&body.model)?;
@@ -79,7 +79,7 @@ pub async fn chat_completions(
         validate_prompt_length(&msg.content, state.config.security.max_prompt_length)?;
     }
 
-    let loaded = state.model_manager.list_loaded().await;
+    let loaded = state.model_manager.list_loaded(Some(&tenant_id)).await;
     let loaded_model = loaded
         .iter()
         .find(|m| m.model_name == body.model)

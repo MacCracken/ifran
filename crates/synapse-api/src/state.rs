@@ -75,7 +75,8 @@ impl AppState {
         let marketplace_catalog = MarketplaceCatalog::open(&marketplace_db_path)?;
         let distributed_coordinator = DistributedCoordinator::new();
 
-        // Initialize experiment store
+        // Optional feature stores — fail silently if DB can't be opened.
+        // These are non-critical; the API still works without them.
         let experiment_store_path = config.storage.database.with_file_name("experiments.db");
         let experiment_store = ExperimentStore::open(&experiment_store_path).ok();
 
@@ -95,7 +96,7 @@ impl AppState {
         let version_store_path = config.storage.database.with_file_name("versions.db");
         let version_store = VersionStore::open(&version_store_path).ok();
 
-        // Initialize tenant store if multi-tenant mode is enabled
+        // Tenant store is REQUIRED when multi_tenant is enabled — propagate errors.
         let tenant_store = if config.security.multi_tenant {
             let tenant_store_path = config.storage.database.with_file_name("tenants.db");
             Some(TenantStore::open(&tenant_store_path).map_err(|e| {
@@ -233,7 +234,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let config = test_config(&tmp);
         let state = AppState::new(config).unwrap();
-        let loaded = state.model_manager.list_loaded().await;
+        let loaded = state.model_manager.list_loaded(None).await;
         assert!(loaded.is_empty());
     }
 

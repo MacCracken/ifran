@@ -10,6 +10,7 @@ use crate::lifecycle::memory;
 use std::collections::HashMap;
 use std::sync::Arc;
 use synapse_types::SynapseError;
+use synapse_types::TenantId;
 use synapse_types::backend::{AcceleratorType, DeviceConfig};
 use synapse_types::error::Result;
 use synapse_types::model::{ModelId, ModelManifest};
@@ -19,6 +20,7 @@ use tokio::sync::RwLock;
 #[derive(Debug, Clone)]
 pub struct LoadedModel {
     pub model_id: ModelId,
+    pub tenant_id: TenantId,
     pub model_name: String,
     pub handle: String,
     pub backend_id: String,
@@ -88,12 +90,14 @@ impl ModelManager {
         handle: String,
         backend_id: String,
         vram_used_mb: u64,
+        tenant_id: TenantId,
     ) {
         let mut loaded = self.loaded.write().await;
         loaded.insert(
             model_id,
             LoadedModel {
                 model_id,
+                tenant_id,
                 model_name,
                 handle,
                 backend_id,
@@ -114,10 +118,20 @@ impl ModelManager {
         loaded.get(model_id).cloned()
     }
 
-    /// List all currently loaded models.
-    pub async fn list_loaded(&self) -> Vec<LoadedModel> {
+    /// List currently loaded models.
+    ///
+    /// When `tenant_id` is `Some`, only models belonging to that tenant are returned.
+    /// When `None`, all models are returned (for system-level usage).
+    pub async fn list_loaded(&self, tenant_id: Option<&TenantId>) -> Vec<LoadedModel> {
         let loaded = self.loaded.read().await;
-        loaded.values().cloned().collect()
+        loaded
+            .values()
+            .filter(|m| match tenant_id {
+                Some(tid) => &m.tenant_id == tid,
+                None => true,
+            })
+            .cloned()
+            .collect()
     }
 
     /// Total VRAM currently used by loaded models.
@@ -136,11 +150,12 @@ impl ModelManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use synapse_types::TenantId;
 
     #[tokio::test]
     async fn register_and_list() {
         let manager = ModelManager::new(512);
-        assert!(manager.list_loaded().await.is_empty());
+        assert!(manager.list_loaded(None).await.is_empty());
 
         let id = uuid::Uuid::new_v4();
         manager
@@ -150,11 +165,12 @@ mod tests {
                 "handle-1".into(),
                 "llamacpp".into(),
                 4000,
+                TenantId::default_tenant(),
             )
             .await;
 
         assert!(manager.is_loaded(&id).await);
-        assert_eq!(manager.list_loaded().await.len(), 1);
+        assert_eq!(manager.list_loaded(None).await.len(), 1);
         assert_eq!(manager.total_vram_used().await, 4000);
     }
 
@@ -169,6 +185,7 @@ mod tests {
                 "handle-1".into(),
                 "llamacpp".into(),
                 4000,
+                TenantId::default_tenant(),
             )
             .await;
 
@@ -191,14 +208,29 @@ mod tests {
         let manager = ModelManager::new(512);
         let id1 = uuid::Uuid::new_v4();
         let id2 = uuid::Uuid::new_v4();
+        let tenant = TenantId::default_tenant();
         manager
-            .register_loaded(id1, "model-1".into(), "h1".into(), "llamacpp".into(), 2000)
+            .register_loaded(
+                id1,
+                "model-1".into(),
+                "h1".into(),
+                "llamacpp".into(),
+                2000,
+                tenant.clone(),
+            )
             .await;
         manager
-            .register_loaded(id2, "model-2".into(), "h2".into(), "ollama".into(), 3000)
+            .register_loaded(
+                id2,
+                "model-2".into(),
+                "h2".into(),
+                "ollama".into(),
+                3000,
+                tenant.clone(),
+            )
             .await;
 
-        assert_eq!(manager.list_loaded().await.len(), 2);
+        assert_eq!(manager.list_loaded(None).await.len(), 2);
         assert_eq!(manager.total_vram_used().await, 5000);
         assert!(manager.is_loaded(&id1).await);
         assert!(manager.is_loaded(&id2).await);
@@ -215,6 +247,7 @@ mod tests {
                 "handle-1".into(),
                 "llamacpp".into(),
                 4000,
+                TenantId::default_tenant(),
             )
             .await;
 
@@ -235,13 +268,28 @@ mod tests {
     async fn register_overwrites_same_id() {
         let manager = ModelManager::new(512);
         let id = uuid::Uuid::new_v4();
+        let tenant = TenantId::default_tenant();
         manager
-            .register_loaded(id, "model-v1".into(), "h1".into(), "llamacpp".into(), 2000)
+            .register_loaded(
+                id,
+                "model-v1".into(),
+                "h1".into(),
+                "llamacpp".into(),
+                2000,
+                tenant.clone(),
+            )
             .await;
         manager
-            .register_loaded(id, "model-v2".into(), "h2".into(), "ollama".into(), 3000)
+            .register_loaded(
+                id,
+                "model-v2".into(),
+                "h2".into(),
+                "ollama".into(),
+                3000,
+                tenant.clone(),
+            )
             .await;
-        assert_eq!(manager.list_loaded().await.len(), 1);
+        assert_eq!(manager.list_loaded(None).await.len(), 1);
         let loaded = manager.get_loaded(&id).await.unwrap();
         assert_eq!(loaded.model_name, "model-v2");
         assert_eq!(loaded.vram_used_mb, 3000);
@@ -272,6 +320,7 @@ mod tests {
                         format!("h-{i}"),
                         "llamacpp".into(),
                         1000,
+                        TenantId::default_tenant(),
                     )
                     .await;
             }));
@@ -281,7 +330,7 @@ mod tests {
         for _ in 0..20 {
             let manager = manager.clone();
             handles.push(tokio::spawn(async move {
-                let _ = manager.list_loaded().await;
+                let _ = manager.list_loaded(None).await;
                 let _ = manager.total_vram_used().await;
             }));
         }
@@ -289,7 +338,7 @@ mod tests {
         for h in handles {
             h.await.unwrap();
         }
-        assert_eq!(manager.list_loaded().await.len(), 20);
+        assert_eq!(manager.list_loaded(None).await.len(), 20);
         assert_eq!(manager.total_vram_used().await, 20000);
     }
 
@@ -297,6 +346,7 @@ mod tests {
     async fn concurrent_register_and_unregister() {
         let manager = Arc::new(ModelManager::new(512));
         let mut ids = vec![];
+        let tenant = TenantId::default_tenant();
 
         // Pre-populate
         for i in 0..20 {
@@ -309,6 +359,7 @@ mod tests {
                     format!("h-{i}"),
                     "llamacpp".into(),
                     1000,
+                    tenant.clone(),
                 )
                 .await;
         }
@@ -337,6 +388,42 @@ mod tests {
         for h in handles {
             h.await.unwrap();
         }
-        assert_eq!(manager.list_loaded().await.len(), 10);
+        assert_eq!(manager.list_loaded(None).await.len(), 10);
+    }
+
+    #[tokio::test]
+    async fn list_loaded_tenant_filter() {
+        let manager = ModelManager::new(512);
+        let tenant_a = TenantId("tenant-a".into());
+        let tenant_b = TenantId("tenant-b".into());
+
+        manager
+            .register_loaded(
+                uuid::Uuid::new_v4(),
+                "model-a".into(),
+                "h1".into(),
+                "llamacpp".into(),
+                1000,
+                tenant_a.clone(),
+            )
+            .await;
+        manager
+            .register_loaded(
+                uuid::Uuid::new_v4(),
+                "model-b".into(),
+                "h2".into(),
+                "llamacpp".into(),
+                2000,
+                tenant_b.clone(),
+            )
+            .await;
+
+        assert_eq!(manager.list_loaded(None).await.len(), 2);
+        assert_eq!(manager.list_loaded(Some(&tenant_a)).await.len(), 1);
+        assert_eq!(manager.list_loaded(Some(&tenant_b)).await.len(), 1);
+        assert_eq!(
+            manager.list_loaded(Some(&tenant_a)).await[0].model_name,
+            "model-a"
+        );
     }
 }

@@ -57,7 +57,7 @@ fn default_method() -> String {
 /// POST /training/distributed/jobs — create a distributed training job.
 pub async fn create_job(
     State(state): State<AppState>,
-    Extension(_tenant_id): Extension<TenantId>,
+    Extension(_tenant_id): Extension<TenantId>, // TODO: tenant-scope distributed jobs
     Json(req): Json<CreateDistributedJobRequest>,
 ) -> Result<(StatusCode, Json<DistributedJobResponse>), (StatusCode, String)> {
     let config = DistributedTrainingConfig {
@@ -87,7 +87,7 @@ pub async fn create_job(
 /// GET /training/distributed/jobs — list all distributed jobs.
 pub async fn list_jobs(
     State(state): State<AppState>,
-    Extension(_tenant_id): Extension<TenantId>,
+    Extension(_tenant_id): Extension<TenantId>, // TODO: tenant-scope distributed jobs
 ) -> Json<Vec<DistributedJobResponse>> {
     let jobs = state.distributed_coordinator.list_jobs().await;
     Json(jobs.iter().map(job_to_response).collect())
@@ -96,7 +96,7 @@ pub async fn list_jobs(
 /// GET /training/distributed/jobs/:id — get a distributed job.
 pub async fn get_job(
     State(state): State<AppState>,
-    Extension(_tenant_id): Extension<TenantId>,
+    Extension(_tenant_id): Extension<TenantId>, // TODO: tenant-scope distributed jobs
     Path(id): Path<DistributedJobId>,
 ) -> Result<Json<DistributedJobResponse>, (StatusCode, String)> {
     let job = state
@@ -110,7 +110,7 @@ pub async fn get_job(
 /// POST /training/distributed/jobs/:id/workers — assign a worker.
 pub async fn assign_worker(
     State(state): State<AppState>,
-    Extension(_tenant_id): Extension<TenantId>,
+    Extension(_tenant_id): Extension<TenantId>, // TODO: tenant-scope distributed jobs
     Path(id): Path<DistributedJobId>,
     Json(req): Json<AssignWorkerRequest>,
 ) -> Result<Json<DistributedJobResponse>, (StatusCode, String)> {
@@ -151,7 +151,7 @@ pub async fn assign_worker(
 /// POST /training/distributed/jobs/:id/start — start the distributed job.
 pub async fn start_job(
     State(state): State<AppState>,
-    Extension(_tenant_id): Extension<TenantId>,
+    Extension(_tenant_id): Extension<TenantId>, // TODO: tenant-scope distributed jobs
     Path(id): Path<DistributedJobId>,
 ) -> Result<Json<DistributedJobResponse>, (StatusCode, String)> {
     state
@@ -172,7 +172,7 @@ pub async fn start_job(
 /// POST /training/distributed/jobs/:id/workers/:rank/complete — mark a worker as completed.
 pub async fn worker_completed(
     State(state): State<AppState>,
-    Extension(_tenant_id): Extension<TenantId>,
+    Extension(_tenant_id): Extension<TenantId>, // TODO: tenant-scope distributed jobs
     Path((id, rank)): Path<(DistributedJobId, u32)>,
 ) -> Result<Json<DistributedJobResponse>, (StatusCode, String)> {
     state
@@ -214,7 +214,7 @@ pub async fn worker_completed(
 /// POST /training/distributed/jobs/:id/fail — fail the distributed job.
 pub async fn fail_job(
     State(state): State<AppState>,
-    Extension(_tenant_id): Extension<TenantId>,
+    Extension(_tenant_id): Extension<TenantId>, // TODO: tenant-scope distributed jobs
     Path(id): Path<DistributedJobId>,
 ) -> Result<Json<DistributedJobResponse>, (StatusCode, String)> {
     state
@@ -235,7 +235,7 @@ pub async fn fail_job(
 /// POST /training/distributed/jobs/:id/aggregate — trigger checkpoint aggregation.
 pub async fn aggregate(
     State(_state): State<AppState>,
-    Extension(_tenant_id): Extension<TenantId>,
+    Extension(_tenant_id): Extension<TenantId>, // TODO: tenant-scope distributed jobs
     Path(id): Path<DistributedJobId>,
     Json(req): Json<AggregateRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {

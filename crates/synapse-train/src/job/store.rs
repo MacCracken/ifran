@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, params};
 use std::path::Path;
 use synapse_types::SynapseError;
+use synapse_types::TenantId;
 use synapse_types::error::Result;
 use synapse_types::training::{TrainingJobConfig, TrainingJobId, TrainingStatus};
 use uuid::Uuid;
@@ -21,6 +22,8 @@ impl JobStore {
             std::fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(path).map_err(|e| SynapseError::StorageError(e.to_string()))?;
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")
+            .map_err(|e| SynapseError::StorageError(e.to_string()))?;
         let store = Self { conn };
         store.migrate()?;
         Ok(store)
@@ -201,6 +204,7 @@ fn row_to_job_state(row: &rusqlite::Row) -> rusqlite::Result<JobState> {
 
     Ok(JobState {
         id,
+        tenant_id: TenantId::default_tenant(), // TODO: persist tenant_id in schema
         config,
         status,
         current_step: current_step as u64,
@@ -262,7 +266,12 @@ mod tests {
     }
 
     fn test_job_state() -> JobState {
-        JobState::new(Uuid::new_v4(), test_config(), 100)
+        JobState::new(
+            Uuid::new_v4(),
+            TenantId::default_tenant(),
+            test_config(),
+            100,
+        )
     }
 
     #[test]

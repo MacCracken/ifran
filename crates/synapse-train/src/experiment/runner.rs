@@ -268,7 +268,12 @@ impl ExperimentRunner {
 
     /// Submit a training job, wait for it to finish, return final loss.
     async fn run_training_trial(&mut self, config: &TrainingJobConfig) -> Result<Option<f64>> {
-        let job_id = self.job_manager.create_job(config.clone()).await?;
+        // Experiment runner operates at system level
+        let tenant = synapse_types::TenantId::default_tenant();
+        let job_id = self
+            .job_manager
+            .create_job(config.clone(), tenant.clone())
+            .await?;
         self.job_manager.start_job(job_id).await?;
 
         // Poll every 5 seconds until terminal, with wall-clock timeout
@@ -281,13 +286,13 @@ impl ExperimentRunner {
         loop {
             // Check stop signal
             if *self.stop_rx.borrow() {
-                let _ = self.job_manager.cancel_job(job_id).await;
+                let _ = self.job_manager.cancel_job(job_id, &tenant).await;
                 return Ok(None);
             }
 
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
-            let job = self.job_manager.get_job(job_id).await?;
+            let job = self.job_manager.get_job(job_id, &tenant).await?;
             if job.is_terminal() {
                 return match job.status {
                     TrainingStatus::Completed => Ok(job.current_loss),
@@ -299,7 +304,7 @@ impl ExperimentRunner {
             }
 
             if std::time::Instant::now() > deadline {
-                let _ = self.job_manager.cancel_job(job_id).await;
+                let _ = self.job_manager.cancel_job(job_id, &tenant).await;
                 warn!(job_id = %job_id, "Training trial exceeded wall-clock timeout");
                 return Ok(job.current_loss);
             }

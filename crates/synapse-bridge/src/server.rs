@@ -10,6 +10,7 @@ use std::sync::Arc;
 use synapse_backends::BackendRouter;
 use synapse_core::lifecycle::manager::ModelManager;
 use synapse_train::job::manager::JobManager;
+use synapse_types::TenantId;
 use synapse_types::bridge::synapse_bridge_server::{SynapseBridge, SynapseBridgeServer};
 use synapse_types::bridge::{
     InferenceRequest, InferenceResponse, JobStatusRequest, JobStatusUpdate, PullModelRequest,
@@ -157,10 +158,10 @@ impl SynapseBridge for SynapseBridgeService {
         let config: TrainingJobConfig = serde_json::from_str(&req.config_json)
             .map_err(|e| Status::invalid_argument(format!("Invalid config_json: {e}")))?;
 
-        // Create and start the job.
+        // Create and start the job (bridge operates as system-level).
         let job_id = self
             .job_manager
-            .create_job(config)
+            .create_job(config, TenantId::default_tenant())
             .await
             .map_err(|e| Status::internal(format!("Failed to create job: {e}")))?;
 
@@ -190,12 +191,14 @@ impl SynapseBridge for SynapseBridgeService {
             .map_err(|e| Status::invalid_argument(format!("Invalid job_id: {e}")))?;
 
         let job_manager = self.job_manager.clone();
+        // Bridge operates as system-level
+        let tenant = TenantId::default_tenant();
 
         let (tx, rx) = tokio::sync::mpsc::channel(16);
 
         tokio::spawn(async move {
             loop {
-                let state = match job_manager.get_job(job_id).await {
+                let state = match job_manager.get_job(job_id, &tenant).await {
                     Ok(s) => s,
                     Err(e) => {
                         let _ = tx
@@ -283,7 +286,7 @@ impl SynapseBridge for SynapseBridgeService {
         }
         info!(model = %req.model, "Received RunInference request");
 
-        let loaded = self.model_manager.list_loaded().await;
+        let loaded = self.model_manager.list_loaded(None).await;
         let loaded_model = loaded
             .iter()
             .find(|m| m.model_name == req.model)
@@ -329,7 +332,7 @@ impl SynapseBridge for SynapseBridgeService {
         }
         info!(model = %req.model, "Received StreamInference request");
 
-        let loaded = self.model_manager.list_loaded().await;
+        let loaded = self.model_manager.list_loaded(None).await;
         let loaded_model = loaded
             .iter()
             .find(|m| m.model_name == req.model)

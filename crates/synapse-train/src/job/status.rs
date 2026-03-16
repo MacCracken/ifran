@@ -24,7 +24,12 @@ pub struct JobState {
 }
 
 impl JobState {
-    pub fn new(id: TrainingJobId, tenant_id: TenantId, config: TrainingJobConfig, total_steps: u64) -> Self {
+    pub fn new(
+        id: TrainingJobId,
+        tenant_id: TenantId,
+        config: TrainingJobConfig,
+        total_steps: u64,
+    ) -> Self {
         Self {
             id,
             tenant_id,
@@ -92,6 +97,7 @@ impl JobState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use synapse_types::TenantId;
     use synapse_types::training::*;
 
     fn test_config() -> TrainingJobConfig {
@@ -122,7 +128,12 @@ mod tests {
 
     #[test]
     fn new_job_is_queued() {
-        let job = JobState::new(uuid::Uuid::new_v4(), test_config(), 1000);
+        let job = JobState::new(
+            uuid::Uuid::new_v4(),
+            TenantId::default_tenant(),
+            test_config(),
+            1000,
+        );
         assert_eq!(job.status, TrainingStatus::Queued);
         assert!(!job.is_terminal());
         assert!(job.started_at.is_none());
@@ -130,7 +141,12 @@ mod tests {
 
     #[test]
     fn start_sets_running() {
-        let mut job = JobState::new(uuid::Uuid::new_v4(), test_config(), 1000);
+        let mut job = JobState::new(
+            uuid::Uuid::new_v4(),
+            TenantId::default_tenant(),
+            test_config(),
+            1000,
+        );
         job.start();
         assert_eq!(job.status, TrainingStatus::Running);
         assert!(job.started_at.is_some());
@@ -139,7 +155,12 @@ mod tests {
 
     #[test]
     fn update_progress_tracks_step() {
-        let mut job = JobState::new(uuid::Uuid::new_v4(), test_config(), 1000);
+        let mut job = JobState::new(
+            uuid::Uuid::new_v4(),
+            TenantId::default_tenant(),
+            test_config(),
+            1000,
+        );
         job.start();
         job.update_progress(500, 1.5, 0.42);
         assert_eq!(job.current_step, 500);
@@ -149,7 +170,12 @@ mod tests {
 
     #[test]
     fn complete_is_terminal() {
-        let mut job = JobState::new(uuid::Uuid::new_v4(), test_config(), 1000);
+        let mut job = JobState::new(
+            uuid::Uuid::new_v4(),
+            TenantId::default_tenant(),
+            test_config(),
+            1000,
+        );
         job.start();
         job.complete();
         assert_eq!(job.status, TrainingStatus::Completed);
@@ -159,7 +185,12 @@ mod tests {
 
     #[test]
     fn fail_captures_error() {
-        let mut job = JobState::new(uuid::Uuid::new_v4(), test_config(), 100);
+        let mut job = JobState::new(
+            uuid::Uuid::new_v4(),
+            TenantId::default_tenant(),
+            test_config(),
+            100,
+        );
         job.start();
         job.fail("OOM".into());
         assert_eq!(job.status, TrainingStatus::Failed);
@@ -169,7 +200,12 @@ mod tests {
 
     #[test]
     fn cancel_is_terminal() {
-        let mut job = JobState::new(uuid::Uuid::new_v4(), test_config(), 100);
+        let mut job = JobState::new(
+            uuid::Uuid::new_v4(),
+            TenantId::default_tenant(),
+            test_config(),
+            100,
+        );
         job.cancel();
         assert_eq!(job.status, TrainingStatus::Cancelled);
         assert!(job.is_terminal());
@@ -177,7 +213,12 @@ mod tests {
 
     #[test]
     fn progress_percent_calculation() {
-        let mut job = JobState::new(uuid::Uuid::new_v4(), test_config(), 200);
+        let mut job = JobState::new(
+            uuid::Uuid::new_v4(),
+            TenantId::default_tenant(),
+            test_config(),
+            200,
+        );
         assert_eq!(job.progress_percent(), 0.0);
         job.update_progress(100, 1.0, 0.5);
         assert_eq!(job.progress_percent(), 50.0);
@@ -185,13 +226,23 @@ mod tests {
 
     #[test]
     fn progress_percent_zero_total() {
-        let job = JobState::new(uuid::Uuid::new_v4(), test_config(), 0);
+        let job = JobState::new(
+            uuid::Uuid::new_v4(),
+            TenantId::default_tenant(),
+            test_config(),
+            0,
+        );
         assert_eq!(job.progress_percent(), 0.0);
     }
 
     #[test]
     fn add_checkpoint() {
-        let mut job = JobState::new(uuid::Uuid::new_v4(), test_config(), 1000);
+        let mut job = JobState::new(
+            uuid::Uuid::new_v4(),
+            TenantId::default_tenant(),
+            test_config(),
+            1000,
+        );
         let cp = CheckpointInfo {
             step: 500,
             epoch: 1.5,

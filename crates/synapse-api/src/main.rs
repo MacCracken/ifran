@@ -21,6 +21,15 @@ async fn main() {
         }
     }
 
+    // Verify encrypted storage requirement if configured
+    if config.security.require_encrypted_storage {
+        synapse_core::storage::encryption::verify_encryption_requirement(
+            &config.storage.models_dir,
+            true,
+        )
+        .expect("Encrypted storage check failed");
+    }
+
     let bind_addr = config.server.bind.clone();
     let bridge_enabled = config.bridge.enabled;
     let grpc_bind = config.server.grpc_bind.clone();
@@ -66,7 +75,7 @@ async fn main() {
                 let mut ticker = tokio::time::interval(interval);
                 loop {
                     ticker.tick().await;
-                    let loaded = model_manager.list_loaded().await.len() as u32;
+                    let loaded = model_manager.list_loaded(None).await.len() as u32;
                     let active = job_manager.running_count().await as u32;
                     let gpu_free = synapse_core::hardware::detect::detect()
                         .ok()

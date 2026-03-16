@@ -32,13 +32,13 @@ fn default_max_tokens() -> u32 {
 /// POST /inference — run inference, returning the full response.
 pub async fn inference(
     State(state): State<AppState>,
-    Extension(_tenant_id): Extension<TenantId>,
+    Extension(tenant_id): Extension<TenantId>,
     Json(body): Json<InferenceBody>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     validate_model_name(&body.model)?;
     validate_prompt_length(&body.prompt, state.config.security.max_prompt_length)?;
 
-    let loaded = state.model_manager.list_loaded().await;
+    let loaded = state.model_manager.list_loaded(Some(&tenant_id)).await;
     let loaded_model = loaded
         .iter()
         .find(|m| m.model_name == body.model)
@@ -88,7 +88,7 @@ pub async fn inference(
 /// POST /inference/stream — run inference with SSE streaming.
 pub async fn inference_stream(
     State(state): State<AppState>,
-    Extension(_tenant_id): Extension<TenantId>,
+    Extension(tenant_id): Extension<TenantId>,
     Json(body): Json<InferenceBody>,
 ) -> Result<
     Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>>,
@@ -97,7 +97,7 @@ pub async fn inference_stream(
     validate_model_name(&body.model)?;
     validate_prompt_length(&body.prompt, state.config.security.max_prompt_length)?;
 
-    let loaded = state.model_manager.list_loaded().await;
+    let loaded = state.model_manager.list_loaded(Some(&tenant_id)).await;
     let loaded_model = loaded
         .iter()
         .find(|m| m.model_name == body.model)

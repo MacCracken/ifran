@@ -81,7 +81,8 @@ pub async fn create_run(
                 let model_manager = model_manager.clone();
                 let model_name = model_name.clone();
                 async move {
-                    let loaded = model_manager.list_loaded().await;
+                    // TODO: tenant-scope eval runs
+                    let loaded = model_manager.list_loaded(None).await;
                     let loaded_model = loaded
                         .iter()
                         .find(|m| m.model_name == model_name)

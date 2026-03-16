@@ -46,12 +46,12 @@ fn default_true() -> bool {
 /// POST /training/jobs — create (and optionally start) a training job.
 pub async fn create_job(
     State(state): State<AppState>,
-    Extension(_tenant_id): Extension<TenantId>,
+    Extension(tenant_id): Extension<TenantId>,
     Json(req): Json<CreateJobRequest>,
 ) -> Result<(StatusCode, Json<JobResponse>), (StatusCode, String)> {
     let id = state
         .job_manager
-        .create_job(req.config)
+        .create_job(req.config, tenant_id.clone())
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
@@ -70,7 +70,7 @@ pub async fn create_job(
 
     let job = state
         .job_manager
-        .get_job(id)
+        .get_job(id, &tenant_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -80,21 +80,21 @@ pub async fn create_job(
 /// GET /training/jobs — list all training jobs.
 pub async fn list_jobs(
     State(state): State<AppState>,
-    Extension(_tenant_id): Extension<TenantId>,
+    Extension(tenant_id): Extension<TenantId>,
 ) -> Json<Vec<JobResponse>> {
-    let jobs = state.job_manager.list_jobs(None).await;
+    let jobs = state.job_manager.list_jobs(None, &tenant_id).await;
     Json(jobs.iter().map(job_to_response).collect())
 }
 
 /// GET /training/jobs/:id — get a specific job's status.
 pub async fn get_job(
     State(state): State<AppState>,
-    Extension(_tenant_id): Extension<TenantId>,
+    Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<TrainingJobId>,
 ) -> Result<Json<JobResponse>, (StatusCode, String)> {
     let job = state
         .job_manager
-        .get_job(id)
+        .get_job(id, &tenant_id)
         .await
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
     Ok(Json(job_to_response(&job)))
@@ -103,12 +103,12 @@ pub async fn get_job(
 /// POST /training/jobs/:id/cancel — cancel a running or queued job.
 pub async fn cancel_job(
     State(state): State<AppState>,
-    Extension(_tenant_id): Extension<TenantId>,
+    Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<TrainingJobId>,
 ) -> Result<Json<JobResponse>, (StatusCode, String)> {
     state
         .job_manager
-        .cancel_job(id)
+        .cancel_job(id, &tenant_id)
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
@@ -121,7 +121,7 @@ pub async fn cancel_job(
 
     let job = state
         .job_manager
-        .get_job(id)
+        .get_job(id, &tenant_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(job_to_response(&job)))
@@ -134,19 +134,19 @@ pub async fn cancel_job(
 /// not exist.
 pub async fn stream_job(
     State(state): State<AppState>,
-    Extension(_tenant_id): Extension<TenantId>,
+    Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<TrainingJobId>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)> {
     // Verify the job exists before starting the stream.
     state
         .job_manager
-        .get_job(id)
+        .get_job(id, &tenant_id)
         .await
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
     let stream = async_stream::stream! {
         loop {
-            let job = match state.job_manager.get_job(id).await {
+            let job = match state.job_manager.get_job(id, &tenant_id).await {
                 Ok(j) => j,
                 Err(e) => {
                     let payload = serde_json::json!({ "error": e.to_string() });
@@ -475,7 +475,8 @@ mod tests {
     async fn job_to_response_conversion() {
         let config = test_job_config();
         let id = uuid::Uuid::new_v4();
-        let mut job = synapse_train::job::status::JobState::new(id, config, 1000);
+        let mut job =
+            synapse_train::job::status::JobState::new(id, TenantId::default_tenant(), config, 1000);
         job.start();
         job.update_progress(500, 1.5, 0.35);
 

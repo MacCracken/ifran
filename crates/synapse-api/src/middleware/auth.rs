@@ -86,6 +86,7 @@ fn extract_bearer_token(req: &Request) -> Option<&str> {
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
+        .filter(|t| !t.is_empty())
 }
 
 #[cfg(test)]
@@ -116,6 +117,15 @@ mod tests {
     #[test]
     fn extract_bearer_missing_header() {
         let req = axum::http::Request::builder()
+            .body(axum::body::Body::empty())
+            .unwrap();
+        assert_eq!(extract_bearer_token(&req), None);
+    }
+
+    #[test]
+    fn extract_bearer_empty_token() {
+        let req = axum::http::Request::builder()
+            .header("authorization", "Bearer ")
             .body(axum::body::Body::empty())
             .unwrap();
         assert_eq!(extract_bearer_token(&req), None);

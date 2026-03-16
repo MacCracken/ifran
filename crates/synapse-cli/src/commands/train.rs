@@ -62,7 +62,9 @@ pub async fn execute(base_model: &str, dataset: &str, method: &str) -> Result<()
         time_budget_secs: None,
     };
 
-    let job_id = manager.create_job(job_config).await?;
+    let job_id = manager
+        .create_job(job_config, synapse_types::TenantId::default_tenant())
+        .await?;
     eprintln!("Created training job: {job_id}");
 
     manager.start_job(job_id).await?;
