@@ -43,8 +43,9 @@ pub async fn list_models(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let db = state.db.lock().await;
+    let tenant = synapse_types::TenantId::default_tenant();
     let models = db
-        .list()
+        .list(&tenant)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let data: Vec<serde_json::Value> = models
@@ -316,7 +317,8 @@ mod tests {
             sha256: None,
             pulled_at: chrono::Utc::now(),
         };
-        db.insert(&model).unwrap();
+        db.insert(&model, &synapse_types::TenantId::default_tenant())
+            .unwrap();
         drop(db);
 
         let Json(json) = list_models(State(state)).await.unwrap();

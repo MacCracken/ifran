@@ -54,8 +54,13 @@ pub async fn connect(
 
     // Also start the server if present
     if let Some(server) = &state.bridge_server {
+        let grpc_service = synapse_bridge::server::SynapseBridgeService::new(
+            state.job_manager.clone(),
+            state.backends.clone(),
+            state.model_manager.clone(),
+        );
         server
-            .start(&state.config.server.grpc_bind)
+            .start(&state.config.server.grpc_bind, grpc_service)
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     }

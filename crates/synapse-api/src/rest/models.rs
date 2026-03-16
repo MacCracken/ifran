@@ -4,13 +4,17 @@ use crate::state::AppState;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use synapse_types::TenantId;
 
 /// GET /models — list all models in the catalog.
 pub async fn list_models(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let db = state.db.lock().await;
-    let models = db.list().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let tenant = TenantId::default_tenant();
+    let models = db
+        .list(&tenant)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let data: Vec<serde_json::Value> = models
         .iter()
@@ -39,10 +43,11 @@ pub async fn get_model(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let db = state.db.lock().await;
+    let tenant = TenantId::default_tenant();
     let model = if let Ok(uuid) = uuid::Uuid::parse_str(&id) {
-        db.get(uuid)
+        db.get(uuid, &tenant)
     } else {
-        db.get_by_name(&id)
+        db.get_by_name(&id, &tenant)
     };
 
     let model = model.map_err(|_| StatusCode::NOT_FOUND)?;
@@ -68,10 +73,11 @@ pub async fn delete_model(
     Path(id): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
     let db = state.db.lock().await;
+    let tenant = TenantId::default_tenant();
     let model = if let Ok(uuid) = uuid::Uuid::parse_str(&id) {
-        db.get(uuid)
+        db.get(uuid, &tenant)
     } else {
-        db.get_by_name(&id)
+        db.get_by_name(&id, &tenant)
     };
 
     let model = model.map_err(|_| StatusCode::NOT_FOUND)?;
@@ -79,7 +85,7 @@ pub async fn delete_model(
     // Delete from database first — if this fails, filesystem stays consistent.
     // Reversing the order (FS first, then DB) risks orphaned DB records pointing
     // to deleted files.
-    db.delete(model.id)
+    db.delete(model.id, &tenant)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Clean up files from disk (best-effort after successful DB delete)
@@ -153,7 +159,8 @@ mod tests {
             sha256: Some("abc123".into()),
             pulled_at: chrono::Utc::now(),
         };
-        db.insert(&model).unwrap();
+        db.insert(&model, &synapse_types::TenantId::default_tenant())
+            .unwrap();
         model
     }
 

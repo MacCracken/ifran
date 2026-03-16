@@ -6,7 +6,8 @@ use synapse_types::error::Result;
 pub async fn execute() -> Result<()> {
     let config = SynapseConfig::discover();
     let db = ModelDatabase::open(&config.storage.database)?;
-    let models = db.list()?;
+    let tenant = synapse_types::TenantId::default_tenant();
+    let models = db.list(&tenant)?;
 
     if models.is_empty() {
         eprintln!("No models found. Use 'synapse pull <model>' to download one.");

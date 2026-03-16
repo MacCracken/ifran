@@ -5,6 +5,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use serde::{Deserialize, Serialize};
+use synapse_types::TenantId;
 use synapse_types::marketplace::{MarketplaceEntry, MarketplaceQuery};
 use synapse_types::model::ModelFormat;
 
@@ -59,8 +60,9 @@ pub async fn search(
     };
 
     let catalog = state.marketplace_catalog.lock().await;
+    let tenant = TenantId::default_tenant();
     let entries = catalog
-        .search(&query)
+        .search(&query, &tenant)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(entries.iter().map(entry_to_response).collect()))
@@ -71,8 +73,9 @@ pub async fn list_entries(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<MarketplaceEntryResponse>>, (StatusCode, String)> {
     let catalog = state.marketplace_catalog.lock().await;
+    let tenant = TenantId::default_tenant();
     let entries = catalog
-        .list()
+        .list(&tenant)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(entries.iter().map(entry_to_response).collect()))
 }
@@ -84,8 +87,9 @@ pub async fn publish(
 ) -> Result<(StatusCode, Json<MarketplaceEntryResponse>), (StatusCode, String)> {
     // Look up the model in the local DB
     let db = state.db.lock().await;
+    let tenant = TenantId::default_tenant();
     let model = db
-        .get_by_name(&req.model_name)
+        .get_by_name(&req.model_name, &tenant)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
     let instance_id =
@@ -97,7 +101,7 @@ pub async fn publish(
 
     let catalog = state.marketplace_catalog.lock().await;
     catalog
-        .publish(&entry)
+        .publish(&entry, &tenant)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok((StatusCode::CREATED, Json(entry_to_response(&entry))))
@@ -109,8 +113,9 @@ pub async fn unpublish(
     Path(name): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     let catalog = state.marketplace_catalog.lock().await;
+    let tenant = TenantId::default_tenant();
     catalog
-        .unpublish(&name)
+        .unpublish(&name, &tenant)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -125,8 +130,9 @@ pub async fn download(
 
     // Look up the model in the local DB to find the file path
     let db = state.db.lock().await;
+    let tenant = TenantId::default_tenant();
     let model = db
-        .get_by_name(&model_name)
+        .get_by_name(&model_name, &tenant)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
     // Open file and get metadata atomically — avoids TOCTOU race where
@@ -382,7 +388,9 @@ mod tests {
         // Publish directly via catalog
         {
             let catalog = state.marketplace_catalog.lock().await;
-            catalog.publish(&test_entry()).unwrap();
+            catalog
+                .publish(&test_entry(), &TenantId::default_tenant())
+                .unwrap();
         }
 
         let result = list_entries(State(state)).await.unwrap();
@@ -397,7 +405,9 @@ mod tests {
 
         {
             let catalog = state.marketplace_catalog.lock().await;
-            catalog.publish(&test_entry()).unwrap();
+            catalog
+                .publish(&test_entry(), &TenantId::default_tenant())
+                .unwrap();
         }
 
         let params = SearchQuery {
@@ -416,7 +426,9 @@ mod tests {
 
         {
             let catalog = state.marketplace_catalog.lock().await;
-            catalog.publish(&test_entry()).unwrap();
+            catalog
+                .publish(&test_entry(), &TenantId::default_tenant())
+                .unwrap();
         }
 
         let params = SearchQuery {
@@ -435,7 +447,9 @@ mod tests {
 
         {
             let catalog = state.marketplace_catalog.lock().await;
-            catalog.publish(&test_entry()).unwrap();
+            catalog
+                .publish(&test_entry(), &TenantId::default_tenant())
+                .unwrap();
         }
 
         let params = SearchQuery {
@@ -454,7 +468,9 @@ mod tests {
 
         {
             let catalog = state.marketplace_catalog.lock().await;
-            catalog.publish(&test_entry()).unwrap();
+            catalog
+                .publish(&test_entry(), &TenantId::default_tenant())
+                .unwrap();
         }
 
         let result = unpublish(State(state.clone()), Path("test-model".into()))

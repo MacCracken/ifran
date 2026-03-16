@@ -75,6 +75,10 @@ pub struct SecurityConfig {
     /// When true, server refuses to start without `SYNAPSE_API_KEY`.
     #[serde(default)]
     pub auth_required: bool,
+    /// Enable multi-tenant mode with per-tenant API keys.
+    /// When false (default), the system uses legacy single-tenant auth.
+    #[serde(default)]
+    pub multi_tenant: bool,
 }
 
 fn default_max_body_size() -> usize {
@@ -99,6 +103,7 @@ impl Default for SecurityConfig {
             rate_limit_burst: default_rate_limit_burst(),
             cors_allowed_origins: Vec::new(),
             auth_required: false,
+            multi_tenant: false,
         }
     }
 }
@@ -376,10 +381,12 @@ max_prompt_length = 50000
 rate_limit_per_second = 30
 rate_limit_burst = 60
 cors_allowed_origins = ["https://app.example.com"]
+multi_tenant = true
 "#;
         std::fs::write(tmp.path(), toml_content).unwrap();
         let cfg = SynapseConfig::load(tmp.path()).unwrap();
         assert!(cfg.security.auth_required);
+        assert!(cfg.security.multi_tenant);
         assert_eq!(cfg.security.max_body_size_bytes, 5242880);
         assert_eq!(cfg.security.max_prompt_length, 50000);
         assert_eq!(cfg.security.rate_limit_per_second, 30);
@@ -388,5 +395,11 @@ cors_allowed_origins = ["https://app.example.com"]
             cfg.security.cors_allowed_origins,
             vec!["https://app.example.com"]
         );
+    }
+
+    #[test]
+    fn security_config_multi_tenant_default_false() {
+        let sec = SecurityConfig::default();
+        assert!(!sec.multi_tenant);
     }
 }

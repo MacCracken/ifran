@@ -1,8 +1,12 @@
-//! REST handlers for training job management (create, status, cancel, list).
+//! REST handlers for training job management (create, status, cancel, list, stream).
+
+use std::convert::Infallible;
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::Json;
+use axum::response::sse::{Event, Sse};
+use futures::Stream;
 use serde::{Deserialize, Serialize};
 use synapse_types::training::{TrainingJobConfig, TrainingJobId, TrainingStatus};
 
@@ -114,6 +118,59 @@ pub async fn cancel_job(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(job_to_response(&job)))
+}
+
+/// GET /training/jobs/:id/stream — SSE stream of job progress updates.
+///
+/// Polls the job every 2 seconds and emits JSON events until the job reaches a
+/// terminal state (Completed, Failed, Cancelled). Returns 404 if the job does
+/// not exist.
+pub async fn stream_job(
+    State(state): State<AppState>,
+    Path(id): Path<TrainingJobId>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)> {
+    // Verify the job exists before starting the stream.
+    state
+        .job_manager
+        .get_job(id)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+
+    let stream = async_stream::stream! {
+        loop {
+            let job = match state.job_manager.get_job(id).await {
+                Ok(j) => j,
+                Err(e) => {
+                    let payload = serde_json::json!({ "error": e.to_string() });
+                    yield Ok(Event::default().data(payload.to_string()));
+                    break;
+                }
+            };
+
+            let payload = serde_json::json!({
+                "status": job.status,
+                "step": job.current_step,
+                "total_steps": job.total_steps,
+                "epoch": job.current_epoch,
+                "loss": job.current_loss,
+                "progress_percent": job.progress_percent(),
+                "error": job.error,
+            });
+            yield Ok(Event::default().data(payload.to_string()));
+
+            if job.is_terminal() {
+                break;
+            }
+
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+    };
+
+    Ok(Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(std::time::Duration::from_secs(15))
+            .text("keep-alive"),
+    ))
 }
 
 fn job_to_response(job: &synapse_train::job::status::JobState) -> JobResponse {
@@ -368,5 +425,69 @@ mod tests {
         assert_eq!(resp.progress_percent, 50.0);
         assert!(resp.started_at.is_some());
         assert!(resp.completed_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn stream_job_not_found() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        let result = stream_job(State(state), Path(uuid::Uuid::new_v4())).await;
+        assert_eq!(result.unwrap_err().0, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn stream_job_returns_sse() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use http_body_util::BodyExt;
+        use tower::ServiceExt;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        // Create a job then cancel it so the stream terminates immediately.
+        let req = CreateJobRequest {
+            config: test_job_config(),
+            auto_start: false,
+        };
+        let (_, Json(created)) = create_job(State(state.clone()), Json(req)).await.unwrap();
+        cancel_job(State(state.clone()), Path(created.id))
+            .await
+            .unwrap();
+
+        let app = crate::rest::router::build(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/training/jobs/{}/stream", created.id))
+                    .header("Authorization", "Bearer test")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        assert!(
+            content_type.contains("text/event-stream"),
+            "expected SSE content type, got: {content_type}"
+        );
+
+        // Read the body and verify it contains SSE event data.
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body_str = String::from_utf8_lossy(&body);
+        assert!(
+            body_str.contains("cancelled"),
+            "SSE body should contain cancelled status, got: {body_str}"
+        );
     }
 }

@@ -1,5 +1,6 @@
 use rusqlite::{Connection, params};
 use synapse_types::SynapseError;
+use synapse_types::TenantId;
 use synapse_types::error::Result;
 use synapse_types::rag::{ChunkInfo, DocumentId, DocumentInfo, RagPipelineConfig, RagPipelineId};
 use uuid::Uuid;
@@ -56,29 +57,49 @@ impl RagStore {
                 CREATE INDEX IF NOT EXISTS idx_documents_pipeline ON rag_documents(pipeline_id);",
             )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
+
+        // Add tenant_id column to rag_pipelines (idempotent — ignore if already exists)
+        let _ = self.conn.execute_batch(
+            "ALTER TABLE rag_pipelines ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';",
+        );
+        self.conn
+            .execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_rag_pipelines_tenant ON rag_pipelines(tenant_id);",
+            )
+            .map_err(|e| SynapseError::StorageError(e.to_string()))?;
+
         Ok(())
     }
 
-    pub fn create_pipeline(&self, id: RagPipelineId, config: &RagPipelineConfig) -> Result<()> {
+    pub fn create_pipeline(
+        &self,
+        id: RagPipelineId,
+        config: &RagPipelineConfig,
+        tenant_id: &TenantId,
+    ) -> Result<()> {
         let config_json =
             serde_json::to_string(config).map_err(|e| SynapseError::StorageError(e.to_string()))?;
         let now = chrono::Utc::now().to_rfc3339();
         self.conn
             .execute(
-                "INSERT INTO rag_pipelines (id, config_json, created_at) VALUES (?1, ?2, ?3)",
-                params![id.to_string(), config_json, now],
+                "INSERT INTO rag_pipelines (id, config_json, created_at, tenant_id) VALUES (?1, ?2, ?3, ?4)",
+                params![id.to_string(), config_json, now, tenant_id.0],
             )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
         Ok(())
     }
 
-    pub fn get_pipeline(&self, id: RagPipelineId) -> Result<RagPipelineConfig> {
+    pub fn get_pipeline(
+        &self,
+        id: RagPipelineId,
+        tenant_id: &TenantId,
+    ) -> Result<RagPipelineConfig> {
         let mut stmt = self
             .conn
-            .prepare("SELECT config_json FROM rag_pipelines WHERE id = ?1")
+            .prepare("SELECT config_json FROM rag_pipelines WHERE id = ?1 AND tenant_id = ?2")
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
 
-        stmt.query_row(params![id.to_string()], |row| {
+        stmt.query_row(params![id.to_string(), tenant_id.0], |row| {
             let json: String = row.get(0)?;
             serde_json::from_str(&json).map_err(|e| {
                 rusqlite::Error::FromSqlConversionFailure(
@@ -91,14 +112,17 @@ impl RagStore {
         .map_err(|e| SynapseError::StorageError(e.to_string()))
     }
 
-    pub fn list_pipelines(&self) -> Result<Vec<(RagPipelineId, RagPipelineConfig)>> {
+    pub fn list_pipelines(
+        &self,
+        tenant_id: &TenantId,
+    ) -> Result<Vec<(RagPipelineId, RagPipelineConfig)>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, config_json FROM rag_pipelines ORDER BY created_at DESC")
+            .prepare("SELECT id, config_json FROM rag_pipelines WHERE tenant_id = ?1 ORDER BY created_at DESC")
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
 
         let results = stmt
-            .query_map([], |row| {
+            .query_map(params![tenant_id.0], |row| {
                 let id_str: String = row.get(0)?;
                 let json: String = row.get(1)?;
                 let id = Uuid::parse_str(&id_str).map_err(|e| {
@@ -124,7 +148,23 @@ impl RagStore {
         Ok(results)
     }
 
-    pub fn delete_pipeline(&self, id: RagPipelineId) -> Result<()> {
+    pub fn delete_pipeline(&self, id: RagPipelineId, tenant_id: &TenantId) -> Result<()> {
+        // Verify the pipeline belongs to this tenant before cascading deletes
+        let exists: bool = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM rag_pipelines WHERE id = ?1 AND tenant_id = ?2",
+                params![id.to_string(), tenant_id.0],
+                |row| row.get::<_, i64>(0).map(|c| c > 0),
+            )
+            .map_err(|e| SynapseError::StorageError(e.to_string()))?;
+
+        if !exists {
+            return Err(SynapseError::StorageError(format!(
+                "Pipeline {id} not found"
+            )));
+        }
+
         // Delete chunks for all documents in this pipeline
         self.conn
             .execute(
@@ -140,18 +180,12 @@ impl RagStore {
             )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
         // Delete pipeline
-        let affected = self
-            .conn
+        self.conn
             .execute(
-                "DELETE FROM rag_pipelines WHERE id = ?1",
-                params![id.to_string()],
+                "DELETE FROM rag_pipelines WHERE id = ?1 AND tenant_id = ?2",
+                params![id.to_string(), tenant_id.0],
             )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
-        if affected == 0 {
-            return Err(SynapseError::StorageError(format!(
-                "Pipeline {id} not found"
-            )));
-        }
         Ok(())
     }
 
@@ -317,11 +351,12 @@ mod tests {
     #[test]
     fn create_and_get_pipeline() {
         let store = RagStore::open_in_memory().unwrap();
+        let tenant = TenantId::default_tenant();
         let id = Uuid::new_v4();
         let config = sample_config();
-        store.create_pipeline(id, &config).unwrap();
+        store.create_pipeline(id, &config, &tenant).unwrap();
 
-        let got = store.get_pipeline(id).unwrap();
+        let got = store.get_pipeline(id, &tenant).unwrap();
         assert_eq!(got.name, config.name);
         assert_eq!(got.chunk_size, config.chunk_size);
         assert_eq!(got.embedding_model, config.embedding_model);
@@ -330,28 +365,35 @@ mod tests {
     #[test]
     fn list_pipelines_empty() {
         let store = RagStore::open_in_memory().unwrap();
-        let list = store.list_pipelines().unwrap();
+        let tenant = TenantId::default_tenant();
+        let list = store.list_pipelines(&tenant).unwrap();
         assert!(list.is_empty());
     }
 
     #[test]
     fn list_pipelines_multiple() {
         let store = RagStore::open_in_memory().unwrap();
+        let tenant = TenantId::default_tenant();
         let id1 = Uuid::new_v4();
         let id2 = Uuid::new_v4();
-        store.create_pipeline(id1, &sample_config()).unwrap();
-        store.create_pipeline(id2, &sample_config()).unwrap();
+        store
+            .create_pipeline(id1, &sample_config(), &tenant)
+            .unwrap();
+        store
+            .create_pipeline(id2, &sample_config(), &tenant)
+            .unwrap();
 
-        let list = store.list_pipelines().unwrap();
+        let list = store.list_pipelines(&tenant).unwrap();
         assert_eq!(list.len(), 2);
     }
 
     #[test]
     fn delete_pipeline_cascades() {
         let store = RagStore::open_in_memory().unwrap();
+        let tenant = TenantId::default_tenant();
         let pipeline_id = Uuid::new_v4();
         store
-            .create_pipeline(pipeline_id, &sample_config())
+            .create_pipeline(pipeline_id, &sample_config(), &tenant)
             .unwrap();
 
         let doc = sample_document(pipeline_id);
@@ -359,10 +401,10 @@ mod tests {
         let chunk = sample_chunk(doc.id, 0);
         store.insert_chunk(&chunk).unwrap();
 
-        store.delete_pipeline(pipeline_id).unwrap();
+        store.delete_pipeline(pipeline_id, &tenant).unwrap();
 
         // Pipeline should be gone
-        assert!(store.get_pipeline(pipeline_id).is_err());
+        assert!(store.get_pipeline(pipeline_id, &tenant).is_err());
         // Chunks should be gone
         let chunks = store.get_chunks_for_document(doc.id).unwrap();
         assert!(chunks.is_empty());
@@ -371,16 +413,18 @@ mod tests {
     #[test]
     fn delete_pipeline_not_found() {
         let store = RagStore::open_in_memory().unwrap();
-        let result = store.delete_pipeline(Uuid::new_v4());
+        let tenant = TenantId::default_tenant();
+        let result = store.delete_pipeline(Uuid::new_v4(), &tenant);
         assert!(result.is_err());
     }
 
     #[test]
     fn insert_document_and_chunks() {
         let store = RagStore::open_in_memory().unwrap();
+        let tenant = TenantId::default_tenant();
         let pipeline_id = Uuid::new_v4();
         store
-            .create_pipeline(pipeline_id, &sample_config())
+            .create_pipeline(pipeline_id, &sample_config(), &tenant)
             .unwrap();
 
         let doc = sample_document(pipeline_id);
@@ -404,9 +448,10 @@ mod tests {
     #[test]
     fn get_all_chunks_for_pipeline() {
         let store = RagStore::open_in_memory().unwrap();
+        let tenant = TenantId::default_tenant();
         let pipeline_id = Uuid::new_v4();
         store
-            .create_pipeline(pipeline_id, &sample_config())
+            .create_pipeline(pipeline_id, &sample_config(), &tenant)
             .unwrap();
 
         let doc1 = sample_document(pipeline_id);
@@ -425,9 +470,10 @@ mod tests {
     #[test]
     fn embedding_blob_roundtrip() {
         let store = RagStore::open_in_memory().unwrap();
+        let tenant = TenantId::default_tenant();
         let pipeline_id = Uuid::new_v4();
         store
-            .create_pipeline(pipeline_id, &sample_config())
+            .create_pipeline(pipeline_id, &sample_config(), &tenant)
             .unwrap();
 
         let doc = sample_document(pipeline_id);

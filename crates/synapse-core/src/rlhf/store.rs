@@ -1,5 +1,6 @@
 use rusqlite::{Connection, params};
 use synapse_types::SynapseError;
+use synapse_types::TenantId;
 use synapse_types::error::Result;
 use synapse_types::rlhf::*;
 use uuid::Uuid;
@@ -51,15 +52,31 @@ impl AnnotationStore {
             CREATE INDEX IF NOT EXISTS idx_pairs_session ON annotation_pairs(session_id);",
             )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
+
+        // Add tenant_id column to annotation_sessions (idempotent — ignore if already exists)
+        let _ = self.conn.execute_batch(
+            "ALTER TABLE annotation_sessions ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';",
+        );
+        self.conn
+            .execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_annotation_sessions_tenant ON annotation_sessions(tenant_id);",
+            )
+            .map_err(|e| SynapseError::StorageError(e.to_string()))?;
+
         Ok(())
     }
 
-    pub fn create_session(&self, name: &str, model_name: &str) -> Result<AnnotationSession> {
+    pub fn create_session(
+        &self,
+        name: &str,
+        model_name: &str,
+        tenant_id: &TenantId,
+    ) -> Result<AnnotationSession> {
         let id = Uuid::new_v4();
         let now = chrono::Utc::now();
         self.conn.execute(
-            "INSERT INTO annotation_sessions (id, name, model_name, created_at, status) VALUES (?1, ?2, ?3, ?4, 'active')",
-            params![id.to_string(), name, model_name, now.to_rfc3339()],
+            "INSERT INTO annotation_sessions (id, name, model_name, created_at, status, tenant_id) VALUES (?1, ?2, ?3, ?4, 'active', ?5)",
+            params![id.to_string(), name, model_name, now.to_rfc3339(), tenant_id.0],
         ).map_err(|e| SynapseError::StorageError(e.to_string()))?;
         Ok(AnnotationSession {
             id,
@@ -70,12 +87,12 @@ impl AnnotationStore {
         })
     }
 
-    pub fn get_session(&self, id: Uuid) -> Result<AnnotationSession> {
+    pub fn get_session(&self, id: Uuid, tenant_id: &TenantId) -> Result<AnnotationSession> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, model_name, created_at, status FROM annotation_sessions WHERE id = ?1"
+            "SELECT id, name, model_name, created_at, status FROM annotation_sessions WHERE id = ?1 AND tenant_id = ?2"
         ).map_err(|e| SynapseError::StorageError(e.to_string()))?;
 
-        stmt.query_row(params![id.to_string()], |row| {
+        stmt.query_row(params![id.to_string(), tenant_id.0], |row| {
             let id_str: String = row.get(0)?;
             let name: String = row.get(1)?;
             let model_name: String = row.get(2)?;
@@ -118,13 +135,13 @@ impl AnnotationStore {
         .map_err(|e| SynapseError::StorageError(e.to_string()))
     }
 
-    pub fn list_sessions(&self) -> Result<Vec<AnnotationSession>> {
+    pub fn list_sessions(&self, tenant_id: &TenantId) -> Result<Vec<AnnotationSession>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, model_name, created_at, status FROM annotation_sessions ORDER BY created_at DESC"
+            "SELECT id, name, model_name, created_at, status FROM annotation_sessions WHERE tenant_id = ?1 ORDER BY created_at DESC"
         ).map_err(|e| SynapseError::StorageError(e.to_string()))?;
 
         let results = stmt
-            .query_map([], |row| {
+            .query_map(params![tenant_id.0], |row| {
                 let id_str: String = row.get(0)?;
                 let name: String = row.get(1)?;
                 let model_name: String = row.get(2)?;
@@ -192,17 +209,19 @@ impl AnnotationStore {
         Ok(())
     }
 
-    pub fn get_pairs(&self, session_id: Uuid) -> Result<Vec<AnnotationPair>> {
+    pub fn get_pairs(&self, session_id: Uuid, tenant_id: &TenantId) -> Result<Vec<AnnotationPair>> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, session_id, prompt, response_a, response_b, preference, annotated_at
-             FROM annotation_pairs WHERE session_id = ?1",
+                "SELECT p.id, p.session_id, p.prompt, p.response_a, p.response_b, p.preference, p.annotated_at
+             FROM annotation_pairs p
+             JOIN annotation_sessions s ON p.session_id = s.id
+             WHERE p.session_id = ?1 AND s.tenant_id = ?2",
             )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
 
         let results = stmt
-            .query_map(params![session_id.to_string()], row_to_pair)
+            .query_map(params![session_id.to_string(), tenant_id.0], row_to_pair)
             .map_err(|e| SynapseError::StorageError(e.to_string()))?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
@@ -210,17 +229,23 @@ impl AnnotationStore {
         Ok(results)
     }
 
-    pub fn get_next_unannotated(&self, session_id: Uuid) -> Result<Option<AnnotationPair>> {
+    pub fn get_next_unannotated(
+        &self,
+        session_id: Uuid,
+        tenant_id: &TenantId,
+    ) -> Result<Option<AnnotationPair>> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, session_id, prompt, response_a, response_b, preference, annotated_at
-             FROM annotation_pairs WHERE session_id = ?1 AND preference IS NULL LIMIT 1",
+                "SELECT p.id, p.session_id, p.prompt, p.response_a, p.response_b, p.preference, p.annotated_at
+             FROM annotation_pairs p
+             JOIN annotation_sessions s ON p.session_id = s.id
+             WHERE p.session_id = ?1 AND s.tenant_id = ?2 AND p.preference IS NULL LIMIT 1",
             )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
 
         let mut rows = stmt
-            .query_map(params![session_id.to_string()], row_to_pair)
+            .query_map(params![session_id.to_string(), tenant_id.0], row_to_pair)
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
 
         match rows.next() {
@@ -251,7 +276,10 @@ impl AnnotationStore {
         Ok(())
     }
 
-    pub fn get_stats(&self, session_id: Uuid) -> Result<AnnotationStats> {
+    pub fn get_stats(&self, session_id: Uuid, tenant_id: &TenantId) -> Result<AnnotationStats> {
+        // Verify session belongs to tenant
+        let _ = self.get_session(session_id, tenant_id)?;
+
         let total: i64 = self
             .conn
             .query_row(
@@ -275,7 +303,14 @@ impl AnnotationStore {
         })
     }
 
-    pub fn export_session(&self, session_id: Uuid) -> Result<Vec<AnnotationPair>> {
+    pub fn export_session(
+        &self,
+        session_id: Uuid,
+        tenant_id: &TenantId,
+    ) -> Result<Vec<AnnotationPair>> {
+        // Verify session belongs to tenant
+        let _ = self.get_session(session_id, tenant_id)?;
+
         let mut stmt = self
             .conn
             .prepare(
@@ -336,35 +371,39 @@ mod tests {
     #[test]
     fn create_and_get_session() {
         let store = AnnotationStore::open_in_memory().unwrap();
-        let session = store.create_session("test", "llama-8b").unwrap();
+        let tenant = TenantId::default_tenant();
+        let session = store.create_session("test", "llama-8b", &tenant).unwrap();
         assert_eq!(session.name, "test");
         assert_eq!(session.model_name, "llama-8b");
         assert_eq!(session.status, AnnotationSessionStatus::Active);
 
-        let got = store.get_session(session.id).unwrap();
+        let got = store.get_session(session.id, &tenant).unwrap();
         assert_eq!(got.name, "test");
     }
 
     #[test]
     fn list_sessions_empty() {
         let store = AnnotationStore::open_in_memory().unwrap();
-        let sessions = store.list_sessions().unwrap();
+        let tenant = TenantId::default_tenant();
+        let sessions = store.list_sessions(&tenant).unwrap();
         assert!(sessions.is_empty());
     }
 
     #[test]
     fn list_sessions_multiple() {
         let store = AnnotationStore::open_in_memory().unwrap();
-        store.create_session("s1", "model-a").unwrap();
-        store.create_session("s2", "model-b").unwrap();
-        let sessions = store.list_sessions().unwrap();
+        let tenant = TenantId::default_tenant();
+        store.create_session("s1", "model-a", &tenant).unwrap();
+        store.create_session("s2", "model-b", &tenant).unwrap();
+        let sessions = store.list_sessions(&tenant).unwrap();
         assert_eq!(sessions.len(), 2);
     }
 
     #[test]
     fn add_and_get_pairs() {
         let store = AnnotationStore::open_in_memory().unwrap();
-        let session = store.create_session("test", "model").unwrap();
+        let tenant = TenantId::default_tenant();
+        let session = store.create_session("test", "model", &tenant).unwrap();
         let pair = AnnotationPair {
             id: Uuid::new_v4(),
             session_id: session.id,
@@ -375,7 +414,7 @@ mod tests {
             annotated_at: None,
         };
         store.add_pairs(std::slice::from_ref(&pair)).unwrap();
-        let pairs = store.get_pairs(session.id).unwrap();
+        let pairs = store.get_pairs(session.id, &tenant).unwrap();
         assert_eq!(pairs.len(), 1);
         assert_eq!(pairs[0].prompt, "What is Rust?");
         assert!(pairs[0].preference.is_none());
@@ -384,7 +423,8 @@ mod tests {
     #[test]
     fn annotate_pair_and_stats() {
         let store = AnnotationStore::open_in_memory().unwrap();
-        let session = store.create_session("test", "model").unwrap();
+        let tenant = TenantId::default_tenant();
+        let session = store.create_session("test", "model", &tenant).unwrap();
         let pair1 = AnnotationPair {
             id: Uuid::new_v4(),
             session_id: session.id,
@@ -406,7 +446,7 @@ mod tests {
         store.add_pairs(&[pair1.clone(), pair2]).unwrap();
 
         // Stats before annotation
-        let stats = store.get_stats(session.id).unwrap();
+        let stats = store.get_stats(session.id, &tenant).unwrap();
         assert_eq!(stats.total_pairs, 2);
         assert_eq!(stats.annotated_count, 0);
         assert_eq!(stats.remaining, 2);
@@ -416,7 +456,7 @@ mod tests {
             .annotate_pair(pair1.id, Preference::ResponseA)
             .unwrap();
 
-        let stats = store.get_stats(session.id).unwrap();
+        let stats = store.get_stats(session.id, &tenant).unwrap();
         assert_eq!(stats.annotated_count, 1);
         assert_eq!(stats.remaining, 1);
     }
@@ -424,10 +464,16 @@ mod tests {
     #[test]
     fn get_next_unannotated() {
         let store = AnnotationStore::open_in_memory().unwrap();
-        let session = store.create_session("test", "model").unwrap();
+        let tenant = TenantId::default_tenant();
+        let session = store.create_session("test", "model", &tenant).unwrap();
 
         // No pairs yet
-        assert!(store.get_next_unannotated(session.id).unwrap().is_none());
+        assert!(
+            store
+                .get_next_unannotated(session.id, &tenant)
+                .unwrap()
+                .is_none()
+        );
 
         let pair = AnnotationPair {
             id: Uuid::new_v4(),
@@ -440,17 +486,23 @@ mod tests {
         };
         store.add_pairs(std::slice::from_ref(&pair)).unwrap();
 
-        let next = store.get_next_unannotated(session.id).unwrap();
+        let next = store.get_next_unannotated(session.id, &tenant).unwrap();
         assert!(next.is_some());
 
         store.annotate_pair(pair.id, Preference::Tie).unwrap();
-        assert!(store.get_next_unannotated(session.id).unwrap().is_none());
+        assert!(
+            store
+                .get_next_unannotated(session.id, &tenant)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
     fn export_session_only_annotated() {
         let store = AnnotationStore::open_in_memory().unwrap();
-        let session = store.create_session("test", "model").unwrap();
+        let tenant = TenantId::default_tenant();
+        let session = store.create_session("test", "model", &tenant).unwrap();
         let pair1 = AnnotationPair {
             id: Uuid::new_v4(),
             session_id: session.id,
@@ -474,7 +526,7 @@ mod tests {
             .annotate_pair(pair1.id, Preference::ResponseB)
             .unwrap();
 
-        let exported = store.export_session(session.id).unwrap();
+        let exported = store.export_session(session.id, &tenant).unwrap();
         assert_eq!(exported.len(), 1);
         assert_eq!(exported[0].preference, Some(Preference::ResponseB));
     }

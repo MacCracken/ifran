@@ -42,8 +42,13 @@ async fn main() {
         if let Some(server) = &state.bridge_server {
             let server = server.clone();
             let addr = grpc_bind.clone();
+            let grpc_service = synapse_bridge::server::SynapseBridgeService::new(
+                state.job_manager.clone(),
+                state.backends.clone(),
+                state.model_manager.clone(),
+            );
             tokio::spawn(async move {
-                match server.start(&addr).await {
+                match server.start(&addr, grpc_service).await {
                     Ok(()) => tracing::info!("Bridge server started on {addr}"),
                     Err(e) => tracing::warn!("Failed to start bridge server: {e}"),
                 }

@@ -19,7 +19,8 @@ pub async fn search(query: Option<&str>) -> synapse_types::error::Result<()> {
         max_size_bytes: None,
     };
 
-    let entries = catalog.search(&mq)?;
+    let tenant = synapse_types::TenantId::default_tenant();
+    let entries = catalog.search(&mq, &tenant)?;
 
     if entries.is_empty() {
         println!("No marketplace entries found.");
@@ -50,7 +51,8 @@ pub async fn search(query: Option<&str>) -> synapse_types::error::Result<()> {
 pub async fn publish(model_name: &str) -> synapse_types::error::Result<()> {
     let config = SynapseConfig::discover();
     let db = ModelDatabase::open(&config.storage.database)?;
-    let model = db.get_by_name(model_name)?;
+    let tenant = synapse_types::TenantId::default_tenant();
+    let model = db.get_by_name(model_name, &tenant)?;
 
     let instance_id =
         std::env::var("SYNAPSE_INSTANCE_ID").unwrap_or_else(|_| config.server.bind.clone());
@@ -60,7 +62,7 @@ pub async fn publish(model_name: &str) -> synapse_types::error::Result<()> {
 
     let catalog_path = config.storage.database.with_file_name("marketplace.db");
     let catalog = MarketplaceCatalog::open(&catalog_path)?;
-    catalog.publish(&entry)?;
+    catalog.publish(&entry, &tenant)?;
 
     println!("Published '{}' to marketplace", entry.model_name);
     println!("Download URL: {}", entry.download_url);
@@ -73,7 +75,8 @@ pub async fn unpublish(model_name: &str) -> synapse_types::error::Result<()> {
     let config = SynapseConfig::discover();
     let catalog_path = config.storage.database.with_file_name("marketplace.db");
     let catalog = MarketplaceCatalog::open(&catalog_path)?;
-    catalog.unpublish(model_name)?;
+    let tenant = synapse_types::TenantId::default_tenant();
+    catalog.unpublish(model_name, &tenant)?;
     println!("Unpublished '{model_name}' from marketplace");
     Ok(())
 }

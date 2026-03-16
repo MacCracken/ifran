@@ -9,11 +9,13 @@ pub async fn execute(model: &str, skip_confirm: bool) -> Result<()> {
     let config = SynapseConfig::discover();
     let db = ModelDatabase::open(&config.storage.database)?;
 
+    let tenant = synapse_types::TenantId::default_tenant();
+
     // Try to find by name first, then by UUID
-    let model_info = db.get_by_name(model).or_else(|_| {
+    let model_info = db.get_by_name(model, &tenant).or_else(|_| {
         uuid::Uuid::parse_str(model)
             .map_err(|_| SynapseError::ModelNotFound(model.to_string()))
-            .and_then(|id| db.get(id))
+            .and_then(|id| db.get(id, &tenant))
     })?;
 
     if !skip_confirm {
@@ -58,7 +60,7 @@ pub async fn execute(model: &str, skip_confirm: bool) -> Result<()> {
     }
 
     // Remove from catalog
-    db.delete(model_info.id)?;
+    db.delete(model_info.id, &tenant)?;
 
     eprintln!("Removed '{}'", model_info.name);
     Ok(())

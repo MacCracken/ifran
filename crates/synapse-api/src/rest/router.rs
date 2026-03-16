@@ -39,6 +39,7 @@ pub fn build(state: AppState) -> Router {
         )
         .route("/training/jobs/{id}", get(training::get_job))
         .route("/training/jobs/{id}/cancel", post(training::cancel_job))
+        .route("/training/jobs/{id}/stream", get(training::stream_job))
         // Distributed Training
         .route(
             "/training/distributed/jobs",
@@ -125,7 +126,10 @@ pub fn build(state: AppState) -> Router {
         )
         // Middleware stack (axum applies bottom-up: last .layer() runs first)
         // 1. Auth (innermost — runs last on request, first on response)
-        .layer(axum_mw::from_fn(middleware::auth::require_auth))
+        .layer(axum_mw::from_fn_with_state(
+            state.clone(),
+            middleware::auth::require_auth,
+        ))
         // 2. CORS
         .layer(build_cors_layer(
             &state.config.security.cors_allowed_origins,

@@ -9,3 +9,4 @@ pub mod rag;
 pub mod registry;
 pub mod rlhf;
 pub mod storage;
+pub mod tenant;

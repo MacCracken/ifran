@@ -2,6 +2,7 @@
 
 use rusqlite::{Connection, params};
 use synapse_types::SynapseError;
+use synapse_types::TenantId;
 use synapse_types::error::Result;
 use synapse_types::marketplace::{MarketplaceEntry, MarketplaceQuery};
 
@@ -44,11 +45,22 @@ impl MarketplaceCatalog {
                     ON marketplace_entries(publisher_instance);",
             )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
+
+        // Add tenant_id column (idempotent — ignore if already exists)
+        let _ = self.conn.execute_batch(
+            "ALTER TABLE marketplace_entries ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';",
+        );
+        self.conn
+            .execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_marketplace_tenant ON marketplace_entries(tenant_id);",
+            )
+            .map_err(|e| SynapseError::StorageError(e.to_string()))?;
+
         Ok(())
     }
 
     /// Publish a model to the marketplace.
-    pub fn publish(&self, entry: &MarketplaceEntry) -> Result<()> {
+    pub fn publish(&self, entry: &MarketplaceEntry, tenant_id: &TenantId) -> Result<()> {
         let format_str = serde_json::to_string(&entry.format)
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
         let quant_str = serde_json::to_string(&entry.quant)
@@ -67,8 +79,8 @@ impl MarketplaceCatalog {
                 "INSERT OR REPLACE INTO marketplace_entries
                     (model_name, description, format, quant, size_bytes, parameter_count,
                      architecture, publisher_instance, download_url, sha256, tags,
-                     published_at, eval_scores)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                     published_at, eval_scores, tenant_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                 params![
                     entry.model_name,
                     entry.description,
@@ -83,6 +95,7 @@ impl MarketplaceCatalog {
                     tags_str,
                     entry.published_at.to_rfc3339(),
                     eval_str,
+                    tenant_id.0,
                 ],
             )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
@@ -90,11 +103,11 @@ impl MarketplaceCatalog {
     }
 
     /// Get a marketplace entry by model name.
-    pub fn get(&self, model_name: &str) -> Result<MarketplaceEntry> {
+    pub fn get(&self, model_name: &str, tenant_id: &TenantId) -> Result<MarketplaceEntry> {
         self.conn
             .query_row(
-                "SELECT * FROM marketplace_entries WHERE model_name = ?1",
-                params![model_name],
+                "SELECT * FROM marketplace_entries WHERE model_name = ?1 AND tenant_id = ?2",
+                params![model_name, tenant_id.0],
                 row_to_entry,
             )
             .map_err(|e| match e {
@@ -106,11 +119,20 @@ impl MarketplaceCatalog {
     }
 
     /// Search the marketplace catalog.
-    pub fn search(&self, query: &MarketplaceQuery) -> Result<Vec<MarketplaceEntry>> {
+    pub fn search(
+        &self,
+        query: &MarketplaceQuery,
+        tenant_id: &TenantId,
+    ) -> Result<Vec<MarketplaceEntry>> {
         // Build parameterized WHERE clause to prevent SQL injection
         let mut conditions = Vec::new();
         let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
         let mut param_idx = 1;
+
+        // Always filter by tenant_id
+        conditions.push(format!("tenant_id = ?{param_idx}"));
+        param_values.push(Box::new(tenant_id.0.clone()));
+        param_idx += 1;
 
         if let Some(ref search) = query.search {
             conditions.push(format!(
@@ -163,17 +185,17 @@ impl MarketplaceCatalog {
     }
 
     /// List all marketplace entries.
-    pub fn list(&self) -> Result<Vec<MarketplaceEntry>> {
-        self.search(&MarketplaceQuery::default())
+    pub fn list(&self, tenant_id: &TenantId) -> Result<Vec<MarketplaceEntry>> {
+        self.search(&MarketplaceQuery::default(), tenant_id)
     }
 
     /// Unpublish a model.
-    pub fn unpublish(&self, model_name: &str) -> Result<()> {
+    pub fn unpublish(&self, model_name: &str, tenant_id: &TenantId) -> Result<()> {
         let rows = self
             .conn
             .execute(
-                "DELETE FROM marketplace_entries WHERE model_name = ?1",
-                params![model_name],
+                "DELETE FROM marketplace_entries WHERE model_name = ?1 AND tenant_id = ?2",
+                params![model_name, tenant_id.0],
             )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
 
@@ -186,11 +208,13 @@ impl MarketplaceCatalog {
     }
 
     /// Count entries.
-    pub fn count(&self) -> Result<usize> {
+    pub fn count(&self, tenant_id: &TenantId) -> Result<usize> {
         self.conn
-            .query_row("SELECT COUNT(*) FROM marketplace_entries", [], |row| {
-                row.get::<_, i64>(0)
-            })
+            .query_row(
+                "SELECT COUNT(*) FROM marketplace_entries WHERE tenant_id = ?1",
+                params![tenant_id.0],
+                |row| row.get::<_, i64>(0),
+            )
             .map(|c| c as usize)
             .map_err(|e| SynapseError::StorageError(e.to_string()))
     }
@@ -270,9 +294,10 @@ mod tests {
     #[test]
     fn publish_and_get() {
         let catalog = test_catalog();
+        let tenant = TenantId::default_tenant();
         let entry = sample_entry();
-        catalog.publish(&entry).unwrap();
-        let fetched = catalog.get("llama-3.1-8b-q4km").unwrap();
+        catalog.publish(&entry, &tenant).unwrap();
+        let fetched = catalog.get("llama-3.1-8b-q4km", &tenant).unwrap();
         assert_eq!(fetched.publisher_instance, "node-1");
         assert_eq!(fetched.size_bytes, 4_800_000_000);
     }
@@ -280,12 +305,16 @@ mod tests {
     #[test]
     fn search_by_name() {
         let catalog = test_catalog();
-        catalog.publish(&sample_entry()).unwrap();
+        let tenant = TenantId::default_tenant();
+        catalog.publish(&sample_entry(), &tenant).unwrap();
         let results = catalog
-            .search(&MarketplaceQuery {
-                search: Some("llama".into()),
-                ..Default::default()
-            })
+            .search(
+                &MarketplaceQuery {
+                    search: Some("llama".into()),
+                    ..Default::default()
+                },
+                &tenant,
+            )
             .unwrap();
         assert_eq!(results.len(), 1);
     }
@@ -293,15 +322,17 @@ mod tests {
     #[test]
     fn unpublish() {
         let catalog = test_catalog();
-        catalog.publish(&sample_entry()).unwrap();
-        assert_eq!(catalog.count().unwrap(), 1);
-        catalog.unpublish("llama-3.1-8b-q4km").unwrap();
-        assert_eq!(catalog.count().unwrap(), 0);
+        let tenant = TenantId::default_tenant();
+        catalog.publish(&sample_entry(), &tenant).unwrap();
+        assert_eq!(catalog.count(&tenant).unwrap(), 1);
+        catalog.unpublish("llama-3.1-8b-q4km", &tenant).unwrap();
+        assert_eq!(catalog.count(&tenant).unwrap(), 0);
     }
 
     #[test]
     fn list_empty() {
         let catalog = test_catalog();
-        assert!(catalog.list().unwrap().is_empty());
+        let tenant = TenantId::default_tenant();
+        assert!(catalog.list(&tenant).unwrap().is_empty());
     }
 }

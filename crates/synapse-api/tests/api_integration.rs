@@ -74,7 +74,8 @@ fn insert_test_model(db_path: &std::path::Path) -> ModelInfo {
         sha256: Some("abcdef1234567890".into()),
         pulled_at: chrono::Utc::now(),
     };
-    db.insert(&model).unwrap();
+    db.insert(&model, &synapse_types::TenantId::default_tenant())
+        .unwrap();
     model
 }
 

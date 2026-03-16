@@ -13,10 +13,12 @@ use synapse_core::marketplace::catalog::MarketplaceCatalog;
 use synapse_core::rag::store::RagStore;
 use synapse_core::rlhf::store::AnnotationStore;
 use synapse_core::storage::db::ModelDatabase;
+use synapse_core::tenant::store::TenantStore;
 use synapse_train::distributed::coordinator::DistributedCoordinator;
 use synapse_train::executor::ExecutorKind;
 use synapse_train::experiment::runner::ExperimentHandle;
 use synapse_train::job::manager::JobManager;
+use synapse_train::job::store::JobStore;
 use synapse_types::experiment::ExperimentId;
 use tokio::sync::Mutex;
 
@@ -38,6 +40,7 @@ pub struct AppState {
     pub experiment_runners: Arc<Mutex<HashMap<ExperimentId, ExperimentHandle>>>,
     pub rag_store: Option<Arc<Mutex<RagStore>>>,
     pub annotation_store: Option<Arc<Mutex<AnnotationStore>>>,
+    pub tenant_store: Option<Arc<Mutex<TenantStore>>>,
     pub bridge_client: Option<Arc<BridgeClient>>,
     pub bridge_server: Option<Arc<BridgeServer>>,
 }
@@ -48,11 +51,21 @@ impl AppState {
         let db = ModelDatabase::open(&config.storage.database)?;
         let backends = BackendRouter::new();
         let model_manager = ModelManager::new(config.hardware.gpu_memory_reserve_mb);
-        let job_manager = JobManager::new(
-            ExecutorKind::Subprocess,
-            None,
-            config.training.max_concurrent_jobs as usize,
-        );
+        // Initialize job store for crash recovery
+        let job_store_path = config.storage.database.with_file_name("training_jobs.db");
+        let job_manager = match JobStore::open(&job_store_path) {
+            Ok(store) => JobManager::new_with_store(
+                ExecutorKind::Subprocess,
+                None,
+                config.training.max_concurrent_jobs as usize,
+                store,
+            ),
+            Err(_) => JobManager::new(
+                ExecutorKind::Subprocess,
+                None,
+                config.training.max_concurrent_jobs as usize,
+            ),
+        };
         let eval_runner = EvalRunner::new();
         let marketplace_db_path = config.storage.database.with_file_name("marketplace.db");
         let marketplace_catalog = MarketplaceCatalog::open(&marketplace_db_path)?;
@@ -69,6 +82,18 @@ impl AppState {
         // Initialize annotation store
         let annotation_store_path = config.storage.database.with_file_name("annotations.db");
         let annotation_store = AnnotationStore::open(&annotation_store_path).ok();
+
+        // Initialize tenant store if multi-tenant mode is enabled
+        let tenant_store = if config.security.multi_tenant {
+            let tenant_store_path = config.storage.database.with_file_name("tenants.db");
+            Some(TenantStore::open(&tenant_store_path).map_err(|e| {
+                synapse_types::SynapseError::StorageError(format!(
+                    "Failed to open tenant store: {e}"
+                ))
+            })?)
+        } else {
+            None
+        };
 
         // Initialize bridge if enabled
         let (bridge_client, bridge_server) = if config.bridge.enabled {
@@ -106,6 +131,7 @@ impl AppState {
             experiment_runners: Arc::new(Mutex::new(HashMap::new())),
             rag_store: rag_store.map(|s| Arc::new(Mutex::new(s))),
             annotation_store: annotation_store.map(|s| Arc::new(Mutex::new(s))),
+            tenant_store: tenant_store.map(|s| Arc::new(Mutex::new(s))),
             bridge_client,
             bridge_server,
         })
@@ -194,5 +220,22 @@ mod tests {
         let state = AppState::new(config).unwrap();
         let loaded = state.model_manager.list_loaded().await;
         assert!(loaded.is_empty());
+    }
+
+    #[test]
+    fn app_state_no_tenant_store_by_default() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config = test_config(&tmp);
+        let state = AppState::new(config).unwrap();
+        assert!(state.tenant_store.is_none());
+    }
+
+    #[test]
+    fn app_state_tenant_store_when_multi_tenant() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut config = test_config(&tmp);
+        config.security.multi_tenant = true;
+        let state = AppState::new(config).unwrap();
+        assert!(state.tenant_store.is_some());
     }
 }

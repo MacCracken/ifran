@@ -7,6 +7,8 @@ use serde::Deserialize;
 use synapse_types::rlhf::{AnnotationPair, Preference};
 use uuid::Uuid;
 
+use synapse_types::TenantId;
+
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -43,8 +45,9 @@ pub async fn create_session(
     ))?;
 
     let s = store.lock().await;
+    let tenant = TenantId::default_tenant();
     let session = s
-        .create_session(&req.name, &req.model_name)
+        .create_session(&req.name, &req.model_name, &tenant)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok((
@@ -68,8 +71,9 @@ pub async fn list_sessions(
     ))?;
 
     let s = store.lock().await;
+    let tenant = TenantId::default_tenant();
     let sessions = s
-        .list_sessions()
+        .list_sessions(&tenant)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let data: Vec<serde_json::Value> = sessions
@@ -99,12 +103,13 @@ pub async fn get_session(
     ))?;
 
     let s = store.lock().await;
+    let tenant = TenantId::default_tenant();
     let session = s
-        .get_session(id)
+        .get_session(id, &tenant)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
     let stats = s
-        .get_stats(id)
+        .get_stats(id, &tenant)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(serde_json::json!({
@@ -168,8 +173,9 @@ pub async fn get_pairs(
     ))?;
 
     let s = store.lock().await;
+    let tenant = TenantId::default_tenant();
     let next = s
-        .get_next_unannotated(id)
+        .get_next_unannotated(id, &tenant)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     match next {
@@ -214,8 +220,9 @@ pub async fn export_session(
     ))?;
 
     let s = store.lock().await;
+    let tenant = TenantId::default_tenant();
     let pairs = s
-        .export_session(id)
+        .export_session(id, &tenant)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // JSONL format for DPO training
@@ -257,8 +264,9 @@ pub async fn get_stats(
     ))?;
 
     let s = store.lock().await;
+    let tenant = TenantId::default_tenant();
     let stats = s
-        .get_stats(id)
+        .get_stats(id, &tenant)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(serde_json::json!({

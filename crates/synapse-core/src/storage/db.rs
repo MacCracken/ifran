@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, params};
 use std::path::Path;
 use synapse_types::SynapseError;
+use synapse_types::TenantId;
 use synapse_types::error::Result;
 use synapse_types::model::{ModelFormat, ModelId, ModelInfo, QuantLevel};
 use uuid::Uuid;
@@ -60,16 +61,25 @@ impl ModelDatabase {
                 CREATE INDEX IF NOT EXISTS idx_models_repo ON models(repo_id);",
             )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
+
+        // Add tenant_id column (idempotent — ignore if already exists)
+        let _ = self.conn.execute_batch(
+            "ALTER TABLE models ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';",
+        );
+        self.conn
+            .execute_batch("CREATE INDEX IF NOT EXISTS idx_models_tenant ON models(tenant_id);")
+            .map_err(|e| SynapseError::StorageError(e.to_string()))?;
+
         Ok(())
     }
 
     /// Insert a new model into the catalog.
-    pub fn insert(&self, model: &ModelInfo) -> Result<()> {
+    pub fn insert(&self, model: &ModelInfo, tenant_id: &TenantId) -> Result<()> {
         self.conn
             .execute(
                 "INSERT INTO models (id, name, repo_id, format, quant, size_bytes,
-                    parameter_count, architecture, license, local_path, sha256, pulled_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                    parameter_count, architecture, license, local_path, sha256, pulled_at, tenant_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                 params![
                     model.id.to_string(),
                     model.name,
@@ -87,6 +97,7 @@ impl ModelDatabase {
                     model.local_path,
                     model.sha256,
                     model.pulled_at.to_rfc3339(),
+                    tenant_id.0,
                 ],
             )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
@@ -94,11 +105,11 @@ impl ModelDatabase {
     }
 
     /// Get a model by its UUID.
-    pub fn get(&self, id: ModelId) -> Result<ModelInfo> {
+    pub fn get(&self, id: ModelId, tenant_id: &TenantId) -> Result<ModelInfo> {
         self.conn
             .query_row(
-                "SELECT * FROM models WHERE id = ?1",
-                params![id.to_string()],
+                "SELECT * FROM models WHERE id = ?1 AND tenant_id = ?2",
+                params![id.to_string(), tenant_id.0],
                 row_to_model,
             )
             .map_err(|e| match e {
@@ -108,11 +119,11 @@ impl ModelDatabase {
     }
 
     /// Find a model by name (exact match).
-    pub fn get_by_name(&self, name: &str) -> Result<ModelInfo> {
+    pub fn get_by_name(&self, name: &str, tenant_id: &TenantId) -> Result<ModelInfo> {
         self.conn
             .query_row(
-                "SELECT * FROM models WHERE name = ?1",
-                params![name],
+                "SELECT * FROM models WHERE name = ?1 AND tenant_id = ?2",
+                params![name, tenant_id.0],
                 row_to_model,
             )
             .map_err(|e| match e {
@@ -124,14 +135,14 @@ impl ModelDatabase {
     }
 
     /// List all models in the catalog.
-    pub fn list(&self) -> Result<Vec<ModelInfo>> {
+    pub fn list(&self, tenant_id: &TenantId) -> Result<Vec<ModelInfo>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT * FROM models ORDER BY pulled_at DESC")
+            .prepare("SELECT * FROM models WHERE tenant_id = ?1 ORDER BY pulled_at DESC")
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
 
         let models = stmt
-            .query_map([], row_to_model)
+            .query_map(params![tenant_id.0], row_to_model)
             .map_err(|e| SynapseError::StorageError(e.to_string()))?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
@@ -140,14 +151,14 @@ impl ModelDatabase {
     }
 
     /// Update an existing model entry.
-    pub fn update(&self, model: &ModelInfo) -> Result<()> {
+    pub fn update(&self, model: &ModelInfo, tenant_id: &TenantId) -> Result<()> {
         let rows = self
             .conn
             .execute(
                 "UPDATE models SET name = ?2, repo_id = ?3, format = ?4, quant = ?5,
                     size_bytes = ?6, parameter_count = ?7, architecture = ?8,
                     license = ?9, local_path = ?10, sha256 = ?11, pulled_at = ?12
-                 WHERE id = ?1",
+                 WHERE id = ?1 AND tenant_id = ?13",
                 params![
                     model.id.to_string(),
                     model.name,
@@ -165,6 +176,7 @@ impl ModelDatabase {
                     model.local_path,
                     model.sha256,
                     model.pulled_at.to_rfc3339(),
+                    tenant_id.0,
                 ],
             )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
@@ -176,10 +188,13 @@ impl ModelDatabase {
     }
 
     /// Delete a model from the catalog by ID.
-    pub fn delete(&self, id: ModelId) -> Result<()> {
+    pub fn delete(&self, id: ModelId, tenant_id: &TenantId) -> Result<()> {
         let rows = self
             .conn
-            .execute("DELETE FROM models WHERE id = ?1", params![id.to_string()])
+            .execute(
+                "DELETE FROM models WHERE id = ?1 AND tenant_id = ?2",
+                params![id.to_string(), tenant_id.0],
+            )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
 
         if rows == 0 {
@@ -189,11 +204,13 @@ impl ModelDatabase {
     }
 
     /// Count total models in the catalog.
-    pub fn count(&self) -> Result<usize> {
+    pub fn count(&self, tenant_id: &TenantId) -> Result<usize> {
         self.conn
-            .query_row("SELECT COUNT(*) FROM models", [], |row| {
-                row.get::<_, i64>(0)
-            })
+            .query_row(
+                "SELECT COUNT(*) FROM models WHERE tenant_id = ?1",
+                params![tenant_id.0],
+                |row| row.get::<_, i64>(0),
+            )
             .map(|c| c as usize)
             .map_err(|e| SynapseError::StorageError(e.to_string()))
     }
@@ -265,8 +282,9 @@ mod tests {
     fn insert_and_get() {
         let db = ModelDatabase::open_memory().unwrap();
         let model = sample_model();
-        db.insert(&model).unwrap();
-        let fetched = db.get(model.id).unwrap();
+        let tenant = TenantId::default_tenant();
+        db.insert(&model, &tenant).unwrap();
+        let fetched = db.get(model.id, &tenant).unwrap();
         assert_eq!(fetched.name, model.name);
         assert_eq!(fetched.format, model.format);
         assert_eq!(fetched.quant, model.quant);
@@ -276,27 +294,30 @@ mod tests {
     fn get_by_name() {
         let db = ModelDatabase::open_memory().unwrap();
         let model = sample_model();
-        db.insert(&model).unwrap();
-        let fetched = db.get_by_name("llama-3.1-8b").unwrap();
+        let tenant = TenantId::default_tenant();
+        db.insert(&model, &tenant).unwrap();
+        let fetched = db.get_by_name("llama-3.1-8b", &tenant).unwrap();
         assert_eq!(fetched.id, model.id);
     }
 
     #[test]
     fn list_models() {
         let db = ModelDatabase::open_memory().unwrap();
-        assert_eq!(db.list().unwrap().len(), 0);
-        db.insert(&sample_model()).unwrap();
-        assert_eq!(db.list().unwrap().len(), 1);
+        let tenant = TenantId::default_tenant();
+        assert_eq!(db.list(&tenant).unwrap().len(), 0);
+        db.insert(&sample_model(), &tenant).unwrap();
+        assert_eq!(db.list(&tenant).unwrap().len(), 1);
     }
 
     #[test]
     fn update_model() {
         let db = ModelDatabase::open_memory().unwrap();
         let mut model = sample_model();
-        db.insert(&model).unwrap();
+        let tenant = TenantId::default_tenant();
+        db.insert(&model, &tenant).unwrap();
         model.name = "llama-3.1-8b-updated".into();
-        db.update(&model).unwrap();
-        let fetched = db.get(model.id).unwrap();
+        db.update(&model, &tenant).unwrap();
+        let fetched = db.get(model.id, &tenant).unwrap();
         assert_eq!(fetched.name, "llama-3.1-8b-updated");
     }
 
@@ -304,23 +325,26 @@ mod tests {
     fn delete_model() {
         let db = ModelDatabase::open_memory().unwrap();
         let model = sample_model();
-        db.insert(&model).unwrap();
-        assert_eq!(db.count().unwrap(), 1);
-        db.delete(model.id).unwrap();
-        assert_eq!(db.count().unwrap(), 0);
+        let tenant = TenantId::default_tenant();
+        db.insert(&model, &tenant).unwrap();
+        assert_eq!(db.count(&tenant).unwrap(), 1);
+        db.delete(model.id, &tenant).unwrap();
+        assert_eq!(db.count(&tenant).unwrap(), 0);
     }
 
     #[test]
     fn get_not_found() {
         let db = ModelDatabase::open_memory().unwrap();
-        let result = db.get(Uuid::new_v4());
+        let tenant = TenantId::default_tenant();
+        let result = db.get(Uuid::new_v4(), &tenant);
         assert!(matches!(result, Err(SynapseError::ModelNotFound(_))));
     }
 
     #[test]
     fn delete_not_found() {
         let db = ModelDatabase::open_memory().unwrap();
-        let result = db.delete(Uuid::new_v4());
+        let tenant = TenantId::default_tenant();
+        let result = db.delete(Uuid::new_v4(), &tenant);
         assert!(matches!(result, Err(SynapseError::ModelNotFound(_))));
     }
 }

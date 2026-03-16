@@ -2,6 +2,7 @@
 
 use rusqlite::{Connection, params};
 use synapse_types::SynapseError;
+use synapse_types::TenantId;
 use synapse_types::error::Result;
 use synapse_types::experiment::{
     Direction, ExperimentId, ExperimentProgram, ExperimentStatus, TrialId, TrialResult, TrialStatus,
@@ -80,6 +81,17 @@ impl ExperimentStore {
                     ON experiment_trials(experiment_id);",
             )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
+
+        // Add tenant_id column to experiments (idempotent — ignore if already exists)
+        let _ = self.conn.execute_batch(
+            "ALTER TABLE experiments ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';",
+        );
+        self.conn
+            .execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_experiments_tenant ON experiments(tenant_id);",
+            )
+            .map_err(|e| SynapseError::StorageError(e.to_string()))?;
+
         Ok(())
     }
 
@@ -89,15 +101,16 @@ impl ExperimentStore {
         id: ExperimentId,
         name: &str,
         program: &ExperimentProgram,
+        tenant_id: &TenantId,
     ) -> Result<()> {
         let program_json = serde_json::to_string(program)
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
         let now = chrono::Utc::now().to_rfc3339();
         self.conn
             .execute(
-                "INSERT INTO experiments (id, name, program_json, status, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, 'running', ?4, ?5)",
-                params![id.to_string(), name, program_json, now, now],
+                "INSERT INTO experiments (id, name, program_json, status, created_at, updated_at, tenant_id)
+                 VALUES (?1, ?2, ?3, 'running', ?4, ?5, ?6)",
+                params![id.to_string(), name, program_json, now, now, tenant_id.0],
             )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
         Ok(())
@@ -108,6 +121,7 @@ impl ExperimentStore {
         &self,
         id: ExperimentId,
         status: ExperimentStatus,
+        tenant_id: &TenantId,
     ) -> Result<()> {
         let status_str = serde_json::to_string(&status)
             .unwrap()
@@ -116,8 +130,8 @@ impl ExperimentStore {
         let now = chrono::Utc::now().to_rfc3339();
         self.conn
             .execute(
-                "UPDATE experiments SET status = ?1, updated_at = ?2 WHERE id = ?3",
-                params![status_str, now, id.to_string()],
+                "UPDATE experiments SET status = ?1, updated_at = ?2 WHERE id = ?3 AND tenant_id = ?4",
+                params![status_str, now, id.to_string(), tenant_id.0],
             )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
         Ok(())
@@ -129,12 +143,13 @@ impl ExperimentStore {
         experiment_id: ExperimentId,
         trial_id: TrialId,
         score: f64,
+        tenant_id: &TenantId,
     ) -> Result<()> {
         let now = chrono::Utc::now().to_rfc3339();
         self.conn
             .execute(
-                "UPDATE experiments SET best_trial_id = ?1, best_score = ?2, updated_at = ?3 WHERE id = ?4",
-                params![trial_id.to_string(), score, now, experiment_id.to_string()],
+                "UPDATE experiments SET best_trial_id = ?1, best_score = ?2, updated_at = ?3 WHERE id = ?4 AND tenant_id = ?5",
+                params![trial_id.to_string(), score, now, experiment_id.to_string(), tenant_id.0],
             )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
         // Mark the trial as best, unmark previous best
@@ -215,13 +230,17 @@ impl ExperimentStore {
     }
 
     /// Get an experiment by ID, returns (id, name, program, status, best_trial_id, best_score).
-    pub fn get_experiment(&self, id: ExperimentId) -> Result<ExperimentRecord> {
+    pub fn get_experiment(
+        &self,
+        id: ExperimentId,
+        tenant_id: &TenantId,
+    ) -> Result<ExperimentRecord> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, name, program_json, status, best_trial_id, best_score FROM experiments WHERE id = ?1")
+            .prepare("SELECT id, name, program_json, status, best_trial_id, best_score FROM experiments WHERE id = ?1 AND tenant_id = ?2")
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
 
-        stmt.query_row(params![id.to_string()], |row| {
+        stmt.query_row(params![id.to_string(), tenant_id.0], |row| {
             let id_str: String = row.get(0)?;
             let name: String = row.get(1)?;
             let program_json: String = row.get(2)?;
@@ -259,16 +278,16 @@ impl ExperimentStore {
     }
 
     /// List all experiments.
-    pub fn list_experiments(&self) -> Result<Vec<ExperimentSummary>> {
+    pub fn list_experiments(&self, tenant_id: &TenantId) -> Result<Vec<ExperimentSummary>> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, name, status, best_score FROM experiments ORDER BY created_at DESC",
+                "SELECT id, name, status, best_score FROM experiments WHERE tenant_id = ?1 ORDER BY created_at DESC",
             )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
 
         let results = stmt
-            .query_map([], |row| {
+            .query_map(params![tenant_id.0], |row| {
                 let id_str: String = row.get(0)?;
                 let name: String = row.get(1)?;
                 let status_str: String = row.get(2)?;
@@ -300,7 +319,14 @@ impl ExperimentStore {
     }
 
     /// Get all trials for an experiment.
-    pub fn get_trials(&self, experiment_id: ExperimentId) -> Result<Vec<TrialResult>> {
+    pub fn get_trials(
+        &self,
+        experiment_id: ExperimentId,
+        tenant_id: &TenantId,
+    ) -> Result<Vec<TrialResult>> {
+        // Verify the experiment belongs to this tenant
+        let _ = self.get_experiment(experiment_id, tenant_id)?;
+
         let mut stmt = self
             .conn
             .prepare(
@@ -327,7 +353,11 @@ impl ExperimentStore {
         experiment_id: ExperimentId,
         direction: Direction,
         limit: usize,
+        tenant_id: &TenantId,
     ) -> Result<Vec<TrialResult>> {
+        // Verify the experiment belongs to this tenant
+        let _ = self.get_experiment(experiment_id, tenant_id)?;
+
         let order = match direction {
             Direction::Minimize => "ASC",
             Direction::Maximize => "DESC",
@@ -470,12 +500,15 @@ mod tests {
     #[test]
     fn insert_and_get_experiment() {
         let store = ExperimentStore::open_in_memory().unwrap();
+        let tenant = TenantId::default_tenant();
         let id = Uuid::new_v4();
         let program = sample_program();
-        store.insert_experiment(id, "test", &program).unwrap();
+        store
+            .insert_experiment(id, "test", &program, &tenant)
+            .unwrap();
 
         let (got_id, name, got_program, status, best_trial, best_score) =
-            store.get_experiment(id).unwrap();
+            store.get_experiment(id, &tenant).unwrap();
         assert_eq!(got_id, id);
         assert_eq!(name, "test");
         assert_eq!(got_program.base_model, "llama-8b");
@@ -487,25 +520,27 @@ mod tests {
     #[test]
     fn update_experiment_status() {
         let store = ExperimentStore::open_in_memory().unwrap();
+        let tenant = TenantId::default_tenant();
         let id = Uuid::new_v4();
         store
-            .insert_experiment(id, "test", &sample_program())
+            .insert_experiment(id, "test", &sample_program(), &tenant)
             .unwrap();
 
         store
-            .update_experiment_status(id, ExperimentStatus::Completed)
+            .update_experiment_status(id, ExperimentStatus::Completed, &tenant)
             .unwrap();
 
-        let (_, _, _, status, _, _) = store.get_experiment(id).unwrap();
+        let (_, _, _, status, _, _) = store.get_experiment(id, &tenant).unwrap();
         assert_eq!(status, ExperimentStatus::Completed);
     }
 
     #[test]
     fn insert_and_get_trials() {
         let store = ExperimentStore::open_in_memory().unwrap();
+        let tenant = TenantId::default_tenant();
         let exp_id = Uuid::new_v4();
         store
-            .insert_experiment(exp_id, "test", &sample_program())
+            .insert_experiment(exp_id, "test", &sample_program(), &tenant)
             .unwrap();
 
         let trial1 = sample_trial(exp_id, 1);
@@ -513,7 +548,7 @@ mod tests {
         store.insert_trial(&trial1).unwrap();
         store.insert_trial(&trial2).unwrap();
 
-        let trials = store.get_trials(exp_id).unwrap();
+        let trials = store.get_trials(exp_id, &tenant).unwrap();
         assert_eq!(trials.len(), 2);
         assert_eq!(trials[0].trial_number, 1);
         assert_eq!(trials[1].trial_number, 2);
@@ -522,45 +557,48 @@ mod tests {
     #[test]
     fn update_best_trial() {
         let store = ExperimentStore::open_in_memory().unwrap();
+        let tenant = TenantId::default_tenant();
         let exp_id = Uuid::new_v4();
         store
-            .insert_experiment(exp_id, "test", &sample_program())
+            .insert_experiment(exp_id, "test", &sample_program(), &tenant)
             .unwrap();
 
         let trial = sample_trial(exp_id, 1);
         store.insert_trial(&trial).unwrap();
         store
-            .update_best_trial(exp_id, trial.trial_id, 5.23)
+            .update_best_trial(exp_id, trial.trial_id, 5.23, &tenant)
             .unwrap();
 
-        let (_, _, _, _, best_id, best_score) = store.get_experiment(exp_id).unwrap();
+        let (_, _, _, _, best_id, best_score) = store.get_experiment(exp_id, &tenant).unwrap();
         assert_eq!(best_id, Some(trial.trial_id));
         assert_eq!(best_score, Some(5.23));
 
-        let trials = store.get_trials(exp_id).unwrap();
+        let trials = store.get_trials(exp_id, &tenant).unwrap();
         assert!(trials[0].is_best);
     }
 
     #[test]
     fn list_experiments() {
         let store = ExperimentStore::open_in_memory().unwrap();
+        let tenant = TenantId::default_tenant();
         store
-            .insert_experiment(Uuid::new_v4(), "exp-1", &sample_program())
+            .insert_experiment(Uuid::new_v4(), "exp-1", &sample_program(), &tenant)
             .unwrap();
         store
-            .insert_experiment(Uuid::new_v4(), "exp-2", &sample_program())
+            .insert_experiment(Uuid::new_v4(), "exp-2", &sample_program(), &tenant)
             .unwrap();
 
-        let list = store.list_experiments().unwrap();
+        let list = store.list_experiments(&tenant).unwrap();
         assert_eq!(list.len(), 2);
     }
 
     #[test]
     fn leaderboard_ordering() {
         let store = ExperimentStore::open_in_memory().unwrap();
+        let tenant = TenantId::default_tenant();
         let exp_id = Uuid::new_v4();
         store
-            .insert_experiment(exp_id, "test", &sample_program())
+            .insert_experiment(exp_id, "test", &sample_program(), &tenant)
             .unwrap();
 
         let mut t1 = sample_trial(exp_id, 1);
@@ -573,17 +611,17 @@ mod tests {
         store.insert_trial(&t2).unwrap();
         store.insert_trial(&t3).unwrap();
 
-        // Minimize → lowest first
+        // Minimize -> lowest first
         let lb = store
-            .get_leaderboard(exp_id, Direction::Minimize, 10)
+            .get_leaderboard(exp_id, Direction::Minimize, 10, &tenant)
             .unwrap();
         assert_eq!(lb.len(), 3);
         assert_eq!(lb[0].eval_score, Some(5.0));
         assert_eq!(lb[1].eval_score, Some(8.0));
 
-        // Maximize → highest first
+        // Maximize -> highest first
         let lb = store
-            .get_leaderboard(exp_id, Direction::Maximize, 2)
+            .get_leaderboard(exp_id, Direction::Maximize, 2, &tenant)
             .unwrap();
         assert_eq!(lb.len(), 2);
         assert_eq!(lb[0].eval_score, Some(10.0));
@@ -592,9 +630,10 @@ mod tests {
     #[test]
     fn update_trial() {
         let store = ExperimentStore::open_in_memory().unwrap();
+        let tenant = TenantId::default_tenant();
         let exp_id = Uuid::new_v4();
         store
-            .insert_experiment(exp_id, "test", &sample_program())
+            .insert_experiment(exp_id, "test", &sample_program(), &tenant)
             .unwrap();
 
         let mut trial = sample_trial(exp_id, 1);
@@ -606,7 +645,7 @@ mod tests {
         trial.eval_score = Some(3.25);
         store.update_trial(&trial).unwrap();
 
-        let trials = store.get_trials(exp_id).unwrap();
+        let trials = store.get_trials(exp_id, &tenant).unwrap();
         assert_eq!(trials[0].status, TrialStatus::Completed);
         assert_eq!(trials[0].eval_score, Some(3.25));
     }

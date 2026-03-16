@@ -6,6 +6,8 @@ use axum::response::Json;
 use serde::{Deserialize, Serialize};
 use synapse_types::experiment::{ExperimentId, ExperimentProgram, ExperimentStatus, TrialResult};
 
+use synapse_types::TenantId;
+
 use crate::state::AppState;
 
 /// Response for an experiment.
@@ -110,8 +112,9 @@ pub async fn list_experiments(
     ))?;
 
     let s = store.lock().await;
+    let tenant = TenantId::default_tenant();
     let experiments = s
-        .list_experiments()
+        .list_experiments(&tenant)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(
@@ -138,12 +141,13 @@ pub async fn get_experiment(
     ))?;
 
     let s = store.lock().await;
+    let tenant = TenantId::default_tenant();
     let (exp_id, name, _, status, _, best_score) = s
-        .get_experiment(id)
+        .get_experiment(id, &tenant)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
     let trials = s
-        .get_trials(id)
+        .get_trials(id, &tenant)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(ExperimentResponse {
@@ -166,13 +170,14 @@ pub async fn get_leaderboard(
     ))?;
 
     let s = store.lock().await;
+    let tenant = TenantId::default_tenant();
     let (_, _, program, _, _, _) = s
-        .get_experiment(id)
+        .get_experiment(id, &tenant)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
     let direction = program.objective.direction;
     let trials = s
-        .get_leaderboard(id, direction, 50)
+        .get_leaderboard(id, direction, 50, &tenant)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(trials.iter().map(trial_to_response).collect()))
@@ -194,7 +199,8 @@ pub async fn stop_experiment(
     // Also mark in the store
     if let Some(store) = &state.experiment_store {
         let s = store.lock().await;
-        let _ = s.update_experiment_status(id, ExperimentStatus::Stopped);
+        let tenant = TenantId::default_tenant();
+        let _ = s.update_experiment_status(id, ExperimentStatus::Stopped, &tenant);
     }
 
     Ok(Json(

@@ -11,6 +11,7 @@ thiserror = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 prost = { workspace = true }
+tonic = { workspace = true }
 
 [build-dependencies]
 tonic-build = { workspace = true }

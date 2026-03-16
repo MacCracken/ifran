@@ -58,7 +58,8 @@ pub async fn run(program_path: &str) -> Result<()> {
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(10)).await;
         let s = store.lock().await;
-        match s.get_experiment(handle.experiment_id) {
+        let tenant = synapse_types::TenantId::default_tenant();
+        match s.get_experiment(handle.experiment_id, &tenant) {
             Ok((_, _, _, status, _, best_score)) => {
                 use synapse_types::experiment::ExperimentStatus;
                 match status {
@@ -105,7 +106,8 @@ pub async fn list() -> Result<()> {
     }
 
     let store = ExperimentStore::open(&store_path)?;
-    let experiments = store.list_experiments()?;
+    let tenant = synapse_types::TenantId::default_tenant();
+    let experiments = store.list_experiments(&tenant)?;
 
     if experiments.is_empty() {
         eprintln!("No experiments found.");
@@ -138,14 +140,15 @@ pub async fn status(id: Option<&str>) -> Result<()> {
     }
 
     let store = ExperimentStore::open(&store_path)?;
+    let tenant = synapse_types::TenantId::default_tenant();
 
     if let Some(id_str) = id {
         let experiment_id: ExperimentId = uuid::Uuid::parse_str(id_str)
             .map_err(|e| synapse_types::SynapseError::ConfigError(format!("Invalid UUID: {e}")))?;
 
         let (_, name, program, exp_status, _best_trial, best_score) =
-            store.get_experiment(experiment_id)?;
-        let trials = store.get_trials(experiment_id)?;
+            store.get_experiment(experiment_id, &tenant)?;
+        let trials = store.get_trials(experiment_id, &tenant)?;
 
         eprintln!("Experiment: {name}");
         eprintln!("ID: {experiment_id}");
@@ -184,7 +187,7 @@ pub async fn status(id: Option<&str>) -> Result<()> {
         }
     } else {
         // Show latest experiment
-        let experiments = store.list_experiments()?;
+        let experiments = store.list_experiments(&tenant)?;
         if experiments.is_empty() {
             eprintln!("No experiments found.");
         } else {
@@ -213,9 +216,10 @@ pub async fn leaderboard(id: &str, limit: usize) -> Result<()> {
     let experiment_id: ExperimentId = uuid::Uuid::parse_str(id)
         .map_err(|e| synapse_types::SynapseError::ConfigError(format!("Invalid UUID: {e}")))?;
 
-    let (_, name, program, _, _, _) = store.get_experiment(experiment_id)?;
+    let tenant = synapse_types::TenantId::default_tenant();
+    let (_, name, program, _, _, _) = store.get_experiment(experiment_id, &tenant)?;
     let direction = program.objective.direction;
-    let trials = store.get_leaderboard(experiment_id, direction, limit)?;
+    let trials = store.get_leaderboard(experiment_id, direction, limit, &tenant)?;
 
     eprintln!(
         "Leaderboard: {name} ({:?} {:?})",
@@ -265,7 +269,8 @@ pub async fn stop(id: &str) -> Result<()> {
     let experiment_id: ExperimentId = uuid::Uuid::parse_str(id)
         .map_err(|e| synapse_types::SynapseError::ConfigError(format!("Invalid UUID: {e}")))?;
 
-    store.update_experiment_status(experiment_id, ExperimentStatus::Stopped)?;
+    let tenant = synapse_types::TenantId::default_tenant();
+    store.update_experiment_status(experiment_id, ExperimentStatus::Stopped, &tenant)?;
     eprintln!("Experiment {experiment_id} marked as stopped.");
     eprintln!("Note: Running trials will complete before the experiment fully stops.");
 

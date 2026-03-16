@@ -23,8 +23,10 @@ pub async fn execute(model: &str, quant: Option<&str>) -> Result<()> {
 
     let db = ModelDatabase::open(&config.storage.database)?;
 
+    let tenant = synapse_types::TenantId::default_tenant();
+
     // Check if already pulled
-    if let Ok(existing) = db.get_by_name(model) {
+    if let Ok(existing) = db.get_by_name(model, &tenant) {
         eprintln!(
             "Model '{}' already exists (id: {})",
             existing.name, existing.id
@@ -122,7 +124,7 @@ pub async fn execute(model: &str, quant: Option<&str>) -> Result<()> {
         pulled_at: chrono::Utc::now(),
     };
 
-    db.insert(&model_info)?;
+    db.insert(&model_info, &tenant)?;
     eprintln!("Model registered: {} ({})", model_info.name, model_info.id);
 
     Ok(())

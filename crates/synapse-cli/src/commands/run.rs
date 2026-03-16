@@ -14,10 +14,11 @@ pub async fn execute(model: &str) -> Result<()> {
     let config = SynapseConfig::discover();
     let db = ModelDatabase::open(&config.storage.database)?;
 
-    let model_info = db.get_by_name(model).or_else(|_| {
+    let tenant = synapse_types::TenantId::default_tenant();
+    let model_info = db.get_by_name(model, &tenant).or_else(|_| {
         uuid::Uuid::parse_str(model)
             .map_err(|_| SynapseError::ModelNotFound(model.to_string()))
-            .and_then(|id| db.get(id))
+            .and_then(|id| db.get(id, &tenant))
     })?;
 
     let manifest = ModelManifest {

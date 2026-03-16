@@ -2148,11 +2148,16 @@ dependencies = [
  "prost",
  "serde",
  "serde_json",
+ "synapse-backends",
+ "synapse-core",
+ "synapse-train",
  "synapse-types",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tonic",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2233,6 +2238,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tonic",
  "tonic-build",
  "uuid",
 ]

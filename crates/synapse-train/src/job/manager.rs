@@ -2,19 +2,21 @@
 
 use crate::executor::{ExecutorKind, TrainingExecutor};
 use crate::job::status::JobState;
+use crate::job::store::JobStore;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use synapse_types::SynapseError;
 use synapse_types::error::Result;
 use synapse_types::training::{TrainingJobConfig, TrainingJobId, TrainingStatus};
 use tokio::sync::RwLock;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Manages all training jobs.
 pub struct JobManager {
     jobs: Arc<RwLock<HashMap<TrainingJobId, JobState>>>,
     executor: Arc<dyn TrainingExecutor>,
     max_concurrent: usize,
+    store: Option<Arc<Mutex<JobStore>>>,
 }
 
 impl JobManager {
@@ -23,20 +25,92 @@ impl JobManager {
         trainer_image: Option<String>,
         max_concurrent: usize,
     ) -> Self {
-        let executor: Arc<dyn TrainingExecutor> = match executor_kind {
+        let executor = Self::make_executor(executor_kind, trainer_image);
+
+        Self {
+            jobs: Arc::new(RwLock::new(HashMap::new())),
+            executor,
+            max_concurrent,
+            store: None,
+        }
+    }
+
+    /// Create a JobManager backed by a persistent SQLite store.
+    pub fn new_with_store(
+        executor_kind: ExecutorKind,
+        trainer_image: Option<String>,
+        max_concurrent: usize,
+        store: JobStore,
+    ) -> Self {
+        let executor = Self::make_executor(executor_kind, trainer_image);
+
+        Self {
+            jobs: Arc::new(RwLock::new(HashMap::new())),
+            executor,
+            max_concurrent,
+            store: Some(Arc::new(Mutex::new(store))),
+        }
+    }
+
+    fn make_executor(
+        executor_kind: ExecutorKind,
+        trainer_image: Option<String>,
+    ) -> Arc<dyn TrainingExecutor> {
+        match executor_kind {
             ExecutorKind::Docker => Arc::new(crate::executor::docker::DockerExecutor::new(
                 trainer_image.unwrap_or_else(|| "ghcr.io/maccracken/synapse-trainer:latest".into()),
             )),
             ExecutorKind::Subprocess => {
                 Arc::new(crate::executor::subprocess::SubprocessExecutor::new())
             }
+        }
+    }
+
+    /// Persist a job to the store, if one is configured. Logs warnings on failure.
+    fn persist(&self, job: &JobState) {
+        if let Some(store) = &self.store {
+            if let Ok(store) = store.lock() {
+                if let Err(e) = store.save_job(job) {
+                    warn!(job_id = %job.id, error = %e, "Failed to persist job state");
+                }
+            }
+        }
+    }
+
+    /// Recover non-terminal jobs from the store after a process restart.
+    /// Jobs that were Running or Preparing are marked as Failed since the
+    /// process crashed while they were in-flight.
+    pub async fn recover(&self) -> Result<usize> {
+        let store = match &self.store {
+            Some(s) => s,
+            None => return Ok(0),
         };
 
-        Self {
-            jobs: Arc::new(RwLock::new(HashMap::new())),
-            executor,
-            max_concurrent,
+        let mut recovered = {
+            let store = store.lock().map_err(|e| {
+                SynapseError::StorageError(format!("Failed to lock job store: {e}"))
+            })?;
+            store.recover_jobs()?
+        };
+
+        let mut count = 0;
+        let mut jobs = self.jobs.write().await;
+
+        for job in &mut recovered {
+            if job.status == TrainingStatus::Running || job.status == TrainingStatus::Preparing {
+                job.fail("Process crashed \u{2014} job interrupted".into());
+                self.persist(job);
+            }
+            info!(job_id = %job.id, status = ?job.status, "Recovered job from store");
+            jobs.insert(job.id, job.clone());
+            count += 1;
         }
+
+        if count > 0 {
+            info!(count, "Recovered jobs from persistent store");
+        }
+
+        Ok(count)
     }
 
     /// Create and enqueue a new training job.
@@ -46,6 +120,7 @@ impl JobManager {
         let total_steps = estimate_total_steps(&config);
         let state = JobState::new(id, config, total_steps);
 
+        self.persist(&state);
         info!(job_id = %id, "Created training job");
         self.jobs.write().await.insert(id, state);
         Ok(id)
@@ -80,10 +155,12 @@ impl JobManager {
         }
 
         state.start();
+        self.persist(state);
 
         let config = state.config.clone();
         let jobs_ref = self.jobs.clone();
         let executor = self.executor.clone();
+        let store = self.store.clone();
 
         // Spawn the training in background
         tokio::spawn(async move {
@@ -93,6 +170,14 @@ impl JobManager {
                 match result {
                     Ok(()) => state.complete(),
                     Err(e) => state.fail(e.to_string()),
+                }
+                // Persist terminal state
+                if let Some(store) = &store {
+                    if let Ok(store) = store.lock() {
+                        if let Err(e) = store.save_job(state) {
+                            warn!(job_id = %id, error = %e, "Failed to persist job completion");
+                        }
+                    }
                 }
             }
         });
@@ -127,6 +212,7 @@ impl JobManager {
             // Re-check: job may have completed between lock release and reacquire
             if !state.is_terminal() {
                 state.cancel();
+                self.persist(state);
             }
         }
         info!(job_id = %id, "Cancelled training job");
@@ -167,6 +253,7 @@ impl JobManager {
         let mut jobs = self.jobs.write().await;
         if let Some(state) = jobs.get_mut(&id) {
             state.update_progress(step, epoch, loss);
+            self.persist(state);
         }
     }
 

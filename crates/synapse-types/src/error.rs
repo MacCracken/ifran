@@ -47,6 +47,12 @@ pub enum SynapseError {
     #[error("RAG pipeline error: {0}")]
     RagError(String),
 
+    #[error("Tenant not found: {0}")]
+    TenantNotFound(String),
+
+    #[error("Unauthorized: {0}")]
+    Unauthorized(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -127,6 +133,8 @@ mod tests {
             SynapseError::MarketplaceError("x".into()),
             SynapseError::DistributedError("x".into()),
             SynapseError::RagError("x".into()),
+            SynapseError::TenantNotFound("x".into()),
+            SynapseError::Unauthorized("x".into()),
             SynapseError::Other("x".into()),
         ];
         for e in errors {
@@ -198,6 +206,18 @@ mod tests {
     fn error_display_rag() {
         let e = SynapseError::RagError("embedding failed".into());
         assert_eq!(e.to_string(), "RAG pipeline error: embedding failed");
+    }
+
+    #[test]
+    fn error_display_tenant_not_found() {
+        let e = SynapseError::TenantNotFound("acme".into());
+        assert_eq!(e.to_string(), "Tenant not found: acme");
+    }
+
+    #[test]
+    fn error_display_unauthorized() {
+        let e = SynapseError::Unauthorized("bad token".into());
+        assert_eq!(e.to_string(), "Unauthorized: bad token");
     }
 
     #[test]

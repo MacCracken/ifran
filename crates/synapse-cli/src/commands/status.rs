@@ -14,7 +14,8 @@ pub async fn execute() -> Result<()> {
 
     // Models in catalog
     let db = ModelDatabase::open(&config.storage.database)?;
-    let models = db.list()?;
+    let tenant = synapse_types::TenantId::default_tenant();
+    let models = db.list(&tenant)?;
     eprintln!("Models: {} in catalog", models.len());
 
     // Note: full training job status requires a persistent job store,

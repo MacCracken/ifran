@@ -101,7 +101,10 @@ mod tests {
             embedding_model: "mock".into(),
             similarity_top_k: 3,
         };
-        store.create_pipeline(pipeline_id, &config).unwrap();
+        let tenant = synapse_types::TenantId::default_tenant();
+        store
+            .create_pipeline(pipeline_id, &config, &tenant)
+            .unwrap();
         (store, pipeline_id, config)
     }
 

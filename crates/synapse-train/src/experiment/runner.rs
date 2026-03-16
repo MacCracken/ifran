@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use synapse_core::experiment::store::ExperimentStore;
+use synapse_types::TenantId;
 use synapse_types::error::Result;
 use synapse_types::experiment::{
     ExperimentId, ExperimentProgram, ExperimentStatus, TrialResult, TrialStatus,
@@ -65,7 +66,8 @@ impl ExperimentRunner {
         // Register experiment
         {
             let s = store.lock().await;
-            s.insert_experiment(experiment_id, &program.name, &program)?;
+            let tenant = TenantId::default_tenant();
+            s.insert_experiment(experiment_id, &program.name, &program, &tenant)?;
         }
 
         let (runner, stop_tx) = Self::new(job_manager, store.clone());
@@ -81,7 +83,9 @@ impl ExperimentRunner {
             if let Err(e) = runner.run_loop(experiment_id, &prog).await {
                 warn!(experiment_id = %experiment_id, error = %e, "Experiment failed");
                 let s = store_for_error.lock().await;
-                let _ = s.update_experiment_status(experiment_id, ExperimentStatus::Failed);
+                let tenant = TenantId::default_tenant();
+                let _ =
+                    s.update_experiment_status(experiment_id, ExperimentStatus::Failed, &tenant);
             }
         });
 
@@ -93,6 +97,7 @@ impl ExperimentRunner {
         experiment_id: ExperimentId,
         program: &ExperimentProgram,
     ) -> Result<()> {
+        let tenant = TenantId::default_tenant();
         info!(experiment_id = %experiment_id, name = %program.name, "Starting experiment");
 
         // Generate trial hyperparams
@@ -127,7 +132,7 @@ impl ExperimentRunner {
             if *self.stop_rx.borrow() {
                 info!(experiment_id = %experiment_id, "Stop signal received");
                 let s = self.store.lock().await;
-                s.update_experiment_status(experiment_id, ExperimentStatus::Stopped)?;
+                s.update_experiment_status(experiment_id, ExperimentStatus::Stopped, &tenant)?;
                 return Ok(());
             }
 
@@ -219,7 +224,7 @@ impl ExperimentRunner {
                         );
 
                         let s = self.store.lock().await;
-                        s.update_best_trial(experiment_id, trial_id, score)?;
+                        s.update_best_trial(experiment_id, trial_id, score, &tenant)?;
                     }
                 }
                 Err(e) => {
@@ -244,7 +249,7 @@ impl ExperimentRunner {
         // Mark experiment completed
         {
             let s = self.store.lock().await;
-            s.update_experiment_status(experiment_id, ExperimentStatus::Completed)?;
+            s.update_experiment_status(experiment_id, ExperimentStatus::Completed, &tenant)?;
         }
 
         if let (Some(id), Some(score)) = (best_trial_id, best_score) {
