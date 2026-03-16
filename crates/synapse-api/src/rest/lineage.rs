@@ -26,6 +26,14 @@ fn default_metadata() -> serde_json::Value {
 #[derive(Deserialize)]
 pub struct ListQuery {
     pub stage: Option<PipelineStage>,
+    #[serde(default = "default_limit")]
+    pub limit: u32,
+    #[serde(default)]
+    pub offset: u32,
+}
+
+fn default_limit() -> u32 {
+    100
 }
 
 /// POST /lineage — record a new lineage node.
@@ -50,9 +58,13 @@ pub async fn record_node(
     };
 
     let store = store.lock().await;
-    store
-        .record(&node, &tenant_id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    store.record(&node, &tenant_id).map_err(|e| {
+        tracing::error!(error = %e, "internal error");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error".into(),
+        )
+    })?;
 
     Ok((
         StatusCode::CREATED,
@@ -76,9 +88,16 @@ pub async fn list_nodes(
     ))?;
 
     let store = store.lock().await;
+    let safe_limit = query.limit.min(1000);
     let nodes = store
-        .list(&tenant_id, query.stage)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .list(&tenant_id, query.stage, safe_limit, query.offset)
+        .map_err(|e| {
+            tracing::error!(error = %e, "internal error");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error".into(),
+            )
+        })?;
 
     Ok(Json(nodes.iter().map(node_to_json).collect()))
 }
@@ -97,7 +116,7 @@ pub async fn get_node(
     let store = store.lock().await;
     let node = store
         .get(id, &tenant_id)
-        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+        .map_err(|_| (StatusCode::NOT_FOUND, "Not found".into()))?;
 
     Ok(Json(node_to_json(&node)))
 }
@@ -114,9 +133,13 @@ pub async fn get_ancestry(
     ))?;
 
     let store = store.lock().await;
-    let nodes = store
-        .get_ancestry(id, &tenant_id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let nodes = store.get_ancestry(id, &tenant_id).map_err(|e| {
+        tracing::error!(error = %e, "internal error");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error".into(),
+        )
+    })?;
 
     Ok(Json(nodes.iter().map(node_to_json).collect()))
 }

@@ -22,6 +22,14 @@ pub struct CreateVersionRequest {
 #[derive(Deserialize)]
 pub struct FamilyQuery {
     pub family: Option<String>,
+    #[serde(default = "default_limit")]
+    pub limit: u32,
+    #[serde(default)]
+    pub offset: u32,
+}
+
+fn default_limit() -> u32 {
+    100
 }
 
 /// POST /versions -- create a new model version.
@@ -48,9 +56,13 @@ pub async fn create_version(
     };
 
     let store = store.lock().await;
-    store
-        .create(&version, &tenant_id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    store.create(&version, &tenant_id).map_err(|e| {
+        tracing::error!(error = %e, "internal error");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error".into(),
+        )
+    })?;
 
     Ok((
         StatusCode::CREATED,
@@ -74,11 +86,18 @@ pub async fn list_versions(
     ))?;
 
     let store = store.lock().await;
+    let safe_limit = query.limit.min(1000);
     let versions = match query.family {
-        Some(ref f) => store.list_by_family(f, &tenant_id),
-        None => store.list(&tenant_id),
+        Some(ref f) => store.list_by_family(f, &tenant_id, safe_limit, query.offset),
+        None => store.list(&tenant_id, safe_limit, query.offset),
     }
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    .map_err(|e| {
+        tracing::error!(error = %e, "internal error");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error".into(),
+        )
+    })?;
 
     Ok(Json(versions.iter().map(version_to_json).collect()))
 }
@@ -97,7 +116,7 @@ pub async fn get_version(
     let store = store.lock().await;
     let version = store
         .get(id, &tenant_id)
-        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+        .map_err(|_| (StatusCode::NOT_FOUND, "Not found".into()))?;
 
     Ok(Json(version_to_json(&version)))
 }
@@ -114,9 +133,13 @@ pub async fn get_lineage(
     ))?;
 
     let store = store.lock().await;
-    let chain = store
-        .get_lineage(id, &tenant_id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let chain = store.get_lineage(id, &tenant_id).map_err(|e| {
+        tracing::error!(error = %e, "internal error");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error".into(),
+        )
+    })?;
 
     Ok(Json(chain.iter().map(version_to_json).collect()))
 }

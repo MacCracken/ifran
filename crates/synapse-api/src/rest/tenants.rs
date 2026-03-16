@@ -40,9 +40,13 @@ pub async fn create_tenant(
     ))?;
 
     let store = store.lock().await;
-    let (record, raw_key) = store
-        .create_tenant(&req.name)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let (record, raw_key) = store.create_tenant(&req.name).map_err(|e| {
+        tracing::error!(error = %e, "internal error");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error".into(),
+        )
+    })?;
 
     Ok((
         StatusCode::CREATED,
@@ -68,9 +72,13 @@ pub async fn list_tenants(
     ))?;
 
     let store = store.lock().await;
-    let tenants = store
-        .list_tenants()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let tenants = store.list_tenants().map_err(|e| {
+        tracing::error!(error = %e, "internal error");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error".into(),
+        )
+    })?;
 
     Ok(Json(
         tenants
@@ -99,7 +107,7 @@ pub async fn disable_tenant(
     let store = store.lock().await;
     store
         .disable_tenant(&tenant_id)
-        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+        .map_err(|_| (StatusCode::NOT_FOUND, "Not found".into()))?;
 
     Ok(StatusCode::NO_CONTENT)
 }

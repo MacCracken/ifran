@@ -186,16 +186,18 @@ impl LineageStore {
         &self,
         tenant_id: &TenantId,
         stage: Option<PipelineStage>,
+        limit: u32,
+        offset: u32,
     ) -> Result<Vec<LineageNode>> {
         let (sql, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match stage {
             Some(s) => (
-                "SELECT id FROM lineage_nodes WHERE tenant_id = ?1 AND stage = ?2 ORDER BY created_at DESC".into(),
-                vec![Box::new(tenant_id.0.clone()), Box::new(s.to_string())],
+                "SELECT id FROM lineage_nodes WHERE tenant_id = ?1 AND stage = ?2 ORDER BY created_at DESC LIMIT ?3 OFFSET ?4".into(),
+                vec![Box::new(tenant_id.0.clone()), Box::new(s.to_string()), Box::new(limit), Box::new(offset)],
             ),
             None => (
-                "SELECT id FROM lineage_nodes WHERE tenant_id = ?1 ORDER BY created_at DESC"
+                "SELECT id FROM lineage_nodes WHERE tenant_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3"
                     .into(),
-                vec![Box::new(tenant_id.0.clone())],
+                vec![Box::new(tenant_id.0.clone()), Box::new(limit), Box::new(offset)],
             ),
         };
 
@@ -351,10 +353,12 @@ mod tests {
             .record(&make_node(PipelineStage::Dataset, "d2", "d2", vec![]), &t)
             .unwrap();
 
-        let datasets = store.list(&t, Some(PipelineStage::Dataset)).unwrap();
+        let datasets = store
+            .list(&t, Some(PipelineStage::Dataset), 100, 0)
+            .unwrap();
         assert_eq!(datasets.len(), 2);
 
-        let all = store.list(&t, None).unwrap();
+        let all = store.list(&t, None, 100, 0).unwrap();
         assert_eq!(all.len(), 3);
     }
 
@@ -390,8 +394,8 @@ mod tests {
             .record(&make_node(PipelineStage::Dataset, "d2", "d2", vec![]), &t2)
             .unwrap();
 
-        assert_eq!(store.list(&t1, None).unwrap().len(), 1);
-        assert_eq!(store.list(&t2, None).unwrap().len(), 1);
+        assert_eq!(store.list(&t1, None, 100, 0).unwrap().len(), 1);
+        assert_eq!(store.list(&t2, None, 100, 0).unwrap().len(), 1);
     }
 
     #[test]

@@ -4,21 +4,19 @@
 
 ### Test Coverage
 
-Current: **958 tests** across 7 crates. CI threshold: 65%.
-
-#### Coverage by Crate
-
-| Crate | Tests | Status |
-|---|---|---|
-| synapse-types | 136 | Serde roundtrips, error Display, all enums, experiment types, RAG types, RLHF types, tenant types, property-based tests (proptest), invalid JSON rejection |
-| synapse-core | 207 | Registry, storage, lifecycle, eval, marketplace, pull, experiment store, RAG store/chunker/pipeline, RLHF store/generator, tenant store, concurrent RwLock tests |
-| synapse-backends | 61 | Router, all backends with mock HTTP, load/infer/unload, wasm backend, concurrent DashMap tests |
-| synapse-train | 138 | Job scheduling, training methods, distributed, executors, experiment search/runner, concurrent access, error path validation |
-| synapse-api | 131+ | Integration tests, middleware, state, system, models, inference, openai, training, distributed, marketplace, experiment, RAG, RLHF, eval, bridge, tenants, error paths |
-| synapse-bridge | 36 | Protocol, discovery, client/server, state transitions |
-| synapse-cli | 25+ | Clap arg parsing, output formatting helpers |
+Current: **1,043 tests** across 7 crates. CI threshold: 65%.
 
 ---
+
+## Engineering Backlog
+
+Hardening and operational improvements identified during security audit.
+
+- [ ] **Per-IP rate limiting** — current rate limiter is global (`NotKeyed`); replace with per-IP keyed limiter using `DashMap`-backed state to prevent one client starving others
+- [ ] **Job memory eviction** — `JobManager` keeps all jobs (including terminal) in memory forever; add TTL-based eviction for completed/failed/cancelled jobs (e.g., 24h retention)
+- [ ] **Disabled tenant in-flight cancellation** — when a tenant is disabled, cancel their running training jobs; currently in-flight jobs run to completion
+- [ ] **Tenant-scope distributed coordinator** — `DistributedCoordinator` and `EvalRunner` are not yet tenant-filtered; add `tenant_id` field and filtering (marked with TODO in handlers)
+- [ ] **Lineage ancestry depth limit** — `get_ancestry()` traverses the full graph unboundedly; add configurable max depth (e.g., 10,000 nodes) to prevent OOM on deep/wide DAGs
 
 ## Post-v1 Considerations
 

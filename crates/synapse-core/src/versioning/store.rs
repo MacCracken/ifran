@@ -97,19 +97,25 @@ impl VersionStore {
     }
 
     /// List versions for a model family.
-    pub fn list_by_family(&self, family: &str, tenant_id: &TenantId) -> Result<Vec<ModelVersion>> {
+    pub fn list_by_family(
+        &self,
+        family: &str,
+        tenant_id: &TenantId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<ModelVersion>> {
         let mut stmt = self
             .conn
             .prepare(
                 "SELECT id, model_family, version_tag, model_id, training_job_id,
              parent_version_id, consumer, notes, created_at
              FROM model_versions WHERE model_family = ?1 AND tenant_id = ?2
-             ORDER BY created_at DESC",
+             ORDER BY created_at DESC LIMIT ?3 OFFSET ?4",
             )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
 
         let versions = stmt
-            .query_map(params![family, tenant_id.0], row_to_version)
+            .query_map(params![family, tenant_id.0, limit, offset], row_to_version)
             .map_err(|e| SynapseError::StorageError(e.to_string()))?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
@@ -117,19 +123,19 @@ impl VersionStore {
     }
 
     /// List all versions for a tenant.
-    pub fn list(&self, tenant_id: &TenantId) -> Result<Vec<ModelVersion>> {
+    pub fn list(&self, tenant_id: &TenantId, limit: u32, offset: u32) -> Result<Vec<ModelVersion>> {
         let mut stmt = self
             .conn
             .prepare(
                 "SELECT id, model_family, version_tag, model_id, training_job_id,
              parent_version_id, consumer, notes, created_at
              FROM model_versions WHERE tenant_id = ?1
-             ORDER BY created_at DESC",
+             ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
             )
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
 
         let versions = stmt
-            .query_map(params![tenant_id.0], row_to_version)
+            .query_map(params![tenant_id.0, limit, offset], row_to_version)
             .map_err(|e| SynapseError::StorageError(e.to_string()))?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|e| SynapseError::StorageError(e.to_string()))?;
@@ -239,7 +245,7 @@ mod tests {
             .create(&make_version("mistral-7b", "v1"), &t())
             .unwrap();
 
-        let llama = store.list_by_family("llama-8b", &t()).unwrap();
+        let llama = store.list_by_family("llama-8b", &t(), 100, 0).unwrap();
         assert_eq!(llama.len(), 2);
     }
 
@@ -286,8 +292,8 @@ mod tests {
         store.create(&make_version("m", "v1"), &t1).unwrap();
         store.create(&make_version("m", "v1"), &t2).unwrap();
 
-        assert_eq!(store.list(&t1).unwrap().len(), 1);
-        assert_eq!(store.list(&t2).unwrap().len(), 1);
+        assert_eq!(store.list(&t1, 100, 0).unwrap().len(), 1);
+        assert_eq!(store.list(&t2, 100, 0).unwrap().len(), 1);
     }
 
     #[test]
@@ -334,8 +340,8 @@ mod tests {
         store.create(&make_version("m", "v1"), &t2).unwrap();
 
         // list returns only the tenant's data
-        let t1_versions = store.list(&t1).unwrap();
-        let t2_versions = store.list(&t2).unwrap();
+        let t1_versions = store.list(&t1, 100, 0).unwrap();
+        let t2_versions = store.list(&t2, 100, 0).unwrap();
         assert_eq!(t1_versions.len(), 2);
         assert_eq!(t2_versions.len(), 1);
     }

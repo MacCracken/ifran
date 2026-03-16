@@ -62,7 +62,7 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - `synapse-core/registry/direct`: Direct URL downloader — HEAD-based `resolve()` for content length, type, range support, filename extraction
 - `synapse-core/storage/cache`: LRU model cache — size-based eviction, touch/insert/remove with ordered tracking
 - `synapse-core/lifecycle/pool`: Hot model pool — async slot management with `put`, `get`, `hot_swap` (atomic replace), concurrent access
-- 958 tests across all crates
+- 1,043 tests across all crates
 
 #### Multi-Tenant Support
 - `synapse-types/tenant`: `TenantId` newtype with `default_tenant()`, `is_default()`, Display, serde support
@@ -77,6 +77,28 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - All REST handlers extract `TenantId` from request extensions and pass to storage layer
 - Disabled tenants are rejected with HTTP 403
 - 788 unit tests across all crates
+
+### Fixed (Security Audit)
+- **SECURITY**: Empty Bearer token bypass — `"Bearer "` (empty token) now correctly rejected instead of matching as empty string
+- **SECURITY**: Bridge client protocol injection — replaced colon-delimited status encoding with JSON for `request_worker_assignment` and `sync_checkpoint` (colons in endpoints/paths no longer break parsing)
+- **SECURITY**: Bridge server prompt injection — added 500KB max prompt length check on `RunInference` and `StreamInference` gRPC RPCs
+- **SECURITY**: Ollama Modelfile path injection — adapter path now quoted in `ADAPTER` directive
+- **SECURITY**: Budget checker URL injection — tenant_id now passed via reqwest `.query()` builder instead of string interpolation
+- **SECURITY**: Marketplace `pull` endpoint now scopes downloaded models to requesting tenant
+- **SECURITY**: Error message sanitization — lineage, versioning, and tenant admin endpoints no longer leak raw database errors to clients
+- `synapse-core/hardware/allocator`: Integer overflow in memory calculation now caught via `checked_mul()`
+- `synapse-core/rag/optimizer`: Thompson Sampling `select()` now samples each arm once then picks max (was re-sampling per comparison)
+- `synapse-backends/cost`: NaN costs no longer panic — `partial_cmp` returns `Equal` for NaN
+- `synapse-core/lineage/store`: UUID parse `.unwrap()` replaced with `.unwrap_or_default()` (prevents panic on corrupt data)
+- `synapse-core/preference/store`: `add_batch()` now wrapped in SQLite transaction for atomicity
+- `synapse-train/job/store`: Schema now includes `tenant_id` column — crash recovery preserves tenant ownership
+- `synapse-train/job/manager`: `start_job()` now verifies tenant ownership before spawning background task
+- `synapse-core/config`: Added `validate()` method — rejects NaN/Inf/negative budget values
+- All SQLite stores: Added `PRAGMA journal_mode=WAL` and `PRAGMA busy_timeout=5000` for concurrent access performance
+- `synapse-core/storage/encryption`: `verify_encryption_requirement()` now wired at startup
+- Pagination added to lineage and versioning list endpoints (default 100, max 1000)
+- `synapse-train/job/manager`: `list_jobs`, `get_job`, `cancel_job` now filter by tenant_id
+- `synapse-core/lifecycle/manager`: `list_loaded` now accepts `Option<&TenantId>` for tenant-scoped filtering
 
 ### Changed
 - Workspace version bumped to 2026.3.15
