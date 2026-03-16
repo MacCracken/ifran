@@ -1,6 +1,6 @@
 //! REST handlers for experiment management.
 
-use axum::extract::{Path, State};
+use axum::extract::{Extension, Path, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use serde::{Deserialize, Serialize};
@@ -65,6 +65,7 @@ fn trial_to_response(t: &TrialResult) -> TrialResponse {
 /// POST /experiments — create and start an experiment from a program JSON.
 pub async fn create_experiment(
     State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
     Json(req): Json<CreateExperimentRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, String)> {
     let store = state.experiment_store.as_ref().ok_or((
@@ -105,6 +106,7 @@ pub async fn create_experiment(
 /// GET /experiments — list all experiments.
 pub async fn list_experiments(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
 ) -> Result<Json<Vec<ExperimentListItem>>, (StatusCode, String)> {
     let store = state.experiment_store.as_ref().ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
@@ -112,9 +114,8 @@ pub async fn list_experiments(
     ))?;
 
     let s = store.lock().await;
-    let tenant = TenantId::default_tenant();
     let experiments = s
-        .list_experiments(&tenant)
+        .list_experiments(&tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(
@@ -133,6 +134,7 @@ pub async fn list_experiments(
 /// GET /experiments/{id} — get experiment detail with trials.
 pub async fn get_experiment(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<ExperimentId>,
 ) -> Result<Json<ExperimentResponse>, (StatusCode, String)> {
     let store = state.experiment_store.as_ref().ok_or((
@@ -141,13 +143,12 @@ pub async fn get_experiment(
     ))?;
 
     let s = store.lock().await;
-    let tenant = TenantId::default_tenant();
     let (exp_id, name, _, status, _, best_score) = s
-        .get_experiment(id, &tenant)
+        .get_experiment(id, &tenant_id)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
     let trials = s
-        .get_trials(id, &tenant)
+        .get_trials(id, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(ExperimentResponse {
@@ -162,6 +163,7 @@ pub async fn get_experiment(
 /// GET /experiments/{id}/leaderboard — trials ranked by objective.
 pub async fn get_leaderboard(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<ExperimentId>,
 ) -> Result<Json<Vec<TrialResponse>>, (StatusCode, String)> {
     let store = state.experiment_store.as_ref().ok_or((
@@ -170,14 +172,13 @@ pub async fn get_leaderboard(
     ))?;
 
     let s = store.lock().await;
-    let tenant = TenantId::default_tenant();
     let (_, _, program, _, _, _) = s
-        .get_experiment(id, &tenant)
+        .get_experiment(id, &tenant_id)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
     let direction = program.objective.direction;
     let trials = s
-        .get_leaderboard(id, direction, 50, &tenant)
+        .get_leaderboard(id, direction, 50, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(trials.iter().map(trial_to_response).collect()))
@@ -186,6 +187,7 @@ pub async fn get_leaderboard(
 /// POST /experiments/{id}/stop — stop a running experiment.
 pub async fn stop_experiment(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<ExperimentId>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     // Try to stop via the in-memory handle first
@@ -199,8 +201,7 @@ pub async fn stop_experiment(
     // Also mark in the store
     if let Some(store) = &state.experiment_store {
         let s = store.lock().await;
-        let tenant = TenantId::default_tenant();
-        let _ = s.update_experiment_status(id, ExperimentStatus::Stopped, &tenant);
+        let _ = s.update_experiment_status(id, ExperimentStatus::Stopped, &tenant_id);
     }
 
     Ok(Json(

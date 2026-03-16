@@ -56,3 +56,6 @@ rate_limit_per_second = 60
 rate_limit_burst = 120
 # CORS: restrict to specific origins in production
 # cors_allowed_origins = ["https://your-domain.com"]
+# Multi-tenant mode: per-tenant API keys and resource isolation
+# Requires SYNAPSE_ADMIN_KEY for tenant management via /admin/tenants
+# multi_tenant = false

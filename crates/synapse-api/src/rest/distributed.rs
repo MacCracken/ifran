@@ -1,9 +1,10 @@
 //! REST handlers for distributed training job management.
 
-use axum::extract::{Path, State};
+use axum::extract::{Extension, Path, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use serde::{Deserialize, Serialize};
+use synapse_types::TenantId;
 use synapse_types::distributed::*;
 use synapse_types::training::{TrainingJobConfig, TrainingStatus};
 
@@ -56,6 +57,7 @@ fn default_method() -> String {
 /// POST /training/distributed/jobs — create a distributed training job.
 pub async fn create_job(
     State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
     Json(req): Json<CreateDistributedJobRequest>,
 ) -> Result<(StatusCode, Json<DistributedJobResponse>), (StatusCode, String)> {
     let config = DistributedTrainingConfig {
@@ -83,7 +85,10 @@ pub async fn create_job(
 }
 
 /// GET /training/distributed/jobs — list all distributed jobs.
-pub async fn list_jobs(State(state): State<AppState>) -> Json<Vec<DistributedJobResponse>> {
+pub async fn list_jobs(
+    State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
+) -> Json<Vec<DistributedJobResponse>> {
     let jobs = state.distributed_coordinator.list_jobs().await;
     Json(jobs.iter().map(job_to_response).collect())
 }
@@ -91,6 +96,7 @@ pub async fn list_jobs(State(state): State<AppState>) -> Json<Vec<DistributedJob
 /// GET /training/distributed/jobs/:id — get a distributed job.
 pub async fn get_job(
     State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
     Path(id): Path<DistributedJobId>,
 ) -> Result<Json<DistributedJobResponse>, (StatusCode, String)> {
     let job = state
@@ -104,6 +110,7 @@ pub async fn get_job(
 /// POST /training/distributed/jobs/:id/workers — assign a worker.
 pub async fn assign_worker(
     State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
     Path(id): Path<DistributedJobId>,
     Json(req): Json<AssignWorkerRequest>,
 ) -> Result<Json<DistributedJobResponse>, (StatusCode, String)> {
@@ -144,6 +151,7 @@ pub async fn assign_worker(
 /// POST /training/distributed/jobs/:id/start — start the distributed job.
 pub async fn start_job(
     State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
     Path(id): Path<DistributedJobId>,
 ) -> Result<Json<DistributedJobResponse>, (StatusCode, String)> {
     state
@@ -164,6 +172,7 @@ pub async fn start_job(
 /// POST /training/distributed/jobs/:id/workers/:rank/complete — mark a worker as completed.
 pub async fn worker_completed(
     State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
     Path((id, rank)): Path<(DistributedJobId, u32)>,
 ) -> Result<Json<DistributedJobResponse>, (StatusCode, String)> {
     state
@@ -205,6 +214,7 @@ pub async fn worker_completed(
 /// POST /training/distributed/jobs/:id/fail — fail the distributed job.
 pub async fn fail_job(
     State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
     Path(id): Path<DistributedJobId>,
 ) -> Result<Json<DistributedJobResponse>, (StatusCode, String)> {
     state
@@ -225,6 +235,7 @@ pub async fn fail_job(
 /// POST /training/distributed/jobs/:id/aggregate — trigger checkpoint aggregation.
 pub async fn aggregate(
     State(_state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
     Path(id): Path<DistributedJobId>,
     Json(req): Json<AggregateRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
@@ -278,7 +289,9 @@ fn job_to_response(job: &DistributedJobState) -> DistributedJobResponse {
 mod tests {
     use super::*;
     use crate::state::AppState;
+    use axum::extract::Extension;
     use synapse_core::config::*;
+    use synapse_types::TenantId;
     use synapse_types::training::*;
 
     fn test_state(tmp: &tempfile::TempDir) -> AppState {
@@ -427,7 +440,13 @@ mod tests {
             strategy: DistributedStrategy::DataParallel,
         };
 
-        let result = create_job(State(state), Json(req)).await.unwrap();
+        let result = create_job(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Json(req),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.0, StatusCode::CREATED);
         assert_eq!(result.1.status, TrainingStatus::Queued);
         assert_eq!(result.1.world_size, 2);
@@ -439,7 +458,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = test_state(&tmp);
 
-        let Json(jobs) = list_jobs(State(state)).await;
+        let Json(jobs) = list_jobs(State(state), Extension(TenantId::default_tenant())).await;
         assert!(jobs.is_empty());
     }
 
@@ -458,10 +477,22 @@ mod tests {
             world_size: 4,
             strategy: DistributedStrategy::ModelParallel,
         };
-        let _ = create_job(State(state.clone()), Json(req1)).await.unwrap();
-        let _ = create_job(State(state.clone()), Json(req2)).await.unwrap();
+        let _ = create_job(
+            State(state.clone()),
+            Extension(TenantId::default_tenant()),
+            Json(req1),
+        )
+        .await
+        .unwrap();
+        let _ = create_job(
+            State(state.clone()),
+            Extension(TenantId::default_tenant()),
+            Json(req2),
+        )
+        .await
+        .unwrap();
 
-        let Json(jobs) = list_jobs(State(state)).await;
+        let Json(jobs) = list_jobs(State(state), Extension(TenantId::default_tenant())).await;
         assert_eq!(jobs.len(), 2);
     }
 
@@ -475,9 +506,21 @@ mod tests {
             world_size: 2,
             strategy: DistributedStrategy::DataParallel,
         };
-        let (_, Json(created)) = create_job(State(state.clone()), Json(req)).await.unwrap();
+        let (_, Json(created)) = create_job(
+            State(state.clone()),
+            Extension(TenantId::default_tenant()),
+            Json(req),
+        )
+        .await
+        .unwrap();
 
-        let result = get_job(State(state), Path(created.job_id)).await.unwrap();
+        let result = get_job(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path(created.job_id),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.job_id, created.job_id);
         assert_eq!(result.status, TrainingStatus::Queued);
     }
@@ -487,7 +530,12 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = test_state(&tmp);
 
-        let result = get_job(State(state), Path(uuid::Uuid::new_v4())).await;
+        let result = get_job(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path(uuid::Uuid::new_v4()),
+        )
+        .await;
         assert_eq!(result.unwrap_err().0, StatusCode::NOT_FOUND);
     }
 
@@ -501,7 +549,13 @@ mod tests {
             world_size: 2,
             strategy: DistributedStrategy::DataParallel,
         };
-        let (_, Json(created)) = create_job(State(state.clone()), Json(req)).await.unwrap();
+        let (_, Json(created)) = create_job(
+            State(state.clone()),
+            Extension(TenantId::default_tenant()),
+            Json(req),
+        )
+        .await
+        .unwrap();
 
         let worker_req = AssignWorkerRequest {
             rank: 0,
@@ -509,9 +563,14 @@ mod tests {
             endpoint: "http://node-1:9000".into(),
             device_ids: vec![0],
         };
-        let result = assign_worker(State(state), Path(created.job_id), Json(worker_req))
-            .await
-            .unwrap();
+        let result = assign_worker(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path(created.job_id),
+            Json(worker_req),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.workers.len(), 1);
         assert_eq!(result.workers[0].rank, 0);
     }
@@ -526,7 +585,13 @@ mod tests {
             world_size: 2,
             strategy: DistributedStrategy::DataParallel,
         };
-        let (_, Json(created)) = create_job(State(state.clone()), Json(req)).await.unwrap();
+        let (_, Json(created)) = create_job(
+            State(state.clone()),
+            Extension(TenantId::default_tenant()),
+            Json(req),
+        )
+        .await
+        .unwrap();
 
         // Assign both workers
         for rank in 0..2 {
@@ -536,12 +601,23 @@ mod tests {
                 endpoint: format!("http://node-{}:9000", rank + 1),
                 device_ids: vec![0],
             };
-            let _ = assign_worker(State(state.clone()), Path(created.job_id), Json(worker_req))
-                .await
-                .unwrap();
+            let _ = assign_worker(
+                State(state.clone()),
+                Extension(TenantId::default_tenant()),
+                Path(created.job_id),
+                Json(worker_req),
+            )
+            .await
+            .unwrap();
         }
 
-        let result = start_job(State(state), Path(created.job_id)).await.unwrap();
+        let result = start_job(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path(created.job_id),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.status, TrainingStatus::Running);
     }
 
@@ -555,7 +631,13 @@ mod tests {
             world_size: 2,
             strategy: DistributedStrategy::DataParallel,
         };
-        let (_, Json(created)) = create_job(State(state.clone()), Json(req)).await.unwrap();
+        let (_, Json(created)) = create_job(
+            State(state.clone()),
+            Extension(TenantId::default_tenant()),
+            Json(req),
+        )
+        .await
+        .unwrap();
 
         // Only assign 1 of 2 workers
         let worker_req = AssignWorkerRequest {
@@ -564,11 +646,21 @@ mod tests {
             endpoint: "http://node-1:9000".into(),
             device_ids: vec![0],
         };
-        let _ = assign_worker(State(state.clone()), Path(created.job_id), Json(worker_req))
-            .await
-            .unwrap();
+        let _ = assign_worker(
+            State(state.clone()),
+            Extension(TenantId::default_tenant()),
+            Path(created.job_id),
+            Json(worker_req),
+        )
+        .await
+        .unwrap();
 
-        let result = start_job(State(state), Path(created.job_id)).await;
+        let result = start_job(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path(created.job_id),
+        )
+        .await;
         assert_eq!(result.unwrap_err().0, StatusCode::BAD_REQUEST);
     }
 
@@ -582,9 +674,21 @@ mod tests {
             world_size: 2,
             strategy: DistributedStrategy::DataParallel,
         };
-        let (_, Json(created)) = create_job(State(state.clone()), Json(req)).await.unwrap();
+        let (_, Json(created)) = create_job(
+            State(state.clone()),
+            Extension(TenantId::default_tenant()),
+            Json(req),
+        )
+        .await
+        .unwrap();
 
-        let result = fail_job(State(state), Path(created.job_id)).await.unwrap();
+        let result = fail_job(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path(created.job_id),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.status, TrainingStatus::Failed);
     }
 
@@ -598,7 +702,13 @@ mod tests {
             world_size: 2,
             strategy: DistributedStrategy::DataParallel,
         };
-        let (_, Json(created)) = create_job(State(state.clone()), Json(req)).await.unwrap();
+        let (_, Json(created)) = create_job(
+            State(state.clone()),
+            Extension(TenantId::default_tenant()),
+            Json(req),
+        )
+        .await
+        .unwrap();
 
         for rank in 0..2 {
             let worker_req = AssignWorkerRequest {
@@ -607,25 +717,42 @@ mod tests {
                 endpoint: format!("http://node-{}:9000", rank + 1),
                 device_ids: vec![0],
             };
-            let _ = assign_worker(State(state.clone()), Path(created.job_id), Json(worker_req))
-                .await
-                .unwrap();
-        }
-        let _ = start_job(State(state.clone()), Path(created.job_id))
+            let _ = assign_worker(
+                State(state.clone()),
+                Extension(TenantId::default_tenant()),
+                Path(created.job_id),
+                Json(worker_req),
+            )
             .await
             .unwrap();
+        }
+        let _ = start_job(
+            State(state.clone()),
+            Extension(TenantId::default_tenant()),
+            Path(created.job_id),
+        )
+        .await
+        .unwrap();
 
         // First worker completes
-        let result = worker_completed(State(state.clone()), Path((created.job_id, 0)))
-            .await
-            .unwrap();
+        let result = worker_completed(
+            State(state.clone()),
+            Extension(TenantId::default_tenant()),
+            Path((created.job_id, 0)),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.completed_workers, 1);
         assert_eq!(result.status, TrainingStatus::Running);
 
         // Second worker completes — job should be done
-        let result = worker_completed(State(state), Path((created.job_id, 1)))
-            .await
-            .unwrap();
+        let result = worker_completed(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path((created.job_id, 1)),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.completed_workers, 2);
         assert_eq!(result.status, TrainingStatus::Completed);
     }

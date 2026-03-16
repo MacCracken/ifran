@@ -3,7 +3,7 @@
 use crate::middleware;
 use crate::rest::{
     bridge, distributed, eval, experiment, inference, marketplace, models, openai_compat, rag,
-    rlhf, system, training,
+    rlhf, system, tenants, training,
 };
 use crate::state::AppState;
 use axum::Router;
@@ -18,6 +18,20 @@ pub fn build(state: AppState) -> Router {
         state.config.security.rate_limit_per_second,
         state.config.security.rate_limit_burst,
     );
+
+    // Admin routes (multi-tenant only) — separate auth via SYNAPSE_ADMIN_KEY
+    let admin_routes = if state.config.security.multi_tenant {
+        Router::new()
+            .route(
+                "/admin/tenants",
+                get(tenants::list_tenants).post(tenants::create_tenant),
+            )
+            .route("/admin/tenants/{id}", delete(tenants::disable_tenant))
+            .layer(axum_mw::from_fn(tenants::require_admin_auth))
+            .with_state(state.clone())
+    } else {
+        Router::new()
+    };
 
     Router::new()
         // System
@@ -124,6 +138,7 @@ pub fn build(state: AppState) -> Router {
             "/v1/chat/completions",
             post(openai_compat::chat_completions),
         )
+        .merge(admin_routes)
         // Middleware stack (axum applies bottom-up: last .layer() runs first)
         // 1. Auth (innermost — runs last on request, first on response)
         .layer(axum_mw::from_fn_with_state(

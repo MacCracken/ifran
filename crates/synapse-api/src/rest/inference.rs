@@ -3,10 +3,11 @@
 use crate::middleware::validation::{validate_model_name, validate_prompt_length};
 use crate::state::AppState;
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Extension, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 use serde::Deserialize;
+use synapse_types::TenantId;
 use synapse_types::inference::InferenceRequest;
 
 /// POST /inference request body.
@@ -31,6 +32,7 @@ fn default_max_tokens() -> u32 {
 /// POST /inference — run inference, returning the full response.
 pub async fn inference(
     State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
     Json(body): Json<InferenceBody>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     validate_model_name(&body.model)?;
@@ -86,6 +88,7 @@ pub async fn inference(
 /// POST /inference/stream — run inference with SSE streaming.
 pub async fn inference_stream(
     State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
     Json(body): Json<InferenceBody>,
 ) -> Result<
     Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>>,
@@ -145,7 +148,9 @@ pub async fn inference_stream(
 mod tests {
     use super::*;
     use crate::state::AppState;
+    use axum::extract::Extension;
     use synapse_core::config::*;
+    use synapse_types::TenantId;
 
     fn test_state(tmp: &tempfile::TempDir) -> AppState {
         let config = SynapseConfig {
@@ -236,7 +241,12 @@ mod tests {
             stream: false,
         };
 
-        let result = inference(State(state), Json(body)).await;
+        let result = inference(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Json(body),
+        )
+        .await;
         let err = result.unwrap_err();
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
         assert!(err.1.contains("No model loaded"));
@@ -258,7 +268,12 @@ mod tests {
             stream: true,
         };
 
-        let result = inference_stream(State(state), Json(body)).await;
+        let result = inference_stream(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Json(body),
+        )
+        .await;
         let err = result.unwrap_err();
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
     }

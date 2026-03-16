@@ -1,7 +1,7 @@
 //! REST handlers for the model marketplace.
 
 use axum::body::Body;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use serde::{Deserialize, Serialize};
@@ -50,6 +50,7 @@ pub struct PullRequest {
 /// GET /marketplace/search — search marketplace entries.
 pub async fn search(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
     Query(params): Query<SearchQuery>,
 ) -> Result<Json<Vec<MarketplaceEntryResponse>>, (StatusCode, String)> {
     let query = MarketplaceQuery {
@@ -60,9 +61,8 @@ pub async fn search(
     };
 
     let catalog = state.marketplace_catalog.lock().await;
-    let tenant = TenantId::default_tenant();
     let entries = catalog
-        .search(&query, &tenant)
+        .search(&query, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(entries.iter().map(entry_to_response).collect()))
@@ -71,11 +71,11 @@ pub async fn search(
 /// GET /marketplace/entries — list all marketplace entries.
 pub async fn list_entries(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
 ) -> Result<Json<Vec<MarketplaceEntryResponse>>, (StatusCode, String)> {
     let catalog = state.marketplace_catalog.lock().await;
-    let tenant = TenantId::default_tenant();
     let entries = catalog
-        .list(&tenant)
+        .list(&tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(entries.iter().map(entry_to_response).collect()))
 }
@@ -83,13 +83,13 @@ pub async fn list_entries(
 /// POST /marketplace/publish — publish a local model to the marketplace.
 pub async fn publish(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
     Json(req): Json<PublishRequest>,
 ) -> Result<(StatusCode, Json<MarketplaceEntryResponse>), (StatusCode, String)> {
     // Look up the model in the local DB
     let db = state.db.lock().await;
-    let tenant = TenantId::default_tenant();
     let model = db
-        .get_by_name(&req.model_name, &tenant)
+        .get_by_name(&req.model_name, &tenant_id)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
     let instance_id =
@@ -101,7 +101,7 @@ pub async fn publish(
 
     let catalog = state.marketplace_catalog.lock().await;
     catalog
-        .publish(&entry, &tenant)
+        .publish(&entry, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok((StatusCode::CREATED, Json(entry_to_response(&entry))))
@@ -110,12 +110,12 @@ pub async fn publish(
 /// DELETE /marketplace/entries/:name — unpublish a model.
 pub async fn unpublish(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
     Path(name): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     let catalog = state.marketplace_catalog.lock().await;
-    let tenant = TenantId::default_tenant();
     catalog
-        .unpublish(&name, &tenant)
+        .unpublish(&name, &tenant_id)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -123,6 +123,7 @@ pub async fn unpublish(
 /// GET /marketplace/download/:name — stream a published model file.
 pub async fn download(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
     Path(name): Path<String>,
 ) -> Result<axum::response::Response<Body>, (StatusCode, String)> {
     // Decode URL-encoded name (__ back to /)
@@ -130,9 +131,8 @@ pub async fn download(
 
     // Look up the model in the local DB to find the file path
     let db = state.db.lock().await;
-    let tenant = TenantId::default_tenant();
     let model = db
-        .get_by_name(&model_name, &tenant)
+        .get_by_name(&model_name, &tenant_id)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
     // Open file and get metadata atomically — avoids TOCTOU race where
@@ -180,6 +180,7 @@ pub async fn download(
 /// POST /marketplace/pull — download a model from a remote marketplace entry.
 pub async fn pull(
     State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
     Json(req): Json<PullRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, String)> {
     let client = synapse_core::pull::downloader::build_client()
@@ -237,6 +238,7 @@ fn entry_to_response(entry: &MarketplaceEntry) -> MarketplaceEntryResponse {
 mod tests {
     use super::*;
     use crate::state::AppState;
+    use axum::extract::Extension;
     use synapse_core::config::*;
     use synapse_types::marketplace::MarketplaceEntry;
     use synapse_types::model::{ModelFormat, QuantLevel};
@@ -376,7 +378,9 @@ mod tests {
     async fn list_entries_empty() {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = test_state(&tmp);
-        let result = list_entries(State(state)).await.unwrap();
+        let result = list_entries(State(state), Extension(TenantId::default_tenant()))
+            .await
+            .unwrap();
         assert!(result.0.is_empty());
     }
 
@@ -393,7 +397,9 @@ mod tests {
                 .unwrap();
         }
 
-        let result = list_entries(State(state)).await.unwrap();
+        let result = list_entries(State(state), Extension(TenantId::default_tenant()))
+            .await
+            .unwrap();
         assert_eq!(result.0.len(), 1);
         assert_eq!(result.0[0].model_name, "test-model");
     }
@@ -415,7 +421,13 @@ mod tests {
             format: None,
             max_size: None,
         };
-        let result = search(State(state), Query(params)).await.unwrap();
+        let result = search(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Query(params),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.0.len(), 1);
     }
 
@@ -436,7 +448,13 @@ mod tests {
             format: None,
             max_size: None,
         };
-        let result = search(State(state), Query(params)).await.unwrap();
+        let result = search(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Query(params),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.0.len(), 1);
     }
 
@@ -457,7 +475,13 @@ mod tests {
             format: None,
             max_size: None,
         };
-        let result = search(State(state), Query(params)).await.unwrap();
+        let result = search(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Query(params),
+        )
+        .await
+        .unwrap();
         assert!(result.0.is_empty());
     }
 
@@ -473,13 +497,19 @@ mod tests {
                 .unwrap();
         }
 
-        let result = unpublish(State(state.clone()), Path("test-model".into()))
-            .await
-            .unwrap();
+        let result = unpublish(
+            State(state.clone()),
+            Extension(TenantId::default_tenant()),
+            Path("test-model".into()),
+        )
+        .await
+        .unwrap();
         assert_eq!(result, StatusCode::NO_CONTENT);
 
         // Verify it's gone
-        let entries = list_entries(State(state)).await.unwrap();
+        let entries = list_entries(State(state), Extension(TenantId::default_tenant()))
+            .await
+            .unwrap();
         assert!(entries.0.is_empty());
     }
 
@@ -488,7 +518,12 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = test_state(&tmp);
 
-        let result = unpublish(State(state), Path("nonexistent".into())).await;
+        let result = unpublish(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path("nonexistent".into()),
+        )
+        .await;
         assert_eq!(result.unwrap_err().0, StatusCode::NOT_FOUND);
     }
 }

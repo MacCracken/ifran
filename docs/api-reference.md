@@ -4,6 +4,8 @@ Synapse exposes a REST API (default `:8420`) and a gRPC API (default `:8421`).
 
 ## Authentication
 
+### Single-Tenant (Default)
+
 Set `SYNAPSE_API_KEY` to require Bearer token authentication:
 
 ```bash
@@ -18,6 +20,27 @@ Authorization: Bearer your-secret-token
 ```
 
 When `SYNAPSE_API_KEY` is unset, the API is open (no auth required).
+
+### Multi-Tenant
+
+Enable in config with `multi_tenant = true` under `[security]`. Each tenant gets its own API key and isolated resources (models, jobs, evals, pipelines, etc.).
+
+```bash
+# Set admin key for tenant management
+export SYNAPSE_ADMIN_KEY=your-admin-secret
+synapse serve
+```
+
+Create tenants via the admin API:
+
+```bash
+curl -X POST http://localhost:8420/admin/tenants \
+  -H "Authorization: Bearer $SYNAPSE_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Acme Corp"}'
+```
+
+The response includes a `syn_*` API key (shown once). Tenants use this key as their Bearer token for all regular endpoints. Resources are automatically scoped to the tenant.
 
 ## REST Endpoints
 
@@ -224,6 +247,34 @@ When `bridge.enabled = true` in config, the server automatically:
 3. Spawns a background heartbeat task at the configured interval
 4. Reports training job progress and completions to SY
 5. Coordinates distributed training worker assignments via SY
+
+### Tenant Admin (Multi-Tenant Only)
+
+Only available when `multi_tenant = true`. Protected by `SYNAPSE_ADMIN_KEY` (separate from tenant API keys).
+
+- `POST /admin/tenants` — create a new tenant, returns API key (shown once)
+- `GET /admin/tenants` — list all tenants
+- `DELETE /admin/tenants/:id` — disable a tenant (soft delete)
+
+#### POST /admin/tenants request body
+```json
+{
+  "name": "Acme Corp"
+}
+```
+
+#### POST /admin/tenants response
+```json
+{
+  "tenant": {
+    "id": "uuid",
+    "name": "Acme Corp",
+    "enabled": true,
+    "created_at": "2026-03-15T00:00:00Z"
+  },
+  "api_key": "syn_a1b2c3..."
+}
+```
 
 ## gRPC Services
 

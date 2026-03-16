@@ -10,4 +10,5 @@ pub mod rag;
 pub mod rlhf;
 pub mod router;
 pub mod system;
+pub mod tenants;
 pub mod training;

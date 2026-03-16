@@ -1,9 +1,10 @@
 //! REST handlers for SY bridge status and management.
 
-use axum::extract::State;
+use axum::extract::{Extension, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use serde::Serialize;
+use synapse_types::TenantId;
 
 use crate::state::AppState;
 
@@ -18,7 +19,10 @@ pub struct BridgeStatusResponse {
 }
 
 /// GET /bridge/status — get bridge connection status.
-pub async fn status(State(state): State<AppState>) -> Json<BridgeStatusResponse> {
+pub async fn status(
+    State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
+) -> Json<BridgeStatusResponse> {
     let client_state = match &state.bridge_client {
         Some(client) => format!("{:?}", client.connection_state().await),
         None => "disabled".into(),
@@ -41,6 +45,7 @@ pub async fn status(State(state): State<AppState>) -> Json<BridgeStatusResponse>
 /// POST /bridge/connect — manually trigger bridge connection to SY.
 pub async fn connect(
     State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
 ) -> Result<Json<BridgeStatusResponse>, (StatusCode, String)> {
     let client = state
         .bridge_client
@@ -115,6 +120,7 @@ pub async fn connect(
 /// POST /bridge/heartbeat — send a one-off heartbeat to SY (useful for debugging).
 pub async fn heartbeat(
     State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let server = state
         .bridge_server

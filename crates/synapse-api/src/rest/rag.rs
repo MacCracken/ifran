@@ -1,6 +1,6 @@
 //! REST handlers for RAG pipeline management.
 
-use axum::extract::{Path, State};
+use axum::extract::{Extension, Path, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use serde::Deserialize;
@@ -38,6 +38,7 @@ fn stub_embed(text: &str) -> Vec<f32> {
 /// POST /rag/pipelines
 pub async fn create_pipeline(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
     Json(config): Json<RagPipelineConfig>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, String)> {
     let store = state.rag_store.as_ref().ok_or((
@@ -47,8 +48,7 @@ pub async fn create_pipeline(
 
     let id = uuid::Uuid::new_v4();
     let s = store.lock().await;
-    let tenant = TenantId::default_tenant();
-    s.create_pipeline(id, &config, &tenant)
+    s.create_pipeline(id, &config, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok((
@@ -60,6 +60,7 @@ pub async fn create_pipeline(
 /// GET /rag/pipelines
 pub async fn list_pipelines(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let store = state.rag_store.as_ref().ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
@@ -67,9 +68,8 @@ pub async fn list_pipelines(
     ))?;
 
     let s = store.lock().await;
-    let tenant = TenantId::default_tenant();
     let pipelines = s
-        .list_pipelines(&tenant)
+        .list_pipelines(&tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let data: Vec<serde_json::Value> = pipelines
@@ -90,6 +90,7 @@ pub async fn list_pipelines(
 /// GET /rag/pipelines/{id}
 pub async fn get_pipeline(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<RagPipelineId>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let store = state.rag_store.as_ref().ok_or((
@@ -98,9 +99,8 @@ pub async fn get_pipeline(
     ))?;
 
     let s = store.lock().await;
-    let tenant = TenantId::default_tenant();
     let config = s
-        .get_pipeline(id, &tenant)
+        .get_pipeline(id, &tenant_id)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
     Ok(Json(serde_json::json!({
@@ -116,6 +116,7 @@ pub async fn get_pipeline(
 /// DELETE /rag/pipelines/{id}
 pub async fn delete_pipeline(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<RagPipelineId>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     let store = state.rag_store.as_ref().ok_or((
@@ -124,8 +125,7 @@ pub async fn delete_pipeline(
     ))?;
 
     let s = store.lock().await;
-    let tenant = TenantId::default_tenant();
-    s.delete_pipeline(id, &tenant)
+    s.delete_pipeline(id, &tenant_id)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
     Ok(StatusCode::NO_CONTENT)
@@ -134,6 +134,7 @@ pub async fn delete_pipeline(
 /// POST /rag/pipelines/{id}/ingest
 pub async fn ingest_document(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<RagPipelineId>,
     Json(req): Json<IngestRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, String)> {
@@ -145,9 +146,8 @@ pub async fn ingest_document(
     ))?;
 
     let s = store.lock().await;
-    let tenant = TenantId::default_tenant();
     let config = s
-        .get_pipeline(id, &tenant)
+        .get_pipeline(id, &tenant_id)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
     let pipeline = synapse_core::rag::pipeline::RagPipeline::new(&s, id, config);
@@ -167,6 +167,7 @@ pub async fn ingest_document(
 /// POST /rag/query
 pub async fn query(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
     Json(req): Json<RagQuery>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let store = state.rag_store.as_ref().ok_or((
@@ -175,9 +176,8 @@ pub async fn query(
     ))?;
 
     let s = store.lock().await;
-    let tenant = TenantId::default_tenant();
     let config = s
-        .get_pipeline(req.pipeline_id, &tenant)
+        .get_pipeline(req.pipeline_id, &tenant_id)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
     let pipeline = synapse_core::rag::pipeline::RagPipeline::new(&s, req.pipeline_id, config);

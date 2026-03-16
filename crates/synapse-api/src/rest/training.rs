@@ -2,12 +2,13 @@
 
 use std::convert::Infallible;
 
-use axum::extract::{Path, State};
+use axum::extract::{Extension, Path, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use axum::response::sse::{Event, Sse};
 use futures::Stream;
 use serde::{Deserialize, Serialize};
+use synapse_types::TenantId;
 use synapse_types::training::{TrainingJobConfig, TrainingJobId, TrainingStatus};
 
 use crate::state::AppState;
@@ -45,6 +46,7 @@ fn default_true() -> bool {
 /// POST /training/jobs — create (and optionally start) a training job.
 pub async fn create_job(
     State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
     Json(req): Json<CreateJobRequest>,
 ) -> Result<(StatusCode, Json<JobResponse>), (StatusCode, String)> {
     let id = state
@@ -76,7 +78,10 @@ pub async fn create_job(
 }
 
 /// GET /training/jobs — list all training jobs.
-pub async fn list_jobs(State(state): State<AppState>) -> Json<Vec<JobResponse>> {
+pub async fn list_jobs(
+    State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
+) -> Json<Vec<JobResponse>> {
     let jobs = state.job_manager.list_jobs(None).await;
     Json(jobs.iter().map(job_to_response).collect())
 }
@@ -84,6 +89,7 @@ pub async fn list_jobs(State(state): State<AppState>) -> Json<Vec<JobResponse>> 
 /// GET /training/jobs/:id — get a specific job's status.
 pub async fn get_job(
     State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
     Path(id): Path<TrainingJobId>,
 ) -> Result<Json<JobResponse>, (StatusCode, String)> {
     let job = state
@@ -97,6 +103,7 @@ pub async fn get_job(
 /// POST /training/jobs/:id/cancel — cancel a running or queued job.
 pub async fn cancel_job(
     State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
     Path(id): Path<TrainingJobId>,
 ) -> Result<Json<JobResponse>, (StatusCode, String)> {
     state
@@ -127,6 +134,7 @@ pub async fn cancel_job(
 /// not exist.
 pub async fn stream_job(
     State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
     Path(id): Path<TrainingJobId>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)> {
     // Verify the job exists before starting the stream.
@@ -193,7 +201,9 @@ fn job_to_response(job: &synapse_train::job::status::JobState) -> JobResponse {
 mod tests {
     use super::*;
     use crate::state::AppState;
+    use axum::extract::Extension;
     use synapse_core::config::*;
+    use synapse_types::TenantId;
     use synapse_types::training::*;
 
     fn test_state(tmp: &tempfile::TempDir) -> AppState {
@@ -316,7 +326,13 @@ mod tests {
             auto_start: false,
         };
 
-        let result = create_job(State(state), Json(req)).await.unwrap();
+        let result = create_job(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Json(req),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.0, StatusCode::CREATED);
         assert_eq!(result.1.status, TrainingStatus::Queued);
         assert_eq!(result.1.current_step, 0);
@@ -332,7 +348,13 @@ mod tests {
             auto_start: true,
         };
 
-        let result = create_job(State(state), Json(req)).await.unwrap();
+        let result = create_job(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Json(req),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.0, StatusCode::CREATED);
         assert_eq!(result.1.status, TrainingStatus::Running);
     }
@@ -342,7 +364,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = test_state(&tmp);
 
-        let Json(jobs) = list_jobs(State(state)).await;
+        let Json(jobs) = list_jobs(State(state), Extension(TenantId::default_tenant())).await;
         assert!(jobs.is_empty());
     }
 
@@ -360,10 +382,22 @@ mod tests {
             config: test_job_config(),
             auto_start: false,
         };
-        let _ = create_job(State(state.clone()), Json(req1)).await.unwrap();
-        let _ = create_job(State(state.clone()), Json(req2)).await.unwrap();
+        let _ = create_job(
+            State(state.clone()),
+            Extension(TenantId::default_tenant()),
+            Json(req1),
+        )
+        .await
+        .unwrap();
+        let _ = create_job(
+            State(state.clone()),
+            Extension(TenantId::default_tenant()),
+            Json(req2),
+        )
+        .await
+        .unwrap();
 
-        let Json(jobs) = list_jobs(State(state)).await;
+        let Json(jobs) = list_jobs(State(state), Extension(TenantId::default_tenant())).await;
         assert_eq!(jobs.len(), 2);
     }
 
@@ -376,9 +410,21 @@ mod tests {
             config: test_job_config(),
             auto_start: false,
         };
-        let (_, Json(created)) = create_job(State(state.clone()), Json(req)).await.unwrap();
+        let (_, Json(created)) = create_job(
+            State(state.clone()),
+            Extension(TenantId::default_tenant()),
+            Json(req),
+        )
+        .await
+        .unwrap();
 
-        let result = get_job(State(state), Path(created.id)).await.unwrap();
+        let result = get_job(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path(created.id),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.id, created.id);
         assert_eq!(result.status, TrainingStatus::Queued);
     }
@@ -388,7 +434,12 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = test_state(&tmp);
 
-        let result = get_job(State(state), Path(uuid::Uuid::new_v4())).await;
+        let result = get_job(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path(uuid::Uuid::new_v4()),
+        )
+        .await;
         assert_eq!(result.unwrap_err().0, StatusCode::NOT_FOUND);
     }
 
@@ -401,9 +452,21 @@ mod tests {
             config: test_job_config(),
             auto_start: false,
         };
-        let (_, Json(created)) = create_job(State(state.clone()), Json(req)).await.unwrap();
+        let (_, Json(created)) = create_job(
+            State(state.clone()),
+            Extension(TenantId::default_tenant()),
+            Json(req),
+        )
+        .await
+        .unwrap();
 
-        let result = cancel_job(State(state), Path(created.id)).await.unwrap();
+        let result = cancel_job(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path(created.id),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.status, TrainingStatus::Cancelled);
     }
 
@@ -432,7 +495,12 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = test_state(&tmp);
 
-        let result = stream_job(State(state), Path(uuid::Uuid::new_v4())).await;
+        let result = stream_job(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path(uuid::Uuid::new_v4()),
+        )
+        .await;
         assert_eq!(result.unwrap_err().0, StatusCode::NOT_FOUND);
     }
 
@@ -451,10 +519,20 @@ mod tests {
             config: test_job_config(),
             auto_start: false,
         };
-        let (_, Json(created)) = create_job(State(state.clone()), Json(req)).await.unwrap();
-        cancel_job(State(state.clone()), Path(created.id))
-            .await
-            .unwrap();
+        let (_, Json(created)) = create_job(
+            State(state.clone()),
+            Extension(TenantId::default_tenant()),
+            Json(req),
+        )
+        .await
+        .unwrap();
+        cancel_job(
+            State(state.clone()),
+            Extension(TenantId::default_tenant()),
+            Path(created.id),
+        )
+        .await
+        .unwrap();
 
         let app = crate::rest::router::build(state);
         let response = app

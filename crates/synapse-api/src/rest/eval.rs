@@ -1,9 +1,10 @@
 //! REST handlers for model evaluation.
 
-use axum::extract::{Path, State};
+use axum::extract::{Extension, Path, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use serde::{Deserialize, Serialize};
+use synapse_types::TenantId;
 use synapse_types::eval::*;
 use synapse_types::inference::InferenceRequest;
 
@@ -42,6 +43,7 @@ pub struct CreateEvalRequest {
 /// POST /eval/runs — create a new eval run and execute benchmarks.
 pub async fn create_run(
     State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
     Json(req): Json<CreateEvalRequest>,
 ) -> Result<(StatusCode, Json<EvalRunResponse>), (StatusCode, String)> {
     let config = EvalConfig {
@@ -160,7 +162,10 @@ pub async fn create_run(
 }
 
 /// GET /eval/runs — list all eval runs.
-pub async fn list_runs(State(state): State<AppState>) -> Json<Vec<EvalRunResponse>> {
+pub async fn list_runs(
+    State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
+) -> Json<Vec<EvalRunResponse>> {
     let runs = state.eval_runner.list_runs().await;
     Json(runs.iter().map(run_to_response).collect())
 }
@@ -168,6 +173,7 @@ pub async fn list_runs(State(state): State<AppState>) -> Json<Vec<EvalRunRespons
 /// GET /eval/runs/:id — get a specific eval run.
 pub async fn get_run(
     State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
     Path(id): Path<EvalRunId>,
 ) -> Result<Json<EvalRunResponse>, (StatusCode, String)> {
     let run = state

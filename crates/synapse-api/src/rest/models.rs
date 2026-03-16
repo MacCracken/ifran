@@ -2,18 +2,18 @@
 
 use crate::state::AppState;
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Extension, Path, State};
 use axum::http::StatusCode;
 use synapse_types::TenantId;
 
 /// GET /models — list all models in the catalog.
 pub async fn list_models(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let db = state.db.lock().await;
-    let tenant = TenantId::default_tenant();
     let models = db
-        .list(&tenant)
+        .list(&tenant_id)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let data: Vec<serde_json::Value> = models
@@ -40,14 +40,14 @@ pub async fn list_models(
 /// GET /models/:id — get a specific model by ID.
 pub async fn get_model(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let db = state.db.lock().await;
-    let tenant = TenantId::default_tenant();
     let model = if let Ok(uuid) = uuid::Uuid::parse_str(&id) {
-        db.get(uuid, &tenant)
+        db.get(uuid, &tenant_id)
     } else {
-        db.get_by_name(&id, &tenant)
+        db.get_by_name(&id, &tenant_id)
     };
 
     let model = model.map_err(|_| StatusCode::NOT_FOUND)?;
@@ -70,14 +70,14 @@ pub async fn get_model(
 /// DELETE /models/:id — remove a model from the catalog and disk.
 pub async fn delete_model(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
     let db = state.db.lock().await;
-    let tenant = TenantId::default_tenant();
     let model = if let Ok(uuid) = uuid::Uuid::parse_str(&id) {
-        db.get(uuid, &tenant)
+        db.get(uuid, &tenant_id)
     } else {
-        db.get_by_name(&id, &tenant)
+        db.get_by_name(&id, &tenant_id)
     };
 
     let model = model.map_err(|_| StatusCode::NOT_FOUND)?;
@@ -85,7 +85,7 @@ pub async fn delete_model(
     // Delete from database first — if this fails, filesystem stays consistent.
     // Reversing the order (FS first, then DB) risks orphaned DB records pointing
     // to deleted files.
-    db.delete(model.id, &tenant)
+    db.delete(model.id, &tenant_id)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Clean up files from disk (best-effort after successful DB delete)
@@ -168,7 +168,9 @@ mod tests {
     async fn list_models_empty() {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = test_state(&tmp);
-        let result = list_models(State(state)).await.unwrap();
+        let result = list_models(State(state), Extension(TenantId::default_tenant()))
+            .await
+            .unwrap();
         let json = result.0;
         assert_eq!(json["data"].as_array().unwrap().len(), 0);
     }
@@ -179,7 +181,9 @@ mod tests {
         let state = test_state(&tmp);
         insert_model(&tmp.path().join("test.db"));
 
-        let result = list_models(State(state)).await.unwrap();
+        let result = list_models(State(state), Extension(TenantId::default_tenant()))
+            .await
+            .unwrap();
         let data = result.0["data"].as_array().unwrap();
         assert_eq!(data.len(), 1);
         assert_eq!(data[0]["name"], "test-model");
@@ -194,9 +198,13 @@ mod tests {
         let state = test_state(&tmp);
         insert_model(&tmp.path().join("test.db"));
 
-        let result = get_model(State(state), Path("test-model".into()))
-            .await
-            .unwrap();
+        let result = get_model(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path("test-model".into()),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.0["name"], "test-model");
         assert_eq!(result.0["repo_id"], "org/test-model");
         assert_eq!(result.0["sha256"], "abc123");
@@ -209,9 +217,13 @@ mod tests {
         let state = test_state(&tmp);
         let model = insert_model(&tmp.path().join("test.db"));
 
-        let result = get_model(State(state), Path(model.id.to_string()))
-            .await
-            .unwrap();
+        let result = get_model(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path(model.id.to_string()),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.0["name"], "test-model");
     }
 
@@ -220,7 +232,12 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = test_state(&tmp);
 
-        let result = get_model(State(state), Path("nonexistent".into())).await;
+        let result = get_model(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path("nonexistent".into()),
+        )
+        .await;
         assert_eq!(result.unwrap_err(), StatusCode::NOT_FOUND);
     }
 
@@ -230,13 +247,22 @@ mod tests {
         let state = test_state(&tmp);
         let model = insert_model(&tmp.path().join("test.db"));
 
-        let result = delete_model(State(state.clone()), Path(model.id.to_string()))
-            .await
-            .unwrap();
+        let result = delete_model(
+            State(state.clone()),
+            Extension(TenantId::default_tenant()),
+            Path(model.id.to_string()),
+        )
+        .await
+        .unwrap();
         assert_eq!(result, StatusCode::NO_CONTENT);
 
         // Verify model is gone
-        let get_result = get_model(State(state), Path(model.id.to_string())).await;
+        let get_result = get_model(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path(model.id.to_string()),
+        )
+        .await;
         assert_eq!(get_result.unwrap_err(), StatusCode::NOT_FOUND);
     }
 
@@ -245,7 +271,12 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = test_state(&tmp);
 
-        let result = delete_model(State(state), Path("nonexistent".into())).await;
+        let result = delete_model(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path("nonexistent".into()),
+        )
+        .await;
         assert_eq!(result.unwrap_err(), StatusCode::NOT_FOUND);
     }
 
@@ -255,7 +286,9 @@ mod tests {
         let state = test_state(&tmp);
         insert_model(&tmp.path().join("test.db"));
 
-        let result = list_models(State(state)).await.unwrap();
+        let result = list_models(State(state), Extension(TenantId::default_tenant()))
+            .await
+            .unwrap();
         let model = &result.0["data"][0];
 
         // Verify all expected fields are present

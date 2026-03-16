@@ -7,11 +7,12 @@
 use crate::middleware::validation::{validate_model_name, validate_prompt_length};
 use crate::state::AppState;
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Extension, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::response::sse::{Event, Sse};
 use serde::Deserialize;
+use synapse_types::TenantId;
 use synapse_types::inference::InferenceRequest;
 
 /// OpenAI-style message.
@@ -41,11 +42,11 @@ fn default_max_tokens() -> u32 {
 /// GET /v1/models — list models in OpenAI format.
 pub async fn list_models(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let db = state.db.lock().await;
-    let tenant = synapse_types::TenantId::default_tenant();
     let models = db
-        .list(&tenant)
+        .list(&tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let data: Vec<serde_json::Value> = models
@@ -69,6 +70,7 @@ pub async fn list_models(
 /// POST /v1/chat/completions — OpenAI-compatible chat completions.
 pub async fn chat_completions(
     State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
     Json(body): Json<ChatCompletionRequest>,
 ) -> Result<axum::response::Response, (StatusCode, String)> {
     validate_model_name(&body.model)?;
@@ -204,8 +206,10 @@ async fn stream_response(
 mod tests {
     use super::*;
     use crate::state::AppState;
+    use axum::extract::Extension;
     use synapse_core::config::*;
     use synapse_core::storage::db::ModelDatabase;
+    use synapse_types::TenantId;
     use synapse_types::model::{ModelFormat, ModelInfo, QuantLevel};
 
     fn test_state(tmp: &tempfile::TempDir) -> AppState {
@@ -292,7 +296,9 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = test_state(&tmp);
 
-        let Json(json) = list_models(State(state)).await.unwrap();
+        let Json(json) = list_models(State(state), Extension(TenantId::default_tenant()))
+            .await
+            .unwrap();
         assert_eq!(json["object"], "list");
         assert_eq!(json["data"].as_array().unwrap().len(), 0);
     }
@@ -321,7 +327,9 @@ mod tests {
             .unwrap();
         drop(db);
 
-        let Json(json) = list_models(State(state)).await.unwrap();
+        let Json(json) = list_models(State(state), Extension(TenantId::default_tenant()))
+            .await
+            .unwrap();
         let data = json["data"].as_array().unwrap();
         assert_eq!(data.len(), 1);
         assert_eq!(data[0]["id"], "test-model");
@@ -347,7 +355,12 @@ mod tests {
             stream: false,
         };
 
-        let result = chat_completions(State(state), Json(body)).await;
+        let result = chat_completions(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Json(body),
+        )
+        .await;
         let err = result.unwrap_err();
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
         assert!(err.1.contains("No model loaded"));

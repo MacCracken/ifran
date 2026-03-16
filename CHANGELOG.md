@@ -7,8 +7,25 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 
 ## [2026.3.15]
 
+### Added
+
+#### Multi-Tenant Support
+- `synapse-types/tenant`: `TenantId` newtype with `default_tenant()`, `is_default()`, Display, serde support
+- `synapse-types/error`: `TenantNotFound(String)` and `Unauthorized(String)` error variants
+- `synapse-core/tenant/store`: SQLite tenant store — `tenants` table with BLAKE3-hashed API keys, CRUD operations (create, resolve by key, list, disable, enable)
+- `synapse-core/config`: `multi_tenant` boolean in `[security]` config section (default: `false`, fully backward compatible)
+- `synapse-api/middleware/auth`: Rewritten for dual-mode auth — single-tenant (legacy `SYNAPSE_API_KEY`) and multi-tenant (TenantStore key lookup). Injects `TenantId` into request extensions for all handlers
+- `synapse-api/rest/tenants`: Admin API — `POST /admin/tenants` (create, returns API key once), `GET /admin/tenants` (list), `DELETE /admin/tenants/{id}` (disable). Protected by `SYNAPSE_ADMIN_KEY` env var. Only mounted when `multi_tenant = true`
+- `synapse-api/state`: `tenant_store` field — conditionally initialized when `multi_tenant = true`
+- All SQLite stores gain `tenant_id TEXT NOT NULL DEFAULT 'default'` column with idempotent migration: `models`, `eval_results`, `marketplace_entries`, `rag_pipelines`, `annotation_sessions`, `experiments`
+- All store CRUD methods accept `&TenantId` parameter for tenant-scoped queries
+- All REST handlers extract `TenantId` from request extensions and pass to storage layer
+- Disabled tenants are rejected with HTTP 403
+- 788 unit tests across all crates
+
 ### Changed
 - Workspace version bumped to 2026.3.15
+- Auth middleware changed from `from_fn` to `from_fn_with_state` to access `AppState`
 
 ---
 

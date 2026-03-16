@@ -1,6 +1,6 @@
 //! REST handlers for RLHF annotation management.
 
-use axum::extract::{Path, State};
+use axum::extract::{Extension, Path, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use serde::Deserialize;
@@ -37,6 +37,7 @@ pub struct AnnotateRequest {
 /// POST /rlhf/sessions
 pub async fn create_session(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
     Json(req): Json<CreateSessionRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, String)> {
     let store = state.annotation_store.as_ref().ok_or((
@@ -45,9 +46,8 @@ pub async fn create_session(
     ))?;
 
     let s = store.lock().await;
-    let tenant = TenantId::default_tenant();
     let session = s
-        .create_session(&req.name, &req.model_name, &tenant)
+        .create_session(&req.name, &req.model_name, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok((
@@ -64,6 +64,7 @@ pub async fn create_session(
 /// GET /rlhf/sessions
 pub async fn list_sessions(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let store = state.annotation_store.as_ref().ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
@@ -71,9 +72,8 @@ pub async fn list_sessions(
     ))?;
 
     let s = store.lock().await;
-    let tenant = TenantId::default_tenant();
     let sessions = s
-        .list_sessions(&tenant)
+        .list_sessions(&tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let data: Vec<serde_json::Value> = sessions
@@ -95,6 +95,7 @@ pub async fn list_sessions(
 /// GET /rlhf/sessions/{id}
 pub async fn get_session(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let store = state.annotation_store.as_ref().ok_or((
@@ -103,13 +104,12 @@ pub async fn get_session(
     ))?;
 
     let s = store.lock().await;
-    let tenant = TenantId::default_tenant();
     let session = s
-        .get_session(id, &tenant)
+        .get_session(id, &tenant_id)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
     let stats = s
-        .get_stats(id, &tenant)
+        .get_stats(id, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(serde_json::json!({
@@ -129,6 +129,7 @@ pub async fn get_session(
 /// POST /rlhf/sessions/{id}/pairs
 pub async fn add_pairs(
     State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
     Path(id): Path<Uuid>,
     Json(req): Json<AddPairsRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, String)> {
@@ -165,6 +166,7 @@ pub async fn add_pairs(
 /// GET /rlhf/sessions/{id}/pairs
 pub async fn get_pairs(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let store = state.annotation_store.as_ref().ok_or((
@@ -173,9 +175,8 @@ pub async fn get_pairs(
     ))?;
 
     let s = store.lock().await;
-    let tenant = TenantId::default_tenant();
     let next = s
-        .get_next_unannotated(id, &tenant)
+        .get_next_unannotated(id, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     match next {
@@ -192,6 +193,7 @@ pub async fn get_pairs(
 /// POST /rlhf/pairs/{id}/annotate
 pub async fn annotate(
     State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
     Path(id): Path<Uuid>,
     Json(req): Json<AnnotateRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
@@ -212,6 +214,7 @@ pub async fn annotate(
 /// POST /rlhf/sessions/{id}/export
 pub async fn export_session(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let store = state.annotation_store.as_ref().ok_or((
@@ -220,9 +223,8 @@ pub async fn export_session(
     ))?;
 
     let s = store.lock().await;
-    let tenant = TenantId::default_tenant();
     let pairs = s
-        .export_session(id, &tenant)
+        .export_session(id, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // JSONL format for DPO training
@@ -256,6 +258,7 @@ pub async fn export_session(
 /// GET /rlhf/sessions/{id}/stats
 pub async fn get_stats(
     State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let store = state.annotation_store.as_ref().ok_or((
@@ -264,9 +267,8 @@ pub async fn get_stats(
     ))?;
 
     let s = store.lock().await;
-    let tenant = TenantId::default_tenant();
     let stats = s
-        .get_stats(id, &tenant)
+        .get_stats(id, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(serde_json::json!({
