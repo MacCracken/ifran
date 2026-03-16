@@ -263,8 +263,34 @@ impl BridgeClient {
             device_count = device_ids.len(),
             "Requesting worker assignment from SY"
         );
-        // TODO: Call SynapseBridge.RequestWorkerAssignment RPC.
-        // SY will route this to the appropriate Synapse node.
+        if let Some(mut client) = self.get_client().await? {
+            let devices_str = device_ids
+                .iter()
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            // Encode assignment request as a progress update with structured status.
+            // SY parses the "worker_assignment:<rank>:<endpoint>:<devices>" format
+            // and routes the assignment to the appropriate node.
+            let update = ProgressUpdate {
+                job_id: job_id.to_string(),
+                status: format!("worker_assignment:{rank}:{endpoint}:{devices_str}"),
+                loss: 0.0,
+                step: 0,
+            };
+            let stream = tokio_stream::once(update);
+            client
+                .report_progress(tonic::Request::new(stream))
+                .await
+                .map_err(|e| {
+                    synapse_types::SynapseError::BridgeError(format!(
+                        "Worker assignment request failed: {e}"
+                    ))
+                })?;
+        } else {
+            warn!("No gRPC connection — worker assignment skipped (degraded mode)");
+        }
+
         Ok(())
     }
 
@@ -279,8 +305,28 @@ impl BridgeClient {
             job_id,
             rank, checkpoint_path, "Notifying SY of checkpoint ready for sync"
         );
-        // TODO: Call SynapseBridge.SyncCheckpoint RPC.
-        // SY coordinates checkpoint transfer between nodes.
+        if let Some(mut client) = self.get_client().await? {
+            // Encode checkpoint sync as a progress update with structured status.
+            // SY parses "checkpoint_sync:<rank>:<path>" and coordinates transfer.
+            let update = ProgressUpdate {
+                job_id: job_id.to_string(),
+                status: format!("checkpoint_sync:{rank}:{checkpoint_path}"),
+                loss: 0.0,
+                step: 0,
+            };
+            let stream = tokio_stream::once(update);
+            client
+                .report_progress(tonic::Request::new(stream))
+                .await
+                .map_err(|e| {
+                    synapse_types::SynapseError::BridgeError(format!(
+                        "Checkpoint sync notification failed: {e}"
+                    ))
+                })?;
+        } else {
+            warn!("No gRPC connection — checkpoint sync skipped (degraded mode)");
+        }
+
         Ok(())
     }
 }

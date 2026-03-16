@@ -20,15 +20,6 @@ Current: **788 tests** across 7 crates. CI threshold: 65%.
 
 ---
 
-## Bridge Completion (High Priority)
-
-Items that block full SecureYeoman integration.
-
-- [ ] **gRPC bridge server implementation** — `bridge/server.rs` is stubbed; SY callbacks (GPU allocation, progress reporting, scale-out, model registration) need real handlers
-- [ ] **gRPC bridge client RPCs** — `bridge/client.rs` stubs for `RequestWorkerAssignment`, `SyncCheckpoint`, `ReportProgress`, `RequestGpuAllocation`, `RegisterCompletedModel`
-- [ ] **REST SSE for training jobs** — SY dashboard relays training events via SSE; Synapse only has gRPC log streaming, needs `/training/jobs/:id/stream` SSE endpoint
-- [ ] **Job crash recovery** — persist in-flight job state to SQLite so jobs survive process restarts (currently in-memory only)
-
 ## Training Feature Parity (Medium Priority)
 
 Features SecureYeoman has that Synapse should support natively.

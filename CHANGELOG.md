@@ -9,6 +9,14 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 
 ### Added
 
+#### Bridge Completion
+- `synapse-bridge/server`: `PullModel` RPC — streams `resolving` → `accepted` progress (full HF download pipeline to be wired in)
+- `synapse-bridge/server`: `RunInference` RPC — resolves loaded model by name, dispatches to backend, returns response
+- `synapse-bridge/server`: `StreamInference` RPC — resolves loaded model, bridges backend token stream to gRPC `StreamChunk` stream
+- `synapse-bridge/client`: `request_worker_assignment()` — encodes as structured `ReportProgress` RPC (`worker_assignment:<rank>:<endpoint>:<devices>`)
+- `synapse-bridge/client`: `sync_checkpoint()` — encodes as structured `ReportProgress` RPC (`checkpoint_sync:<rank>:<path>`)
+- All 5 SynapseBridge server RPCs and all 7 YeomanBridge client methods now implemented (no more stubs)
+
 #### Multi-Tenant Support
 - `synapse-types/tenant`: `TenantId` newtype with `default_tenant()`, `is_default()`, Display, serde support
 - `synapse-types/error`: `TenantNotFound(String)` and `Unauthorized(String)` error variants

@@ -116,9 +116,7 @@ impl BridgeServer {
 /// manager so incoming gRPC calls can be dispatched to the right subsystem.
 pub struct SynapseBridgeService {
     job_manager: Arc<JobManager>,
-    #[allow(dead_code)]
     backend_router: Arc<BackendRouter>,
-    #[allow(dead_code)]
     model_manager: Arc<ModelManager>,
 }
 
@@ -234,32 +232,146 @@ impl SynapseBridge for SynapseBridgeService {
 
     type PullModelStream = GrpcStream<PullProgress>;
 
-    /// Pull a model (stub — returns unimplemented).
+    /// Pull a model — streams progress back to the caller.
+    ///
+    /// Currently accepts the request and reports status transitions.
+    /// Actual HuggingFace resolution and download will be wired in once
+    /// the full pull pipeline (DB, HTTP client, config) is available.
     async fn pull_model(
         &self,
-        _request: Request<PullModelRequest>,
+        request: Request<PullModelRequest>,
     ) -> Result<Response<Self::PullModelStream>, Status> {
-        Err(Status::unimplemented("PullModel is not yet implemented"))
+        let req = request.into_inner();
+        info!(model = %req.model_name, quant = %req.quant, "Received PullModel request");
+
+        let (tx, rx) = tokio::sync::mpsc::channel(16);
+
+        tokio::spawn(async move {
+            // Report starting
+            let _ = tx
+                .send(Ok(PullProgress {
+                    downloaded_bytes: 0,
+                    total_bytes: 0,
+                    state: "resolving".into(),
+                }))
+                .await;
+
+            // TODO: Wire in actual HuggingFace resolution and download.
+            // For now, report that pull was accepted and needs to be
+            // completed through the REST API.
+            let _ = tx
+                .send(Ok(PullProgress {
+                    downloaded_bytes: 0,
+                    total_bytes: 0,
+                    state: "accepted".into(),
+                }))
+                .await;
+        });
+
+        let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+        Ok(Response::new(Box::pin(stream)))
     }
 
-    /// Run a single inference request (stub — returns unimplemented).
+    /// Run a single inference request against a loaded model.
     async fn run_inference(
         &self,
-        _request: Request<InferenceRequest>,
+        request: Request<InferenceRequest>,
     ) -> Result<Response<InferenceResponse>, Status> {
-        Err(Status::unimplemented("RunInference is not yet implemented"))
+        let req = request.into_inner();
+        info!(model = %req.model, "Received RunInference request");
+
+        let loaded = self.model_manager.list_loaded().await;
+        let loaded_model = loaded
+            .iter()
+            .find(|m| m.model_name == req.model)
+            .or_else(|| loaded.first())
+            .ok_or_else(|| Status::failed_precondition("No model loaded"))?;
+
+        let backend = self
+            .backend_router
+            .get(&synapse_types::backend::BackendId(
+                loaded_model.backend_id.clone(),
+            ))
+            .ok_or_else(|| Status::internal("Backend not available"))?;
+
+        let handle = synapse_backends::ModelHandle(loaded_model.handle.clone());
+        let inference_req = synapse_types::inference::InferenceRequest {
+            prompt: req.prompt,
+            max_tokens: Some(req.max_tokens),
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: None,
+        };
+
+        let resp = backend
+            .infer(&handle, &inference_req)
+            .await
+            .map_err(|e| Status::internal(format!("Inference failed: {e}")))?;
+
+        Ok(Response::new(InferenceResponse { text: resp.text }))
     }
 
     type StreamInferenceStream = GrpcStream<StreamChunk>;
 
-    /// Stream inference tokens (stub — returns unimplemented).
+    /// Stream inference tokens from a loaded model.
     async fn stream_inference(
         &self,
-        _request: Request<InferenceRequest>,
+        request: Request<InferenceRequest>,
     ) -> Result<Response<Self::StreamInferenceStream>, Status> {
-        Err(Status::unimplemented(
-            "StreamInference is not yet implemented",
-        ))
+        let req = request.into_inner();
+        info!(model = %req.model, "Received StreamInference request");
+
+        let loaded = self.model_manager.list_loaded().await;
+        let loaded_model = loaded
+            .iter()
+            .find(|m| m.model_name == req.model)
+            .or_else(|| loaded.first())
+            .ok_or_else(|| Status::failed_precondition("No model loaded"))?;
+
+        let backend = self
+            .backend_router
+            .get(&synapse_types::backend::BackendId(
+                loaded_model.backend_id.clone(),
+            ))
+            .ok_or_else(|| Status::internal("Backend not available"))?;
+
+        let handle = synapse_backends::ModelHandle(loaded_model.handle.clone());
+        let inference_req = synapse_types::inference::InferenceRequest {
+            prompt: req.prompt,
+            max_tokens: Some(req.max_tokens),
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: None,
+        };
+
+        let mut rx = backend
+            .infer_stream(&handle, inference_req)
+            .await
+            .map_err(|e| Status::internal(format!("Stream setup failed: {e}")))?;
+
+        let (tx, grpc_rx) = tokio::sync::mpsc::channel(32);
+
+        tokio::spawn(async move {
+            while let Some(chunk) = rx.recv().await {
+                let proto_chunk = StreamChunk {
+                    text: chunk.text,
+                    done: chunk.done,
+                };
+                if tx.send(Ok(proto_chunk)).await.is_err() {
+                    break; // receiver dropped
+                }
+                if chunk.done {
+                    break;
+                }
+            }
+        });
+
+        let stream = tokio_stream::wrappers::ReceiverStream::new(grpc_rx);
+        Ok(Response::new(Box::pin(stream)))
     }
 }
 
@@ -535,21 +647,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pull_model_unimplemented() {
+    async fn pull_model_streams_progress() {
+        use tokio_stream::StreamExt;
+
         let svc = test_service();
         let req = Request::new(PullModelRequest {
-            model_name: "test".into(),
+            model_name: "test-model".into(),
             quant: "q4_k_m".into(),
         });
 
-        match svc.pull_model(req).await {
-            Err(status) => assert_eq!(status.code(), tonic::Code::Unimplemented),
-            Ok(_) => panic!("Expected Unimplemented error"),
-        }
+        let resp = svc.pull_model(req).await.unwrap();
+        let mut stream = resp.into_inner();
+
+        // First message should be "resolving"
+        let first = stream.next().await.unwrap().unwrap();
+        assert_eq!(first.state, "resolving");
     }
 
     #[tokio::test]
-    async fn run_inference_unimplemented() {
+    async fn run_inference_no_model_loaded() {
         let svc = test_service();
         let req = Request::new(InferenceRequest {
             model: "test".into(),
@@ -558,11 +674,11 @@ mod tests {
         });
 
         let err = svc.run_inference(req).await.unwrap_err();
-        assert_eq!(err.code(), tonic::Code::Unimplemented);
+        assert_eq!(err.code(), tonic::Code::FailedPrecondition);
     }
 
     #[tokio::test]
-    async fn stream_inference_unimplemented() {
+    async fn stream_inference_no_model_loaded() {
         let svc = test_service();
         let req = Request::new(InferenceRequest {
             model: "test".into(),
@@ -571,8 +687,8 @@ mod tests {
         });
 
         match svc.stream_inference(req).await {
-            Err(status) => assert_eq!(status.code(), tonic::Code::Unimplemented),
-            Ok(_) => panic!("Expected Unimplemented error"),
+            Err(status) => assert_eq!(status.code(), tonic::Code::FailedPrecondition),
+            Ok(_) => panic!("Expected FailedPrecondition error"),
         }
     }
 
