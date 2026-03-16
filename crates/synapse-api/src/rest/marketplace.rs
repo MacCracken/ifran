@@ -180,7 +180,7 @@ pub async fn download(
 /// POST /marketplace/pull — download a model from a remote marketplace entry.
 pub async fn pull(
     State(state): State<AppState>,
-    Extension(_tenant_id): Extension<TenantId>,
+    Extension(tenant_id): Extension<TenantId>,
     Json(req): Json<PullRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, String)> {
     let client = synapse_core::pull::downloader::build_client()
@@ -208,6 +208,30 @@ pub async fn pull(
 
     synapse_core::pull::downloader::download(&client, &download_req, &progress)
         .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Register the pulled model in the DB, scoped to the requesting tenant
+    let metadata = tokio::fs::metadata(&dest)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let model = synapse_types::model::ModelInfo {
+        id: uuid::Uuid::new_v4(),
+        name: req.model_name.clone(),
+        repo_id: None,
+        format: synapse_types::model::ModelFormat::Gguf,
+        quant: synapse_types::model::QuantLevel::None,
+        size_bytes: metadata.len(),
+        parameter_count: None,
+        architecture: None,
+        license: None,
+        local_path: dest.to_string_lossy().to_string(),
+        sha256: req.expected_sha256.clone(),
+        pulled_at: chrono::Utc::now(),
+    };
+
+    let db = state.db.lock().await;
+    db.insert(&model, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok((

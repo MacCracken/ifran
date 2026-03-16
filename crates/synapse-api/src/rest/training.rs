@@ -56,7 +56,7 @@ pub async fn create_job(
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
     if req.auto_start {
-        if let Err(e) = state.job_manager.start_job(id).await {
+        if let Err(e) = state.job_manager.start_job(id, &tenant_id).await {
             tracing::warn!(job_id = %id, error = %e, "Auto-start failed for training job");
         }
 

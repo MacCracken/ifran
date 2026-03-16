@@ -157,4 +157,41 @@ mod tests {
             .unwrap();
         assert!(status.allowed);
     }
+
+    #[test]
+    fn budget_status_clone() {
+        let status = BudgetStatus {
+            allowed: true,
+            remaining_gpu_hours: 5.5,
+            reason: Some("test reason".into()),
+        };
+        let cloned = status.clone();
+        assert_eq!(cloned.allowed, true);
+        assert_eq!(cloned.remaining_gpu_hours, 5.5);
+        assert_eq!(cloned.reason.as_deref(), Some("test reason"));
+    }
+
+    #[tokio::test]
+    async fn checker_zero_budget_allows() {
+        // max_gpu_hours=0 means unlimited — should always allow
+        let checker = BudgetChecker::new("http://127.0.0.1:19999", 0.0);
+        let status = checker
+            .check_budget(&TenantId::default_tenant(), 1000.0)
+            .await
+            .unwrap();
+        assert!(status.allowed);
+        // remaining should be 0.0 (the configured limit)
+        assert_eq!(status.remaining_gpu_hours, 0.0);
+    }
+
+    #[tokio::test]
+    async fn checker_negative_hours_requested() {
+        // Edge case: requesting negative hours (should still work — allowed)
+        let checker = BudgetChecker::new("http://127.0.0.1:19999", 24.0);
+        let status = checker
+            .check_budget(&TenantId::default_tenant(), -1.0)
+            .await
+            .unwrap();
+        assert!(status.allowed);
+    }
 }

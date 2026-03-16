@@ -209,4 +209,56 @@ mod tests {
         let result = request_unlock(Path::new("/tmp"), "http://127.0.0.1:19998").await;
         assert!(result.is_err());
     }
+
+    #[test]
+    fn check_encryption_with_real_tmp() {
+        // /tmp should exist and return a definitive status (not panic)
+        let status = check_encryption(Path::new("/tmp"));
+        // Must be one of the three variants — the key thing is no panic
+        match &status {
+            EncryptionStatus::Encrypted { device } => assert!(!device.is_empty()),
+            EncryptionStatus::Unencrypted => {}
+            EncryptionStatus::Unknown => {}
+        }
+    }
+
+    #[test]
+    fn verify_encryption_not_required_unknown_path() {
+        // Nonexistent path + not required = Ok(Unknown)
+        let result = verify_encryption_requirement(Path::new("/nonexistent/path/xyz/12345"), false);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), EncryptionStatus::Unknown);
+    }
+
+    #[test]
+    fn encryption_status_clone_and_debug() {
+        let encrypted = EncryptionStatus::Encrypted {
+            device: "/dev/mapper/luks".into(),
+        };
+        let cloned = encrypted.clone();
+        assert_eq!(encrypted, cloned);
+        // Debug should produce a non-empty string
+        let debug = format!("{:?}", encrypted);
+        assert!(debug.contains("Encrypted"));
+
+        let unknown = EncryptionStatus::Unknown;
+        let debug_unknown = format!("{:?}", unknown);
+        assert!(debug_unknown.contains("Unknown"));
+    }
+
+    #[test]
+    fn encryption_status_display_all_variants() {
+        // Verify Display for all three variants returns non-empty strings
+        let encrypted = EncryptionStatus::Encrypted {
+            device: "/dev/dm-0".into(),
+        };
+        let display = format!("{}", encrypted);
+        assert!(display.contains("dm-0"));
+
+        let unencrypted = format!("{}", EncryptionStatus::Unencrypted);
+        assert_eq!(unencrypted, "unencrypted");
+
+        let unknown = format!("{}", EncryptionStatus::Unknown);
+        assert_eq!(unknown, "unknown");
+    }
 }

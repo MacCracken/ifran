@@ -113,10 +113,14 @@ impl DeviceAllocator {
             devices[i].allocated_mb += memory_per_device_mb;
         }
 
+        let total_memory = memory_per_device_mb
+            .checked_mul(count as u64)
+            .ok_or_else(|| SynapseError::HardwareError("Memory calculation overflow".into()))?;
+
         let alloc = Allocation {
             id: uuid::Uuid::new_v4(),
             device_ids,
-            memory_mb: memory_per_device_mb * count as u64,
+            memory_mb: total_memory,
             memory_per_device_mb,
             job_label: job_label.to_string(),
         };
@@ -282,5 +286,95 @@ mod tests {
         alloc.init_from_hardware(&mock_gpus(1, 8192)).await;
         let avail = alloc.available_memory().await;
         assert_eq!(avail[0].1, 7192); // 8192 - 1000 reserve
+    }
+
+    #[tokio::test]
+    async fn allocate_all_devices() {
+        let alloc = DeviceAllocator::new(0);
+        alloc.init_from_hardware(&mock_gpus(4, 8192)).await;
+        // Request all 4 devices
+        let a = alloc.allocate(4000, 4, "full-use").await.unwrap();
+        assert_eq!(a.device_ids.len(), 4);
+        assert_eq!(a.memory_mb, 4000 * 4);
+        assert_eq!(alloc.list_allocations().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn deallocate_then_reallocate() {
+        let alloc = DeviceAllocator::new(0);
+        alloc.init_from_hardware(&mock_gpus(1, 8192)).await;
+
+        // Allocate nearly all memory
+        let a1 = alloc.allocate(7000, 1, "job-1").await.unwrap();
+        // Should not fit another 7000
+        assert!(alloc.allocate(7000, 1, "job-2").await.is_err());
+
+        // Free and re-allocate
+        alloc.deallocate(a1.id).await.unwrap();
+        let a2 = alloc.allocate(7000, 1, "job-2").await.unwrap();
+        assert_eq!(a2.device_ids.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn concurrent_allocate_and_deallocate() {
+        let alloc = std::sync::Arc::new(DeviceAllocator::new(0));
+        alloc.init_from_hardware(&mock_gpus(8, 16384)).await;
+
+        let mut handles = vec![];
+        // 8 concurrent allocations of 1 device each
+        for i in 0..8 {
+            let alloc = alloc.clone();
+            handles.push(tokio::spawn(async move {
+                let a = alloc.allocate(1000, 1, &format!("job-{i}")).await.unwrap();
+                a.id
+            }));
+        }
+        let mut ids = vec![];
+        for h in handles {
+            ids.push(h.await.unwrap());
+        }
+        assert_eq!(alloc.list_allocations().await.len(), 8);
+
+        // Deallocate all concurrently
+        let mut handles = vec![];
+        for id in ids {
+            let alloc = alloc.clone();
+            handles.push(tokio::spawn(async move {
+                alloc.deallocate(id).await.unwrap();
+            }));
+        }
+        for h in handles {
+            h.await.unwrap();
+        }
+        assert!(alloc.list_allocations().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn available_memory_after_multiple_allocations() {
+        let alloc = DeviceAllocator::new(0);
+        alloc.init_from_hardware(&mock_gpus(2, 8192)).await;
+
+        alloc.allocate(2000, 1, "job-1").await.unwrap();
+        alloc.allocate(3000, 1, "job-2").await.unwrap();
+
+        let avail = alloc.available_memory().await;
+        // One device got 2000 allocated, the other got 3000 (fair scheduling picks least-loaded)
+        let mut mems: Vec<u64> = avail.iter().map(|(_, m)| *m).collect();
+        mems.sort();
+        assert_eq!(mems, vec![5192, 6192]);
+    }
+
+    #[tokio::test]
+    async fn allocate_memory_overflow_detection() {
+        let alloc = DeviceAllocator::new(0);
+        alloc.init_from_hardware(&mock_gpus(2, u64::MAX)).await;
+        // u64::MAX * 2 would overflow
+        let result = alloc.allocate(u64::MAX, 2, "overflow-job").await;
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("overflow"),
+            "Expected overflow error, got: {err_msg}"
+        );
     }
 }

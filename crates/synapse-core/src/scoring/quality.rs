@@ -276,4 +276,47 @@ mod tests {
             .unwrap();
         assert_eq!(completeness.score, 1.0);
     }
+
+    #[test]
+    fn score_only_punctuation() {
+        let score = score_response("What is AI?", "...");
+        // "..." is 1 word, ends with '.', so completeness=1.0
+        let completeness = score
+            .criteria
+            .iter()
+            .find(|c| c.name == "completeness")
+            .unwrap();
+        assert_eq!(completeness.score, 1.0);
+        // Length: 1 word response to 3-word prompt, ratio ~0.33 < 0.5 => penalized
+        let length = score
+            .criteria
+            .iter()
+            .find(|c| c.name == "length_adequacy")
+            .unwrap();
+        assert!(length.score < 1.0);
+    }
+
+    #[test]
+    fn score_very_short_prompt_long_response() {
+        let prompt = "Why?";
+        // ~100 words in response
+        let response = "Because the fundamental nature of existence requires us to question \
+            everything we encounter in our daily lives. The pursuit of knowledge drives \
+            human civilization forward, enabling us to create technologies, build societies, \
+            and understand the universe around us. Without curiosity, we would remain \
+            stagnant, unable to progress beyond our current limitations. Every great \
+            discovery began with a simple question, much like the one you have just asked. \
+            It is through these questions that we find meaning, purpose, and direction in \
+            an otherwise chaotic world. The answer lies within the question itself.";
+        let score = score_response(prompt, response);
+        // Very long relative to prompt — length should be penalized
+        let length = score
+            .criteria
+            .iter()
+            .find(|c| c.name == "length_adequacy")
+            .unwrap();
+        assert!(length.score < 1.0);
+        // But overall score should still be reasonable due to good completeness/coherence
+        assert!(score.overall > 0.0);
+    }
 }

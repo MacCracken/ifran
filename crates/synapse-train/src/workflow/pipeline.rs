@@ -249,4 +249,53 @@ mod tests {
         assert!(validate_dag(&pipeline).is_ok());
         assert!(ready_steps(&pipeline).is_empty());
     }
+
+    #[test]
+    fn diamond_dependency() {
+        // A -> B, A -> C, B -> D, C -> D
+        let a = step("A", StepType::Curate, vec![]);
+        let b = step("B", StepType::Train, vec![a.id]);
+        let c = step("C", StepType::Evaluate, vec![a.id]);
+        let d = step("D", StepType::Deploy, vec![b.id, c.id]);
+
+        let pipeline = Pipeline {
+            name: "diamond".into(),
+            steps: vec![a.clone(), b.clone(), c.clone(), d.clone()],
+        };
+        assert!(validate_dag(&pipeline).is_ok());
+
+        // Initially only A is ready
+        let ready = ready_steps(&pipeline);
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0], a.id);
+    }
+
+    #[test]
+    fn single_step_pipeline() {
+        let s = step("only", StepType::Deploy, vec![]);
+        let pipeline = Pipeline {
+            name: "single".into(),
+            steps: vec![s.clone()],
+        };
+        assert!(validate_dag(&pipeline).is_ok());
+        let ready = ready_steps(&pipeline);
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0], s.id);
+    }
+
+    #[test]
+    fn step_status_serde() {
+        for status in [
+            StepStatus::Pending,
+            StepStatus::Running,
+            StepStatus::Completed,
+            StepStatus::Failed,
+            StepStatus::Skipped,
+            StepStatus::WaitingApproval,
+        ] {
+            let json = serde_json::to_string(&status).unwrap();
+            let back: StepStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(status, back);
+        }
+    }
 }

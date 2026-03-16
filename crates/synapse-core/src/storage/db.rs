@@ -349,4 +349,54 @@ mod tests {
         let result = db.delete(Uuid::new_v4(), &tenant);
         assert!(matches!(result, Err(SynapseError::ModelNotFound(_))));
     }
+
+    #[test]
+    fn count_with_tenant() {
+        let db = ModelDatabase::open_memory().unwrap();
+        let tenant_a = TenantId("tenant-a".into());
+        let tenant_b = TenantId("tenant-b".into());
+
+        let mut m1 = sample_model();
+        m1.name = "model-a".into();
+        db.insert(&m1, &tenant_a).unwrap();
+
+        let mut m2 = sample_model();
+        m2.name = "model-b".into();
+        db.insert(&m2, &tenant_a).unwrap();
+
+        let mut m3 = sample_model();
+        m3.name = "model-c".into();
+        db.insert(&m3, &tenant_b).unwrap();
+
+        assert_eq!(db.count(&tenant_a).unwrap(), 2);
+        assert_eq!(db.count(&tenant_b).unwrap(), 1);
+    }
+
+    #[test]
+    fn get_by_name_wrong_tenant() {
+        let db = ModelDatabase::open_memory().unwrap();
+        let tenant_a = TenantId("tenant-a".into());
+        let tenant_b = TenantId("tenant-b".into());
+
+        let model = sample_model();
+        db.insert(&model, &tenant_a).unwrap();
+
+        // Should not find it under a different tenant
+        let result = db.get_by_name("llama-3.1-8b", &tenant_b);
+        assert!(matches!(result, Err(SynapseError::ModelNotFound(_))));
+    }
+
+    #[test]
+    fn update_wrong_tenant() {
+        let db = ModelDatabase::open_memory().unwrap();
+        let tenant_a = TenantId("tenant-a".into());
+        let tenant_b = TenantId("tenant-b".into());
+
+        let mut model = sample_model();
+        db.insert(&model, &tenant_a).unwrap();
+
+        model.name = "updated-name".into();
+        let result = db.update(&model, &tenant_b);
+        assert!(matches!(result, Err(SynapseError::ModelNotFound(_))));
+    }
 }

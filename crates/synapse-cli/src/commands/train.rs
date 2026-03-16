@@ -67,7 +67,9 @@ pub async fn execute(base_model: &str, dataset: &str, method: &str) -> Result<()
         .await?;
     eprintln!("Created training job: {job_id}");
 
-    manager.start_job(job_id).await?;
+    manager
+        .start_job(job_id, &synapse_types::TenantId::default_tenant())
+        .await?;
     eprintln!("Training job started. Use 'synapse status' to monitor progress.");
 
     Ok(())

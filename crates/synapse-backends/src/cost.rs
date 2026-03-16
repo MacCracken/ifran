@@ -161,4 +161,28 @@ mod tests {
         let s = selected.unwrap();
         assert!(s == "a" || s == "b" || s == "c");
     }
+
+    #[test]
+    fn empty_costs_cheapest_returns_based_on_max_default() {
+        // No costs configured — all backends get f64::MAX as default cost
+        let config = CostConfig::new();
+        let result = config.cheapest(&["alpha", "beta"]);
+        // Should still return something (any candidate), since all have equal MAX cost
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn single_candidate() {
+        let mut config = CostConfig::new();
+        config.set_cost("only-one", 0.01);
+        assert_eq!(config.cheapest(&["only-one"]), Some("only-one"));
+        assert_eq!(
+            config.select_within_budget(&["only-one"], 0.02),
+            Some("only-one")
+        );
+        assert_eq!(
+            config.select_within_budget(&["only-one"], 0.001),
+            Some("only-one")
+        );
+    }
 }

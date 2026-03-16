@@ -34,6 +34,7 @@ impl JobStore {
             .execute_batch(
                 "CREATE TABLE IF NOT EXISTS training_jobs (
                     id              TEXT PRIMARY KEY,
+                    tenant_id       TEXT NOT NULL DEFAULT 'default',
                     config_json     TEXT NOT NULL,
                     status          TEXT NOT NULL,
                     current_step    INTEGER NOT NULL DEFAULT 0,
@@ -62,11 +63,12 @@ impl JobStore {
         self.conn
             .execute(
                 "INSERT OR REPLACE INTO training_jobs
-                    (id, config_json, status, current_step, total_steps, current_epoch,
+                    (id, tenant_id, config_json, status, current_step, total_steps, current_epoch,
                      current_loss, created_at, started_at, completed_at, error)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
                     job.id.to_string(),
+                    job.tenant_id.0.as_str(),
                     config_json,
                     status_str,
                     job.current_step as i64,
@@ -168,43 +170,44 @@ impl JobStore {
 
 fn row_to_job_state(row: &rusqlite::Row) -> rusqlite::Result<JobState> {
     let id_str: String = row.get(0)?;
-    let config_json: String = row.get(1)?;
-    let status_str: String = row.get(2)?;
-    let current_step: i64 = row.get(3)?;
-    let total_steps: i64 = row.get(4)?;
-    let current_epoch: f64 = row.get(5)?;
-    let current_loss: Option<f64> = row.get(6)?;
-    let created_at_str: String = row.get(7)?;
-    let started_at_str: Option<String> = row.get(8)?;
-    let completed_at_str: Option<String> = row.get(9)?;
-    let error: Option<String> = row.get(10)?;
+    let tenant_id_str: String = row.get(1)?;
+    let config_json: String = row.get(2)?;
+    let status_str: String = row.get(3)?;
+    let current_step: i64 = row.get(4)?;
+    let total_steps: i64 = row.get(5)?;
+    let current_epoch: f64 = row.get(6)?;
+    let current_loss: Option<f64> = row.get(7)?;
+    let created_at_str: String = row.get(8)?;
+    let started_at_str: Option<String> = row.get(9)?;
+    let completed_at_str: Option<String> = row.get(10)?;
+    let error: Option<String> = row.get(11)?;
 
     let id = Uuid::parse_str(&id_str).map_err(|e| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     })?;
 
     let config: TrainingJobConfig = serde_json::from_str(&config_json).map_err(|e| {
-        rusqlite::Error::FromSqlConversionFailure(1, rusqlite::types::Type::Text, Box::new(e))
+        rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, Box::new(e))
     })?;
 
     let status: TrainingStatus =
         serde_json::from_str(&format!("\"{status_str}\"")).map_err(|e| {
-            rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, Box::new(e))
+            rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e))
         })?;
 
-    let created_at = parse_rfc3339(&created_at_str, 7)?;
+    let created_at = parse_rfc3339(&created_at_str, 8)?;
     let started_at = started_at_str
         .as_deref()
-        .map(|s| parse_rfc3339(s, 8))
+        .map(|s| parse_rfc3339(s, 9))
         .transpose()?;
     let completed_at = completed_at_str
         .as_deref()
-        .map(|s| parse_rfc3339(s, 9))
+        .map(|s| parse_rfc3339(s, 10))
         .transpose()?;
 
     Ok(JobState {
         id,
-        tenant_id: TenantId::default_tenant(), // TODO: persist tenant_id in schema
+        tenant_id: TenantId(tenant_id_str),
         config,
         status,
         current_step: current_step as u64,

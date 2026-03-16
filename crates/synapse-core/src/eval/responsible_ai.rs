@@ -229,4 +229,48 @@ mod tests {
         assert!(report.fairness.demographic_parity_gap < f64::EPSILON);
         assert!((report.fairness.disparate_impact_ratio - 1.0).abs() < f64::EPSILON);
     }
+
+    #[test]
+    fn many_cohorts() {
+        // 10 cohorts with varying accuracy
+        let mut samples = vec![];
+        for i in 0..10 {
+            let cohort = format!("cohort-{i}");
+            // Each cohort has (i+1) correct out of 10 samples
+            for j in 0..10 {
+                samples.push(LabeledSample {
+                    cohort: cohort.clone(),
+                    correct: j < (i + 1),
+                });
+            }
+        }
+        let report = compute_report("multi-cohort-model", &samples);
+        assert_eq!(report.total_samples, 100);
+        assert_eq!(report.cohort_metrics.len(), 10);
+        // Best cohort: cohort-9 with 10/10 = 100%
+        // Worst cohort: cohort-0 with 1/10 = 10%
+        assert!(report.fairness.demographic_parity_gap > 0.8);
+        assert!(!report.fairness.passes_80_percent_rule);
+    }
+
+    #[test]
+    fn perfect_parity() {
+        // Identical accuracy across all 5 cohorts
+        let mut samples = vec![];
+        for i in 0..5 {
+            let cohort = format!("group-{i}");
+            // 7 out of 10 correct for each
+            for j in 0..10 {
+                samples.push(LabeledSample {
+                    cohort: cohort.clone(),
+                    correct: j < 7,
+                });
+            }
+        }
+        let report = compute_report("fair-model", &samples);
+        assert_eq!(report.cohort_metrics.len(), 5);
+        assert!(report.fairness.demographic_parity_gap < f64::EPSILON);
+        assert!((report.fairness.disparate_impact_ratio - 1.0).abs() < f64::EPSILON);
+        assert!(report.fairness.passes_80_percent_rule);
+    }
 }

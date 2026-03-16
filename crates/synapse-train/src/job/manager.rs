@@ -131,8 +131,8 @@ impl JobManager {
         Ok(id)
     }
 
-    /// Start a queued job.
-    pub async fn start_job(&self, id: TrainingJobId) -> Result<()> {
+    /// Start a queued job. The caller must provide the tenant_id to verify ownership.
+    pub async fn start_job(&self, id: TrainingJobId, tenant_id: &TenantId) -> Result<()> {
         let mut jobs = self.jobs.write().await;
 
         // Check running count inside the write lock to prevent race condition
@@ -151,6 +151,11 @@ impl JobManager {
         let state = jobs
             .get_mut(&id)
             .ok_or_else(|| SynapseError::TrainingError(format!("Job {id} not found")))?;
+
+        // Verify tenant ownership
+        if &state.tenant_id != tenant_id {
+            return Err(SynapseError::TrainingError(format!("Job {id} not found")));
+        }
 
         if state.status != TrainingStatus::Queued {
             return Err(SynapseError::TrainingError(format!(
@@ -552,5 +557,60 @@ mod tests {
             let job = manager.get_job(id, &tenant).await.unwrap();
             assert_eq!(job.current_step, 9);
         }
+    }
+
+    #[tokio::test]
+    async fn list_jobs_tenant_filtered() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 10);
+        let tenant_a = TenantId("tenant-a".into());
+        let tenant_b = TenantId("tenant-b".into());
+
+        manager
+            .create_job(test_config(), tenant_a.clone())
+            .await
+            .unwrap();
+        manager
+            .create_job(test_config(), tenant_a.clone())
+            .await
+            .unwrap();
+        manager
+            .create_job(test_config(), tenant_b.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(manager.list_jobs(None, &tenant_a).await.len(), 2);
+        assert_eq!(manager.list_jobs(None, &tenant_b).await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn get_job_wrong_tenant() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 10);
+        let tenant_a = TenantId("tenant-a".into());
+        let tenant_b = TenantId("tenant-b".into());
+
+        let id = manager
+            .create_job(test_config(), tenant_a.clone())
+            .await
+            .unwrap();
+
+        // Should fail when accessed with wrong tenant
+        let result = manager.get_job(id, &tenant_b).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn cancel_job_wrong_tenant() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 10);
+        let tenant_a = TenantId("tenant-a".into());
+        let tenant_b = TenantId("tenant-b".into());
+
+        let id = manager
+            .create_job(test_config(), tenant_a.clone())
+            .await
+            .unwrap();
+
+        // Should fail when cancelled with wrong tenant
+        let result = manager.cancel_job(id, &tenant_b).await;
+        assert!(result.is_err());
     }
 }

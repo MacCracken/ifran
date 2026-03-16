@@ -426,4 +426,85 @@ mod tests {
             "model-a"
         );
     }
+
+    #[tokio::test]
+    async fn list_loaded_filters_by_tenant() {
+        let manager = ModelManager::new(512);
+        let tenant_a = TenantId("tenant-x".into());
+        let tenant_b = TenantId("tenant-y".into());
+
+        // Register 3 models for tenant_a, 2 for tenant_b
+        for i in 0..3 {
+            manager
+                .register_loaded(
+                    uuid::Uuid::new_v4(),
+                    format!("model-a-{i}"),
+                    format!("h-a-{i}"),
+                    "llamacpp".into(),
+                    1000,
+                    tenant_a.clone(),
+                )
+                .await;
+        }
+        for i in 0..2 {
+            manager
+                .register_loaded(
+                    uuid::Uuid::new_v4(),
+                    format!("model-b-{i}"),
+                    format!("h-b-{i}"),
+                    "llamacpp".into(),
+                    2000,
+                    tenant_b.clone(),
+                )
+                .await;
+        }
+
+        assert_eq!(manager.list_loaded(Some(&tenant_a)).await.len(), 3);
+        assert_eq!(manager.list_loaded(Some(&tenant_b)).await.len(), 2);
+        assert_eq!(manager.list_loaded(None).await.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn list_loaded_none_returns_all() {
+        let manager = ModelManager::new(512);
+        let t1 = TenantId("t1".into());
+        let t2 = TenantId("t2".into());
+        let t3 = TenantId("t3".into());
+
+        manager
+            .register_loaded(
+                uuid::Uuid::new_v4(),
+                "m1".into(),
+                "h1".into(),
+                "backend".into(),
+                100,
+                t1,
+            )
+            .await;
+        manager
+            .register_loaded(
+                uuid::Uuid::new_v4(),
+                "m2".into(),
+                "h2".into(),
+                "backend".into(),
+                200,
+                t2,
+            )
+            .await;
+        manager
+            .register_loaded(
+                uuid::Uuid::new_v4(),
+                "m3".into(),
+                "h3".into(),
+                "backend".into(),
+                300,
+                t3,
+            )
+            .await;
+
+        // None filter returns everything
+        let all = manager.list_loaded(None).await;
+        assert_eq!(all.len(), 3);
+        assert_eq!(manager.total_vram_used().await, 600);
+    }
 }

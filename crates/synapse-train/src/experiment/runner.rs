@@ -274,7 +274,7 @@ impl ExperimentRunner {
             .job_manager
             .create_job(config.clone(), tenant.clone())
             .await?;
-        self.job_manager.start_job(job_id).await?;
+        self.job_manager.start_job(job_id, &tenant).await?;
 
         // Poll every 5 seconds until terminal, with wall-clock timeout
         let wall_timeout = config

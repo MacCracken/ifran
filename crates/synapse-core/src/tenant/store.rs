@@ -248,4 +248,49 @@ mod tests {
         assert!(raw_key.starts_with("syn_"));
         assert_eq!(raw_key.len(), 36); // "syn_" + 32 hex chars
     }
+
+    #[test]
+    fn create_multiple_tenants() {
+        let store = TenantStore::open_in_memory().unwrap();
+        let (r1, _) = store.create_tenant("Tenant A").unwrap();
+        let (r2, _) = store.create_tenant("Tenant B").unwrap();
+        let (r3, _) = store.create_tenant("Tenant C").unwrap();
+        // All IDs should be unique
+        assert_ne!(r1.id, r2.id);
+        assert_ne!(r2.id, r3.id);
+        assert_ne!(r1.id, r3.id);
+        assert_eq!(store.list_tenants().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn disable_already_disabled() {
+        let store = TenantStore::open_in_memory().unwrap();
+        let (record, raw_key) = store.create_tenant("Test").unwrap();
+        store.disable_tenant(&record.id).unwrap();
+        // Disable again — should be idempotent (UPDATE still matches 1 row)
+        store.disable_tenant(&record.id).unwrap();
+        let resolved = store.resolve_by_key(&raw_key).unwrap();
+        assert!(!resolved.enabled);
+    }
+
+    #[test]
+    fn enable_already_enabled() {
+        let store = TenantStore::open_in_memory().unwrap();
+        let (record, raw_key) = store.create_tenant("Test").unwrap();
+        // Already enabled by default — enable again
+        store.enable_tenant(&record.id).unwrap();
+        let resolved = store.resolve_by_key(&raw_key).unwrap();
+        assert!(resolved.enabled);
+    }
+
+    #[test]
+    fn resolve_disabled_tenant() {
+        let store = TenantStore::open_in_memory().unwrap();
+        let (record, raw_key) = store.create_tenant("Test").unwrap();
+        store.disable_tenant(&record.id).unwrap();
+        // resolve_by_key still returns the record, just with enabled=false
+        let resolved = store.resolve_by_key(&raw_key).unwrap();
+        assert_eq!(resolved.id, record.id);
+        assert!(!resolved.enabled);
+    }
 }

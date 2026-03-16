@@ -312,4 +312,38 @@ mod tests {
         assert_eq!(baseline.sample_count, 1);
         assert_eq!(baseline.std_dev, 0.0);
     }
+
+    #[test]
+    fn large_sample_baseline() {
+        let det = DriftDetector::open_in_memory(2.0).unwrap();
+        // 1000 samples with values 0.001..1.0
+        let scores: Vec<f64> = (1..=1000).map(|i| i as f64 / 1000.0).collect();
+        let baseline = det.record_baseline("large-model", &scores, &t()).unwrap();
+        assert_eq!(baseline.sample_count, 1000);
+        // Mean should be ~0.5005
+        assert!((baseline.mean_score - 0.5005).abs() < 0.01);
+        // Std dev should be ~0.2887 for uniform
+        assert!(baseline.std_dev > 0.2);
+        assert!(baseline.std_dev < 0.35);
+    }
+
+    #[test]
+    fn drift_severity_boundary_values() {
+        use synapse_types::drift::DriftSeverity;
+        // Exact boundary values: >1.0, >2.0, >3.0, >4.0
+        // At exactly 1.0, should be None (not >1.0)
+        assert_eq!(DriftSeverity::from_z_score(1.0), DriftSeverity::None);
+        // At exactly 2.0, should be Low (not >2.0)
+        assert_eq!(DriftSeverity::from_z_score(2.0), DriftSeverity::Low);
+        // At exactly 3.0, should be Medium (not >3.0)
+        assert_eq!(DriftSeverity::from_z_score(3.0), DriftSeverity::Medium);
+        // At exactly 4.0, should be High (not >4.0)
+        assert_eq!(DriftSeverity::from_z_score(4.0), DriftSeverity::High);
+
+        // Just above boundaries
+        assert_eq!(DriftSeverity::from_z_score(1.001), DriftSeverity::Low);
+        assert_eq!(DriftSeverity::from_z_score(2.001), DriftSeverity::Medium);
+        assert_eq!(DriftSeverity::from_z_score(3.001), DriftSeverity::High);
+        assert_eq!(DriftSeverity::from_z_score(4.001), DriftSeverity::Critical);
+    }
 }

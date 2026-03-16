@@ -185,6 +185,28 @@ impl Default for SynapseConfig {
 }
 
 impl SynapseConfig {
+    /// Validate configuration for logical consistency.
+    pub fn validate(&self) -> synapse_types::error::Result<()> {
+        if self.security.multi_tenant && !self.security.auth_required {
+            // In multi-tenant mode, auth is always enforced via tenant keys,
+            // but warn if auth_required is false (it's ignored in multi-tenant).
+            // This is not an error — multi-tenant overrides auth_required.
+        }
+        if self.budget.enabled && self.budget.max_gpu_hours_per_day < 0.0 {
+            return Err(synapse_types::SynapseError::ConfigError(
+                "max_gpu_hours_per_day must be >= 0".into(),
+            ));
+        }
+        if self.budget.max_gpu_hours_per_day.is_nan()
+            || self.budget.max_gpu_hours_per_day.is_infinite()
+        {
+            return Err(synapse_types::SynapseError::ConfigError(
+                "max_gpu_hours_per_day must be finite".into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Load config from a specific file path.
     pub fn load(path: &std::path::Path) -> synapse_types::error::Result<Self> {
         let content = std::fs::read_to_string(path)
@@ -437,5 +459,118 @@ multi_tenant = true
     fn security_config_multi_tenant_default_false() {
         let sec = SecurityConfig::default();
         assert!(!sec.multi_tenant);
+    }
+
+    #[test]
+    fn validate_default_config_ok() {
+        let cfg = SynapseConfig::default();
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_negative_gpu_hours_rejected() {
+        let mut cfg = SynapseConfig::default();
+        cfg.budget.enabled = true;
+        cfg.budget.max_gpu_hours_per_day = -1.0;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn validate_nan_gpu_hours_rejected() {
+        let mut cfg = SynapseConfig::default();
+        cfg.budget.max_gpu_hours_per_day = f64::NAN;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn validate_infinite_gpu_hours_rejected() {
+        let mut cfg = SynapseConfig::default();
+        cfg.budget.max_gpu_hours_per_day = f64::INFINITY;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn validate_multi_tenant_without_auth_ok() {
+        // Not an error — multi-tenant overrides auth_required
+        let mut cfg = SynapseConfig::default();
+        cfg.security.multi_tenant = true;
+        cfg.security.auth_required = false;
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_budget_disabled_negative_hours_ok() {
+        // When budget is disabled, negative hours don't matter
+        let mut cfg = SynapseConfig::default();
+        cfg.budget.enabled = false;
+        cfg.budget.max_gpu_hours_per_day = -5.0;
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn budget_config_defaults() {
+        let budget = BudgetConfig::default();
+        assert!(!budget.enabled);
+        assert_eq!(budget.hoosh_endpoint, "http://127.0.0.1:9401");
+        assert_eq!(budget.max_gpu_hours_per_day, 0.0);
+    }
+
+    #[test]
+    fn default_config_serde_roundtrip() {
+        let cfg = SynapseConfig::default();
+        let toml_str = toml::to_string(&cfg).unwrap();
+        let back: SynapseConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(back.server.bind, cfg.server.bind);
+        assert_eq!(back.backends.default, cfg.backends.default);
+        assert_eq!(back.budget.enabled, cfg.budget.enabled);
+    }
+
+    #[test]
+    fn config_with_budget_section() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let toml_content = r#"
+[server]
+bind = "127.0.0.1:9000"
+grpc_bind = "127.0.0.1:9001"
+
+[storage]
+models_dir = "/tmp/models"
+database = "/tmp/test.db"
+cache_dir = "/tmp/cache"
+
+[backends]
+default = "llamacpp"
+enabled = ["llamacpp"]
+
+[training]
+executor = "subprocess"
+max_concurrent_jobs = 2
+checkpoints_dir = "/tmp/checkpoints"
+
+[bridge]
+enabled = false
+heartbeat_interval_secs = 10
+
+[hardware]
+gpu_memory_reserve_mb = 512
+
+[budget]
+enabled = true
+hoosh_endpoint = "http://10.0.0.1:9401"
+max_gpu_hours_per_day = 48.0
+"#;
+        std::fs::write(tmp.path(), toml_content).unwrap();
+        let cfg = SynapseConfig::load(tmp.path()).unwrap();
+        assert!(cfg.budget.enabled);
+        assert_eq!(cfg.budget.hoosh_endpoint, "http://10.0.0.1:9401");
+        assert_eq!(cfg.budget.max_gpu_hours_per_day, 48.0);
+    }
+
+    #[test]
+    fn validate_normal_budget_ok() {
+        let mut cfg = SynapseConfig::default();
+        cfg.budget.enabled = true;
+        cfg.budget.max_gpu_hours_per_day = 24.0;
+        assert!(cfg.validate().is_ok());
     }
 }

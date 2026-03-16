@@ -166,7 +166,7 @@ impl SynapseBridge for SynapseBridgeService {
             .map_err(|e| Status::internal(format!("Failed to create job: {e}")))?;
 
         self.job_manager
-            .start_job(job_id)
+            .start_job(job_id, &TenantId::default_tenant())
             .await
             .map_err(|e| Status::internal(format!("Failed to start job: {e}")))?;
 
