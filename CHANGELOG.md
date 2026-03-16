@@ -5,6 +5,13 @@ All notable changes to Synapse will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 
+## [2026.3.15]
+
+### Changed
+- Workspace version bumped to 2026.3.15
+
+---
+
 ## [2026.3.14]
 
 ### Added
