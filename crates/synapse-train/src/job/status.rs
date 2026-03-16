@@ -2,12 +2,14 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use synapse_types::TenantId;
 use synapse_types::training::{CheckpointInfo, TrainingJobConfig, TrainingJobId, TrainingStatus};
 
 /// Full state of a training job.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobState {
     pub id: TrainingJobId,
+    pub tenant_id: TenantId,
     pub config: TrainingJobConfig,
     pub status: TrainingStatus,
     pub current_step: u64,
@@ -22,9 +24,10 @@ pub struct JobState {
 }
 
 impl JobState {
-    pub fn new(id: TrainingJobId, config: TrainingJobConfig, total_steps: u64) -> Self {
+    pub fn new(id: TrainingJobId, tenant_id: TenantId, config: TrainingJobConfig, total_steps: u64) -> Self {
         Self {
             id,
+            tenant_id,
             config,
             status: TrainingStatus::Queued,
             current_step: 0,
