@@ -4,7 +4,7 @@ use synapse_core::config::SynapseConfig;
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::init();
+    synapse_api::middleware::telemetry::init_tracing();
 
     let config = SynapseConfig::discover();
 

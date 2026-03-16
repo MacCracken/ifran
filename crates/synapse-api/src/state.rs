@@ -9,11 +9,13 @@ use synapse_core::config::SynapseConfig;
 use synapse_core::eval::runner::EvalRunner;
 use synapse_core::experiment::store::ExperimentStore;
 use synapse_core::lifecycle::manager::ModelManager;
+use synapse_core::lineage::store::LineageStore;
 use synapse_core::marketplace::catalog::MarketplaceCatalog;
 use synapse_core::rag::store::RagStore;
 use synapse_core::rlhf::store::AnnotationStore;
 use synapse_core::storage::db::ModelDatabase;
 use synapse_core::tenant::store::TenantStore;
+use synapse_core::versioning::store::VersionStore;
 use synapse_train::distributed::coordinator::DistributedCoordinator;
 use synapse_train::executor::ExecutorKind;
 use synapse_train::experiment::runner::ExperimentHandle;
@@ -41,6 +43,8 @@ pub struct AppState {
     pub rag_store: Option<Arc<Mutex<RagStore>>>,
     pub annotation_store: Option<Arc<Mutex<AnnotationStore>>>,
     pub tenant_store: Option<Arc<Mutex<TenantStore>>>,
+    pub lineage_store: Option<Arc<Mutex<LineageStore>>>,
+    pub version_store: Option<Arc<Mutex<VersionStore>>>,
     pub bridge_client: Option<Arc<BridgeClient>>,
     pub bridge_server: Option<Arc<BridgeServer>>,
 }
@@ -82,6 +86,14 @@ impl AppState {
         // Initialize annotation store
         let annotation_store_path = config.storage.database.with_file_name("annotations.db");
         let annotation_store = AnnotationStore::open(&annotation_store_path).ok();
+
+        // Initialize lineage store
+        let lineage_store_path = config.storage.database.with_file_name("lineage.db");
+        let lineage_store = LineageStore::open(&lineage_store_path).ok();
+
+        // Initialize version store
+        let version_store_path = config.storage.database.with_file_name("versions.db");
+        let version_store = VersionStore::open(&version_store_path).ok();
 
         // Initialize tenant store if multi-tenant mode is enabled
         let tenant_store = if config.security.multi_tenant {
@@ -132,6 +144,8 @@ impl AppState {
             rag_store: rag_store.map(|s| Arc::new(Mutex::new(s))),
             annotation_store: annotation_store.map(|s| Arc::new(Mutex::new(s))),
             tenant_store: tenant_store.map(|s| Arc::new(Mutex::new(s))),
+            lineage_store: lineage_store.map(|s| Arc::new(Mutex::new(s))),
+            version_store: version_store.map(|s| Arc::new(Mutex::new(s))),
             bridge_client,
             bridge_server,
         })
@@ -173,6 +187,7 @@ mod tests {
                 gpu_memory_reserve_mb: 512,
             },
             security: SecurityConfig::default(),
+            budget: BudgetConfig::default(),
         }
     }
 

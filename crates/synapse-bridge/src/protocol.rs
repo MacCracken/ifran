@@ -53,6 +53,18 @@ pub struct Capabilities {
     pub gpu_count: u32,
     pub total_gpu_memory_mb: u64,
     pub supported_methods: Vec<String>,
+    /// Available inference backends on this instance.
+    #[serde(default)]
+    pub backends: Vec<String>,
+    /// Currently loaded model names.
+    #[serde(default)]
+    pub loaded_models: Vec<String>,
+    /// Supported model formats (gguf, safetensors, onnx, etc.).
+    #[serde(default)]
+    pub supported_formats: Vec<String>,
+    /// Supported quantization levels.
+    #[serde(default)]
+    pub supported_quants: Vec<String>,
 }
 
 #[cfg(test)]
@@ -97,11 +109,19 @@ mod tests {
             gpu_count: 2,
             total_gpu_memory_mb: 16384,
             supported_methods: vec!["lora".into(), "dpo".into()],
+            backends: vec!["llamacpp".into(), "candle".into()],
+            loaded_models: vec!["llama-3".into()],
+            supported_formats: vec!["gguf".into(), "safetensors".into()],
+            supported_quants: vec!["q4_k_m".into(), "q8_0".into()],
         };
         let json = serde_json::to_string(&caps).unwrap();
         let parsed: Capabilities = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.gpu_count, 2);
         assert_eq!(parsed.supported_methods.len(), 2);
+        assert_eq!(parsed.backends.len(), 2);
+        assert_eq!(parsed.loaded_models, vec!["llama-3"]);
+        assert_eq!(parsed.supported_formats.len(), 2);
+        assert_eq!(parsed.supported_quants.len(), 2);
     }
 
     #[test]
@@ -168,6 +188,10 @@ mod tests {
             gpu_count: 0,
             total_gpu_memory_mb: 0,
             supported_methods: vec![],
+            backends: vec![],
+            loaded_models: vec![],
+            supported_formats: vec![],
+            supported_quants: vec![],
         };
         let json = serde_json::to_string(&caps).unwrap();
         let parsed: Capabilities = serde_json::from_str(&json).unwrap();
@@ -175,6 +199,10 @@ mod tests {
         assert_eq!(parsed.version, "2026.3.12");
         assert_eq!(parsed.gpu_count, 0);
         assert!(parsed.supported_methods.is_empty());
+        assert!(parsed.backends.is_empty());
+        assert!(parsed.loaded_models.is_empty());
+        assert!(parsed.supported_formats.is_empty());
+        assert!(parsed.supported_quants.is_empty());
     }
 
     #[test]

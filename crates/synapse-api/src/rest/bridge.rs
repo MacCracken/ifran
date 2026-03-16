@@ -85,6 +85,31 @@ pub async fn connect(
     let instance_id =
         std::env::var("SYNAPSE_INSTANCE_ID").unwrap_or_else(|_| state.config.server.bind.clone());
 
+    // Collect dynamic capability information from backends and model manager
+    let backend_ids = state.backends.list_backends();
+    let backends: Vec<String> = backend_ids.iter().map(|id| id.0.clone()).collect();
+
+    let mut all_formats = std::collections::BTreeSet::new();
+    for id in &backend_ids {
+        if let Some(b) = state.backends.get(id) {
+            for fmt in b.supported_formats() {
+                all_formats.insert(format!("{fmt:?}").to_lowercase());
+            }
+        }
+    }
+    let supported_formats: Vec<String> = all_formats.into_iter().collect();
+
+    let loaded = state.model_manager.list_loaded().await;
+    let loaded_models: Vec<String> = loaded.iter().map(|m| m.model_name.clone()).collect();
+
+    let supported_quants: Vec<String> = vec![
+        "f32", "f16", "bf16", "q8_0", "q6k", "q5km", "q5ks", "q4km", "q4ks", "q4_0", "q3km",
+        "q3ks", "q2k", "iq4xs", "iq3xxs",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
+
     let capabilities = synapse_bridge::protocol::Capabilities {
         instance_id,
         version: env!("CARGO_PKG_VERSION").into(),
@@ -98,6 +123,10 @@ pub async fn connect(
             "rlhf".into(),
             "distillation".into(),
         ],
+        backends,
+        loaded_models,
+        supported_formats,
+        supported_quants,
     };
 
     client

@@ -17,6 +17,53 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - `synapse-bridge/client`: `sync_checkpoint()` — encodes as structured `ReportProgress` RPC (`checkpoint_sync:<rank>:<path>`)
 - All 5 SynapseBridge server RPCs and all 7 YeomanBridge client methods now implemented (no more stubs)
 
+#### Agnosticos OS Integration
+- `deploy/synapse.service`: `ExecHealthCheck` directive using `curl` against `/health` endpoint
+- `deploy/synapse-inference.conf`: Systemd drop-in override for inference-only mode — tighter sandbox (no checkpoint writes, no subprocess spawning)
+- `deploy/synapse-training.conf`: Systemd drop-in override for training mode — relaxed sandbox (checkpoint writes, Docker access, subprocess spawning)
+- `synapse-core/hardware/allocator`: GPU device allocator with fair scheduling — tracks per-device memory, assigns least-loaded devices, supports concurrent allocation/deallocation
+- `synapse-api/middleware/telemetry`: `init_tracing()` with optional OTLP export — `otlp` feature flag gates OpenTelemetry dependencies, exports to daimon's OTLP collector when `OTEL_EXPORTER_OTLP_ENDPOINT` is set
+- `synapse-bridge/protocol`: Dynamic capability advertising — `Capabilities` struct extended with `backends`, `loaded_models`, `supported_formats`, `supported_quants` fields populated from actual runtime state
+- `synapse-bridge/discovery`: `discover_async()` with daimon service registry lookup — queries `GET http://127.0.0.1:9400/v1/discover?service=secureyeoman` before falling back to well-known endpoint
+- `synapse-core/budget/checker`: GPU budget enforcement via hoosh accounting — `BudgetChecker` queries `{hoosh_endpoint}/v1/budget/gpu?tenant={id}`, falls back gracefully when hoosh is unavailable
+- `synapse-core/config`: `[budget]` config section with `enabled`, `hoosh_endpoint`, `max_gpu_hours_per_day`
+- `synapse-core/storage/encryption`: Encrypted storage detection — checks dm-crypt/LUKS via `/proc/mounts` and `/sys/block/*/dm/uuid`, `request_unlock()` for daimon key management integration
+- `synapse-core/config`: `require_encrypted_storage` in `[security]` — server refuses to start if models_dir is not on an encrypted volume
+#### Training Feature Parity
+- `synapse-types/lineage`: Pipeline lineage types — `LineageNode`, `PipelineStage` (Dataset/Training/Evaluation/Deployment/Checkpoint/Merge)
+- `synapse-core/lineage/store`: SQLite lineage graph store — `record`, `get`, `get_ancestry` (graph traversal), `list`, `find_by_artifact` with tenant isolation
+- `synapse-api/rest/lineage`: REST endpoints — `POST /lineage`, `GET /lineage`, `GET /lineage/{id}`, `GET /lineage/{id}/ancestry`
+- `synapse-types/versioning`: Model versioning types — `ModelVersion`, `VersionComparison`
+- `synapse-core/versioning/store`: SQLite version store — `create`, `get`, `list_by_family`, `latest`, `get_lineage` (parent chain traversal)
+- `synapse-api/rest/versioning`: REST endpoints — `POST /versions`, `GET /versions`, `GET /versions/{id}`, `GET /versions/{id}/lineage`
+- `synapse-types/drift`: Drift detection types — `BaselineSnapshot`, `DriftResult`, `DriftSeverity` with z-score classification
+- `synapse-core/drift/detector`: SQLite-backed drift detector — `record_baseline`, `check_drift` (z-score comparison), `list_baselines`
+- `synapse-core/scoring/quality`: Inference quality scoring — `score_response()` with 4 weighted heuristic criteria (length, completeness, repetition, coherence), `filter_high_quality()` batch filter
+- `synapse-types/dataset`: Dataset curation types — `CuratedDataset`, `RefreshJob`, `RefreshStatus`
+- `synapse-core/dataset/curator`: SQLite curator store — dataset registration, content fingerprint deduplication, version tracking
+- `synapse-core/preference/store`: Standalone preference pair store for DPO/RLHF — `add`, `list`, `export_dpo`, `add_batch` with tenant isolation
+- `synapse-types/ab_test`: A/B testing types — `AbTest`, `AbTestStatus`, `AbTestResult`
+- `synapse-core/ab_test/router`: Traffic splitting router — `select_variant()` based on configurable split fraction
+
+#### Evaluation & Responsible AI
+- `synapse-core/eval/judge`: LLM-as-judge evaluation — `JudgeRubric`, `build_judge_prompt`, `parse_verdict`, `aggregate_verdicts` for pairwise model comparison
+- `synapse-core/eval/responsible_ai`: Fairness metrics — `compute_report()` with cohort error analysis, demographic parity gap, disparate impact ratio, 80% rule check
+- `synapse-core/rag/optimizer`: Thompson Sampling bandit for RAG retrieval — `RetrievalOptimizer` with Beta-distributed arms, `select`, `record_reward`, `best_strategy`
+
+#### Training Pipeline Enhancements
+- `synapse-train/continual/config`: Continual learning config and `ReplayBuffer` with sliding-window eviction and sampling
+- `synapse-train/approval/gate`: Approval gates — `ApprovalGate` managing pending/approved/rejected lifecycle with reviewer tracking
+- `synapse-train/workflow/pipeline`: DAG-based ML workflow — `Pipeline` with step types (Curate/Train/Evaluate/Approve/Deploy), `ready_steps()`, `validate_dag()` cycle detection
+- `synapse-train/integration/ollama`: Ollama adapter registration — `register_adapter()`, `build_modelfile()`, `check_ollama()`
+- `synapse-backends/cost`: Cost-aware backend routing — `CostConfig` with `cheapest()` and `select_within_budget()`
+
+#### Infrastructure Stubs Completed
+- `synapse-core/registry/oci`: OCI registry client — Docker Registry v2 manifest retrieval, blob URL construction, model layer identification
+- `synapse-core/registry/direct`: Direct URL downloader — HEAD-based `resolve()` for content length, type, range support, filename extraction
+- `synapse-core/storage/cache`: LRU model cache — size-based eviction, touch/insert/remove with ordered tracking
+- `synapse-core/lifecycle/pool`: Hot model pool — async slot management with `put`, `get`, `hot_swap` (atomic replace), concurrent access
+- 958 tests across all crates
+
 #### Multi-Tenant Support
 - `synapse-types/tenant`: `TenantId` newtype with `default_tenant()`, `is_default()`, Display, serde support
 - `synapse-types/error`: `TenantNotFound(String)` and `Unauthorized(String)` error variants

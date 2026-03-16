@@ -242,6 +242,7 @@ mod tests {
                 gpu_memory_reserve_mb: 512,
             },
             security: SecurityConfig::default(),
+            budget: BudgetConfig::default(),
         };
         AppState::new(config).unwrap()
     }

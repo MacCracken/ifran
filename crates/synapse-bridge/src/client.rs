@@ -379,6 +379,10 @@ mod tests {
             gpu_count: 1,
             total_gpu_memory_mb: 8192,
             supported_methods: vec!["lora".into()],
+            backends: vec![],
+            loaded_models: vec![],
+            supported_formats: vec![],
+            supported_quants: vec![],
         };
         client.announce(caps).await.unwrap();
     }
@@ -493,6 +497,10 @@ mod tests {
                 gpu_count: i,
                 total_gpu_memory_mb: 8192,
                 supported_methods: vec![],
+                backends: vec![],
+                loaded_models: vec![],
+                supported_formats: vec![],
+                supported_quants: vec![],
             };
             client.announce(caps).await.unwrap();
         }

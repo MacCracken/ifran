@@ -2,8 +2,8 @@
 
 use crate::middleware;
 use crate::rest::{
-    bridge, distributed, eval, experiment, inference, marketplace, models, openai_compat, rag,
-    rlhf, system, tenants, training,
+    bridge, distributed, eval, experiment, inference, lineage, marketplace, models, openai_compat,
+    rag, rlhf, system, tenants, training, versioning,
 };
 use crate::state::AppState;
 use axum::Router;
@@ -128,6 +128,20 @@ pub fn build(state: AppState) -> Router {
         .route("/rlhf/pairs/{id}/annotate", post(rlhf::annotate))
         .route("/rlhf/sessions/{id}/export", post(rlhf::export_session))
         .route("/rlhf/sessions/{id}/stats", get(rlhf::get_stats))
+        // Versioning
+        .route(
+            "/versions",
+            post(versioning::create_version).get(versioning::list_versions),
+        )
+        .route("/versions/{id}", get(versioning::get_version))
+        .route("/versions/{id}/lineage", get(versioning::get_lineage))
+        // Lineage
+        .route(
+            "/lineage",
+            post(lineage::record_node).get(lineage::list_nodes),
+        )
+        .route("/lineage/{id}", get(lineage::get_node))
+        .route("/lineage/{id}/ancestry", get(lineage::get_ancestry))
         // Bridge
         .route("/bridge/status", get(bridge::status))
         .route("/bridge/connect", post(bridge::connect))

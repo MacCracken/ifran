@@ -1,7 +1,11 @@
+pub mod approval;
 pub mod checkpoint;
+pub mod continual;
 pub mod dataset;
 pub mod distributed;
 pub mod executor;
 pub mod experiment;
+pub mod integration;
 pub mod job;
 pub mod methods;
+pub mod workflow;

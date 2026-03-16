@@ -97,6 +97,7 @@ mod tests {
                 gpu_memory_reserve_mb: 512,
             },
             security: synapse_core::config::SecurityConfig::default(),
+            budget: synapse_core::config::BudgetConfig::default(),
         };
 
         let state = AppState::new(config).unwrap();

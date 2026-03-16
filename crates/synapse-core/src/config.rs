@@ -12,6 +12,8 @@ pub struct SynapseConfig {
     pub hardware: HardwareConfig,
     #[serde(default)]
     pub security: SecurityConfig,
+    #[serde(default)]
+    pub budget: BudgetConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,6 +81,38 @@ pub struct SecurityConfig {
     /// When false (default), the system uses legacy single-tenant auth.
     #[serde(default)]
     pub multi_tenant: bool,
+    /// Require encrypted storage for model files.
+    /// When true, server refuses to start if models_dir is not on an encrypted volume.
+    #[serde(default)]
+    pub require_encrypted_storage: bool,
+}
+
+/// GPU budget enforcement configuration for hoosh accounting integration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BudgetConfig {
+    /// Enable GPU budget enforcement.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Hoosh accounting endpoint for budget queries.
+    #[serde(default = "default_hoosh_endpoint")]
+    pub hoosh_endpoint: String,
+    /// Maximum GPU-hours per tenant per day (0 = unlimited).
+    #[serde(default)]
+    pub max_gpu_hours_per_day: f64,
+}
+
+fn default_hoosh_endpoint() -> String {
+    "http://127.0.0.1:9401".into()
+}
+
+impl Default for BudgetConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            hoosh_endpoint: default_hoosh_endpoint(),
+            max_gpu_hours_per_day: 0.0,
+        }
+    }
 }
 
 fn default_max_body_size() -> usize {
@@ -104,6 +138,7 @@ impl Default for SecurityConfig {
             cors_allowed_origins: Vec::new(),
             auth_required: false,
             multi_tenant: false,
+            require_encrypted_storage: false,
         }
     }
 }
@@ -144,6 +179,7 @@ impl Default for SynapseConfig {
                 gpu_memory_reserve_mb: 512,
             },
             security: SecurityConfig::default(),
+            budget: BudgetConfig::default(),
         }
     }
 }

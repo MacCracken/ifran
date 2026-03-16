@@ -18,12 +18,16 @@ Group=synapse
 Restart=on-failure
 RestartSec=5
 WatchdogSec=30
+ExecHealthCheck=/usr/bin/curl -sf http://127.0.0.1:8420/health
 
 # Resource limits
 LimitNOFILE=65536
 LimitMEMLOCK=infinity
 
 # Security hardening
+# NOTE: Drop-in overrides for inference-only and training modes are available.
+# See deploy/synapse-inference.conf and deploy/synapse-training.conf.
+# Install to /etc/systemd/system/synapse.service.d/ as needed.
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true

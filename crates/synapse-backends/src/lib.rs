@@ -4,6 +4,7 @@
 //! backend implementations that can be enabled via feature flags. A
 //! [`BackendRouter`] handles smart backend selection at runtime.
 
+pub mod cost;
 pub mod router;
 pub mod traits;
 
