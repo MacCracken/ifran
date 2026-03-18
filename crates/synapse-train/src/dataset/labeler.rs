@@ -241,7 +241,7 @@ where
             .map_err(|e| SynapseError::TrainingError(format!("Write error: {e}")))?;
 
         processed += 1;
-        if processed.is_multiple_of(10) {
+        if processed % 10 == 0 {
             let _ = labeler.update_progress(job_id, processed, total).await;
         }
     }
