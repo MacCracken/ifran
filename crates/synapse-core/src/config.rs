@@ -622,4 +622,93 @@ max_gpu_hours_per_day = 48.0
         cfg.budget.max_gpu_hours_per_day = 24.0;
         assert!(cfg.validate().is_ok());
     }
+
+    #[test]
+    fn fleet_config_defaults() {
+        let fleet = FleetConfig::default();
+        assert!(!fleet.enabled);
+        assert_eq!(fleet.suspect_timeout_secs, 30);
+        assert_eq!(fleet.offline_timeout_secs, 90);
+        assert_eq!(fleet.health_check_interval_secs, 15);
+    }
+
+    #[test]
+    fn config_with_fleet_section() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let toml_content = r#"
+[server]
+bind = "127.0.0.1:9000"
+grpc_bind = "127.0.0.1:9001"
+
+[storage]
+models_dir = "/tmp/models"
+database = "/tmp/test.db"
+cache_dir = "/tmp/cache"
+
+[backends]
+default = "llamacpp"
+enabled = ["llamacpp"]
+
+[training]
+executor = "subprocess"
+max_concurrent_jobs = 2
+checkpoints_dir = "/tmp/checkpoints"
+
+[bridge]
+enabled = false
+heartbeat_interval_secs = 10
+
+[hardware]
+gpu_memory_reserve_mb = 512
+telemetry_interval_secs = 5
+
+[fleet]
+enabled = true
+suspect_timeout_secs = 15
+offline_timeout_secs = 45
+health_check_interval_secs = 10
+"#;
+        std::fs::write(tmp.path(), toml_content).unwrap();
+        let cfg = SynapseConfig::load(tmp.path()).unwrap();
+        assert!(cfg.fleet.enabled);
+        assert_eq!(cfg.fleet.suspect_timeout_secs, 15);
+        assert_eq!(cfg.fleet.offline_timeout_secs, 45);
+        assert_eq!(cfg.hardware.telemetry_interval_secs, 5);
+    }
+
+    #[test]
+    fn config_without_fleet_section_gets_defaults() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let toml_content = r#"
+[server]
+bind = "127.0.0.1:9000"
+grpc_bind = "127.0.0.1:9001"
+
+[storage]
+models_dir = "/tmp/models"
+database = "/tmp/test.db"
+cache_dir = "/tmp/cache"
+
+[backends]
+default = "llamacpp"
+enabled = ["llamacpp"]
+
+[training]
+executor = "subprocess"
+max_concurrent_jobs = 2
+checkpoints_dir = "/tmp/checkpoints"
+
+[bridge]
+enabled = false
+heartbeat_interval_secs = 10
+
+[hardware]
+gpu_memory_reserve_mb = 512
+"#;
+        std::fs::write(tmp.path(), toml_content).unwrap();
+        let cfg = SynapseConfig::load(tmp.path()).unwrap();
+        assert!(!cfg.fleet.enabled);
+        assert_eq!(cfg.fleet.suspect_timeout_secs, 30);
+        assert_eq!(cfg.hardware.telemetry_interval_secs, 10);
+    }
 }

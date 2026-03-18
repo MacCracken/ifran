@@ -3,6 +3,7 @@
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::State;
+use axum::response::sse::{Event, Sse};
 
 /// GET /health — simple liveness probe.
 pub async fn health() -> &'static str {
@@ -64,6 +65,23 @@ pub async fn gpu_telemetry(State(state): State<AppState>) -> Json<serde_json::Va
         }
         None => Json(serde_json::json!({ "readings": [], "message": "telemetry disabled" })),
     }
+}
+
+/// GET /system/training/events — SSE stream of training lifecycle events.
+pub async fn training_events(
+    State(state): State<AppState>,
+) -> Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>> {
+    let mut rx = state.training_event_bus.subscribe();
+
+    let stream = async_stream::stream! {
+        while let Ok(event) = rx.recv().await {
+            if let Ok(data) = serde_json::to_string(&event) {
+                yield Ok(Event::default().data(data));
+            }
+        }
+    };
+
+    Sse::new(stream)
 }
 
 /// GET /models/discover — discover models from local inference servers.

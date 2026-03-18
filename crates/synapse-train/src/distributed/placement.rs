@@ -43,6 +43,12 @@ impl PlacementPolicy for GpuAffinityPolicy {
         gpus_per_worker: u32,
         nodes: &[NodeResources],
     ) -> Result<Vec<WorkerAssignment>> {
+        if gpus_per_worker == 0 {
+            return Err(SynapseError::DistributedError(
+                "gpus_per_worker must be > 0".into(),
+            ));
+        }
+
         // Sort nodes by most available GPUs (pack onto fewest nodes)
         let mut sorted: Vec<&NodeResources> = nodes.iter().collect();
         sorted.sort_by(|a, b| b.available_gpu_ids.len().cmp(&a.available_gpu_ids.len()));
@@ -97,6 +103,12 @@ impl PlacementPolicy for BalancedPolicy {
         gpus_per_worker: u32,
         nodes: &[NodeResources],
     ) -> Result<Vec<WorkerAssignment>> {
+        if gpus_per_worker == 0 {
+            return Err(SynapseError::DistributedError(
+                "gpus_per_worker must be > 0".into(),
+            ));
+        }
+
         if nodes.is_empty() {
             return Err(SynapseError::DistributedError(
                 "No nodes available for placement".into(),
@@ -163,6 +175,12 @@ impl PlacementPolicy for CostAwarePolicy {
         gpus_per_worker: u32,
         nodes: &[NodeResources],
     ) -> Result<Vec<WorkerAssignment>> {
+        if gpus_per_worker == 0 {
+            return Err(SynapseError::DistributedError(
+                "gpus_per_worker must be > 0".into(),
+            ));
+        }
+
         // Sort by cost (cheapest first, unknown cost goes last)
         let mut sorted: Vec<&NodeResources> = nodes.iter().collect();
         sorted.sort_by(|a, b| {
@@ -331,6 +349,21 @@ mod tests {
         for (i, a) in assignments.iter().enumerate() {
             assert_eq!(a.rank, i as u32);
         }
+    }
+
+    #[test]
+    fn gpus_per_worker_zero_fails() {
+        let nodes = make_nodes();
+        assert!(GpuAffinityPolicy.place(2, 0, &nodes).is_err());
+        assert!(BalancedPolicy.place(2, 0, &nodes).is_err());
+        assert!(CostAwarePolicy.place(2, 0, &nodes).is_err());
+    }
+
+    #[test]
+    fn world_size_zero_returns_empty() {
+        let nodes = make_nodes();
+        let result = GpuAffinityPolicy.place(0, 1, &nodes).unwrap();
+        assert!(result.is_empty());
     }
 
     #[test]

@@ -8,6 +8,7 @@ use axum::response::Json;
 use axum::response::sse::{Event, Sse};
 use futures::Stream;
 use serde::{Deserialize, Serialize};
+use synapse_core::training_events::TrainingEvent;
 use synapse_types::TenantId;
 use synapse_types::training::{TrainingJobConfig, TrainingJobId, TrainingStatus};
 
@@ -49,6 +50,8 @@ pub async fn create_job(
     Extension(tenant_id): Extension<TenantId>,
     Json(req): Json<CreateJobRequest>,
 ) -> Result<(StatusCode, Json<JobResponse>), (StatusCode, String)> {
+    let base_model = req.config.base_model.clone();
+
     let id = state
         .job_manager
         .create_job(req.config, tenant_id.clone())
@@ -60,7 +63,14 @@ pub async fn create_job(
             tracing::warn!(job_id = %id, error = %e, "Auto-start failed for training job");
         }
 
-        // Report to SY bridge if connected
+        // Emit local training event
+        state.training_event_bus.emit(TrainingEvent::JobStarted {
+            job_id: id.to_string(),
+            model: base_model,
+            timestamp: chrono::Utc::now(),
+        });
+
+        // Also report to SY bridge if connected
         if let Some(client) = &state.bridge_client {
             let _ = client
                 .report_progress(&id.to_string(), "running", 0, 0.0)
@@ -112,7 +122,13 @@ pub async fn cancel_job(
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
-    // Report cancellation to SY bridge
+    // Emit local cancellation event
+    state.training_event_bus.emit(TrainingEvent::JobCancelled {
+        job_id: id.to_string(),
+        timestamp: chrono::Utc::now(),
+    });
+
+    // Also report cancellation to SY bridge
     if let Some(client) = &state.bridge_client {
         let _ = client
             .report_progress(&id.to_string(), "cancelled", 0, 0.0)

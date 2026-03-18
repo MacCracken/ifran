@@ -8,8 +8,9 @@ use synapse_types::error::Result;
 /// Default SecureYeoman endpoint (well-known local address).
 const DEFAULT_SY_ENDPOINT: &str = "http://127.0.0.1:9420";
 
-/// Daimon service registry endpoint.
-const DAIMON_DISCOVER_URL: &str = "http://127.0.0.1:9400/v1/discover?service=secureyeoman";
+/// Daimon service registry base URL.
+/// Override with `DAIMON_ENDPOINT` environment variable.
+const DEFAULT_DAIMON_ENDPOINT: &str = "http://127.0.0.1:9400";
 
 /// A discovered SY endpoint.
 #[derive(Debug, Clone)]
@@ -100,13 +101,20 @@ pub async fn discover_async(config_endpoint: Option<&str>) -> Result<SyEndpoint>
 
 /// Query daimon's service registry for SecureYeoman endpoint.
 /// Returns `None` if daimon is not available or SY is not registered.
+///
+/// The daimon endpoint is configurable via `DAIMON_ENDPOINT` env var,
+/// defaulting to `http://127.0.0.1:9400` (standard Agnosticos location).
 async fn query_daimon_registry() -> Option<String> {
+    let base =
+        std::env::var("DAIMON_ENDPOINT").unwrap_or_else(|_| DEFAULT_DAIMON_ENDPOINT.to_string());
+    let url = format!("{base}/v1/discover?service=secureyeoman");
+
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
         .build()
         .ok()?;
 
-    let resp = client.get(DAIMON_DISCOVER_URL).send().await.ok()?;
+    let resp = client.get(&url).send().await.ok()?;
 
     if !resp.status().is_success() {
         return None;

@@ -4,6 +4,7 @@ use axum::extract::{Extension, Path, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use serde::{Deserialize, Serialize};
+use synapse_core::training_events::TrainingEvent;
 use synapse_types::TenantId;
 use synapse_types::distributed::*;
 use synapse_types::training::{TrainingJobConfig, TrainingStatus};
@@ -52,6 +53,25 @@ pub struct AggregateRequest {
 
 fn default_method() -> String {
     "average".into()
+}
+
+/// Request to auto-place workers using fleet nodes.
+#[derive(Deserialize)]
+pub struct AutoPlaceRequest {
+    /// Placement policy (defaults to gpu_affinity).
+    #[serde(default = "default_placement_policy")]
+    pub policy: synapse_types::distributed::PlacementPolicyKind,
+    /// Optional: GPUs per worker (default: 1).
+    #[serde(default = "default_gpus_per_worker")]
+    pub gpus_per_worker: u32,
+}
+
+fn default_placement_policy() -> synapse_types::distributed::PlacementPolicyKind {
+    synapse_types::distributed::PlacementPolicyKind::GpuAffinity
+}
+
+fn default_gpus_per_worker() -> u32 {
+    1
 }
 
 /// POST /training/distributed/jobs — create a distributed training job.
@@ -128,7 +148,18 @@ pub async fn assign_worker(
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
-    // Notify SY bridge of worker assignment for cross-node coordination
+    // Emit local event for fleet coordination
+    state
+        .training_event_bus
+        .emit(TrainingEvent::WorkerAssigned {
+            job_id: id.to_string(),
+            rank: worker.rank,
+            instance_id: worker.instance_id.clone(),
+            endpoint: worker.endpoint.clone(),
+            timestamp: chrono::Utc::now(),
+        });
+
+    // Also notify SY bridge of worker assignment for cross-node coordination
     if let Some(client) = &state.bridge_client {
         let _ = client
             .request_worker_assignment(
@@ -188,20 +219,35 @@ pub async fn worker_completed(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    // Sync checkpoint via SY bridge
+    let checkpoint_path = format!(
+        "{}/worker-{}",
+        state.config.training.checkpoints_dir.display(),
+        rank
+    );
+
+    // Emit local checkpoint event for fleet-based sync
+    state
+        .training_event_bus
+        .emit(TrainingEvent::CheckpointReady {
+            job_id: id.to_string(),
+            rank,
+            path: checkpoint_path.clone(),
+            timestamp: chrono::Utc::now(),
+        });
+
+    // Also sync via SY bridge if connected
     if let Some(client) = &state.bridge_client {
-        let checkpoint_path = format!(
-            "{}/worker-{}",
-            state.config.training.checkpoints_dir.display(),
-            rank
-        );
         let _ = client
             .sync_checkpoint(&id.to_string(), rank, &checkpoint_path)
             .await;
     }
 
-    // If all workers completed, report completion to SY
+    // If all workers completed, emit local event and report to SY
     if job.status == TrainingStatus::Completed {
+        state.training_event_bus.emit(TrainingEvent::JobCompleted {
+            job_id: id.to_string(),
+            timestamp: chrono::Utc::now(),
+        });
         if let Some(client) = &state.bridge_client {
             let _ = client
                 .report_progress(&id.to_string(), "completed", 0, 0.0)
@@ -271,6 +317,75 @@ pub async fn aggregate(
         "command": command,
         "output_dir": req.output_dir,
     })))
+}
+
+/// POST /training/distributed/jobs/:id/auto-place — auto-place workers using fleet nodes.
+///
+/// Uses the fleet manager to discover available nodes and a placement policy
+/// to assign workers, enabling distributed training without SecureYeoman.
+pub async fn auto_place(
+    State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
+    Path(id): Path<DistributedJobId>,
+    Json(req): Json<AutoPlaceRequest>,
+) -> Result<Json<DistributedJobResponse>, (StatusCode, String)> {
+    // Build NodeResources from fleet manager
+    let fleet_nodes = state.fleet_manager.list_nodes().await;
+    let online_nodes: Vec<_> = fleet_nodes
+        .iter()
+        .filter(|n| n.health == synapse_core::fleet::manager::NodeHealth::Online)
+        .collect();
+
+    if online_nodes.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "No online fleet nodes available for placement. Register nodes via POST /fleet/nodes first.".into(),
+        ));
+    }
+
+    let node_resources: Vec<synapse_train::distributed::placement::NodeResources> = online_nodes
+        .iter()
+        .map(|n| {
+            let available_gpu_ids: Vec<u32> = (0..n.gpu_info.gpu_count as u32).collect();
+            synapse_train::distributed::placement::NodeResources {
+                node_id: n.id.clone(),
+                endpoint: n.endpoint.clone(),
+                available_gpu_ids,
+                available_gpu_memory_mb: n.gpu_info.total_gpu_memory_mb,
+                gpu_utilization_pct: n.gpu_info.gpu_utilization_pct,
+                cost_per_gpu_hour: None,
+            }
+        })
+        .collect();
+
+    let policy = synapse_train::distributed::placement::policy_from_kind(req.policy);
+
+    let assignments = state
+        .distributed_coordinator
+        .auto_place(id, &node_resources, policy.as_ref())
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+
+    // Emit local events for each placement
+    for worker in &assignments {
+        state
+            .training_event_bus
+            .emit(TrainingEvent::WorkerAssigned {
+                job_id: id.to_string(),
+                rank: worker.rank,
+                instance_id: worker.instance_id.clone(),
+                endpoint: worker.endpoint.clone(),
+                timestamp: chrono::Utc::now(),
+            });
+    }
+
+    let job = state
+        .distributed_coordinator
+        .get_job(id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(job_to_response(&job)))
 }
 
 fn job_to_response(job: &DistributedJobState) -> DistributedJobResponse {

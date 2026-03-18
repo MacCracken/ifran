@@ -97,6 +97,48 @@ async fn main() {
         }
     }
 
+    // Self-register with fleet manager if fleet mode is enabled
+    if state.config.fleet.enabled {
+        let hardware = synapse_core::hardware::detect::detect().ok();
+        let (gpu_count, gpu_mem) = hardware
+            .as_ref()
+            .map(|hw| (hw.gpus.len(), hw.total_gpu_memory_mb()))
+            .unwrap_or((0, 0));
+
+        let instance_id = std::env::var("SYNAPSE_INSTANCE_ID").unwrap_or_else(|_| {
+            // Sanitize bind address to valid node id (alphanumeric + hyphens)
+            state
+                .config
+                .server
+                .bind
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '-' {
+                        c
+                    } else {
+                        '-'
+                    }
+                })
+                .collect()
+        });
+
+        let _ = state
+            .fleet_manager
+            .register(synapse_core::fleet::manager::RegisterNodeRequest {
+                id: instance_id,
+                endpoint: format!("http://{}", state.config.server.bind),
+                gpu_count,
+                total_gpu_memory_mb: gpu_mem,
+            })
+            .await;
+
+        tracing::info!(
+            gpus = gpu_count,
+            gpu_memory_mb = gpu_mem,
+            "Self-registered with fleet manager"
+        );
+    }
+
     let app = synapse_api::router::build(state);
 
     tracing::info!("Starting synapse-server on {bind_addr}");

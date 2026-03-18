@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use synapse_types::SynapseError;
 use tokio::sync::{RwLock, watch};
 
 /// Unique node identifier.
@@ -108,7 +109,47 @@ impl FleetManager {
     }
 
     /// Register a new node or update an existing one.
-    pub async fn register(&self, req: RegisterNodeRequest) -> FleetNode {
+    pub async fn register(
+        &self,
+        req: RegisterNodeRequest,
+    ) -> synapse_types::error::Result<FleetNode> {
+        // Validate id: 1-128 chars, alphanumeric + hyphens only
+        if req.id.is_empty() || req.id.len() > 128 {
+            return Err(SynapseError::ValidationError(
+                "id must be 1-128 characters".into(),
+            ));
+        }
+        if !req
+            .id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+        {
+            return Err(SynapseError::ValidationError(
+                "id must contain only alphanumeric characters and hyphens".into(),
+            ));
+        }
+
+        // Validate endpoint
+        if !req.endpoint.starts_with("http://") && !req.endpoint.starts_with("https://") {
+            return Err(SynapseError::ValidationError(
+                "endpoint must start with http:// or https://".into(),
+            ));
+        }
+
+        // Validate gpu_count
+        if req.gpu_count > 64 {
+            return Err(SynapseError::ValidationError(
+                "gpu_count must be <= 64".into(),
+            ));
+        }
+
+        // Validate total_gpu_memory_mb
+        if req.total_gpu_memory_mb > 10_000_000 {
+            return Err(SynapseError::ValidationError(
+                "total_gpu_memory_mb must be <= 10,000,000 (10 TB)".into(),
+            ));
+        }
+
         let now = Utc::now();
         let node = FleetNode {
             id: req.id.clone(),
@@ -125,7 +166,7 @@ impl FleetManager {
             registered_at: now,
         };
         self.nodes.write().await.insert(req.id, node.clone());
-        node
+        Ok(node)
     }
 
     /// Process a heartbeat from a node.
@@ -135,11 +176,27 @@ impl FleetManager {
         gpu_utilization_pct: Option<f32>,
         gpu_memory_used_mb: Option<u64>,
         gpu_temperature_c: Option<f32>,
-    ) -> Result<(), String> {
+    ) -> synapse_types::error::Result<()> {
+        // Validate telemetry values
+        if let Some(pct) = gpu_utilization_pct {
+            if pct.is_nan() || !(0.0..=100.0).contains(&pct) {
+                return Err(SynapseError::ValidationError(
+                    "gpu_utilization_pct must be 0.0..=100.0 and not NaN".into(),
+                ));
+            }
+        }
+        if let Some(temp) = gpu_temperature_c {
+            if temp.is_nan() || !(-50.0..=250.0).contains(&temp) {
+                return Err(SynapseError::ValidationError(
+                    "gpu_temperature_c must be -50.0..=250.0 and not NaN".into(),
+                ));
+            }
+        }
+
         let mut nodes = self.nodes.write().await;
         let node = nodes
             .get_mut(node_id)
-            .ok_or_else(|| format!("Node {node_id} not found"))?;
+            .ok_or_else(|| SynapseError::HardwareError(format!("Node {node_id} not found")))?;
 
         node.health = NodeHealth::Online;
         node.last_heartbeat = Utc::now();
@@ -244,8 +301,8 @@ mod tests {
     #[tokio::test]
     async fn register_and_list() {
         let fm = FleetManager::with_defaults();
-        fm.register(make_req("node-1")).await;
-        fm.register(make_req("node-2")).await;
+        fm.register(make_req("node-1")).await.unwrap();
+        fm.register(make_req("node-2")).await.unwrap();
 
         let nodes = fm.list_nodes().await;
         assert_eq!(nodes.len(), 2);
@@ -254,15 +311,15 @@ mod tests {
     #[tokio::test]
     async fn register_is_idempotent() {
         let fm = FleetManager::with_defaults();
-        fm.register(make_req("node-1")).await;
-        fm.register(make_req("node-1")).await;
+        fm.register(make_req("node-1")).await.unwrap();
+        fm.register(make_req("node-1")).await.unwrap();
         assert_eq!(fm.list_nodes().await.len(), 1);
     }
 
     #[tokio::test]
     async fn heartbeat_updates_health() {
         let fm = FleetManager::with_defaults();
-        fm.register(make_req("node-1")).await;
+        fm.register(make_req("node-1")).await.unwrap();
 
         fm.heartbeat("node-1", Some(75.0), Some(20000), Some(68.0))
             .await
@@ -284,7 +341,7 @@ mod tests {
     #[tokio::test]
     async fn health_transitions() {
         let fm = FleetManager::new(Duration::from_millis(50), Duration::from_millis(100));
-        fm.register(make_req("node-1")).await;
+        fm.register(make_req("node-1")).await.unwrap();
 
         // Initially online
         let node = fm.get_node("node-1").await.unwrap();
@@ -306,7 +363,7 @@ mod tests {
     #[tokio::test]
     async fn heartbeat_resets_to_online() {
         let fm = FleetManager::new(Duration::from_millis(50), Duration::from_millis(100));
-        fm.register(make_req("node-1")).await;
+        fm.register(make_req("node-1")).await.unwrap();
 
         tokio::time::sleep(Duration::from_millis(60)).await;
         fm.check_health().await;
@@ -326,7 +383,7 @@ mod tests {
     #[tokio::test]
     async fn remove_node() {
         let fm = FleetManager::with_defaults();
-        fm.register(make_req("node-1")).await;
+        fm.register(make_req("node-1")).await.unwrap();
         assert!(fm.remove("node-1").await);
         assert!(!fm.remove("node-1").await); // already removed
         assert!(fm.list_nodes().await.is_empty());
@@ -335,8 +392,8 @@ mod tests {
     #[tokio::test]
     async fn stats() {
         let fm = FleetManager::new(Duration::from_millis(50), Duration::from_millis(100));
-        fm.register(make_req("node-1")).await;
-        fm.register(make_req("node-2")).await;
+        fm.register(make_req("node-1")).await.unwrap();
+        fm.register(make_req("node-2")).await.unwrap();
 
         let s = fm.stats().await;
         assert_eq!(s.total_nodes, 2);

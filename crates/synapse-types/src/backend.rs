@@ -152,6 +152,44 @@ mod tests {
         let result = serde_json::from_str::<AcceleratorType>("\"invalid\"");
         assert!(result.is_err());
     }
+
+    #[test]
+    fn backend_locality_serde_roundtrip() {
+        let values = [BackendLocality::Local, BackendLocality::Remote];
+        for v in &values {
+            let json = serde_json::to_string(v).unwrap();
+            let back: BackendLocality = serde_json::from_str(&json).unwrap();
+            assert_eq!(*v, back);
+        }
+    }
+
+    #[test]
+    fn backend_locality_json_values() {
+        assert_eq!(
+            serde_json::to_string(&BackendLocality::Local).unwrap(),
+            "\"local\""
+        );
+        assert_eq!(
+            serde_json::to_string(&BackendLocality::Remote).unwrap(),
+            "\"remote\""
+        );
+    }
+
+    #[test]
+    fn backend_capabilities_with_locality() {
+        let caps = BackendCapabilities {
+            accelerators: vec![AcceleratorType::Cpu],
+            max_context_length: None,
+            supports_streaming: false,
+            supports_embeddings: false,
+            supports_vision: false,
+            locality: BackendLocality::Remote,
+        };
+        let json = serde_json::to_string(&caps).unwrap();
+        assert!(json.contains("\"remote\""));
+        let back: BackendCapabilities = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.locality, BackendLocality::Remote);
+    }
 }
 
 #[cfg(test)]

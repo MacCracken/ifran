@@ -575,6 +575,155 @@ mod tests {
         }
     }
 
+    struct MockRemoteBackend {
+        name: &'static str,
+        formats: Vec<ModelFormat>,
+    }
+
+    #[async_trait]
+    impl InferenceBackend for MockRemoteBackend {
+        fn id(&self) -> BackendId {
+            BackendId(self.name.into())
+        }
+        fn capabilities(&self) -> BackendCapabilities {
+            BackendCapabilities {
+                accelerators: vec![AcceleratorType::Cpu],
+                max_context_length: None,
+                supports_streaming: false,
+                supports_embeddings: false,
+                supports_vision: false,
+                locality: BackendLocality::Remote,
+            }
+        }
+        fn supported_formats(&self) -> &[ModelFormat] {
+            &self.formats
+        }
+        async fn load_model(
+            &self,
+            _: &ModelManifest,
+            _: &DeviceConfig,
+        ) -> synapse_types::error::Result<crate::ModelHandle> {
+            Ok(crate::ModelHandle("mock".into()))
+        }
+        async fn unload_model(&self, _: crate::ModelHandle) -> synapse_types::error::Result<()> {
+            Ok(())
+        }
+        async fn infer(
+            &self,
+            _: &crate::ModelHandle,
+            _: &InferenceRequest,
+        ) -> synapse_types::error::Result<InferenceResponse> {
+            Ok(InferenceResponse {
+                text: "mock".into(),
+                usage: TokenUsage {
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    total_tokens: 0,
+                },
+                finish_reason: FinishReason::Stop,
+            })
+        }
+        async fn infer_stream(
+            &self,
+            _: &crate::ModelHandle,
+            _: InferenceRequest,
+        ) -> synapse_types::error::Result<mpsc::Receiver<StreamChunk>> {
+            let (_, rx) = mpsc::channel(1);
+            Ok(rx)
+        }
+        async fn health_check(&self) -> synapse_types::error::Result<bool> {
+            Ok(true)
+        }
+    }
+
+    #[test]
+    fn select_with_privacy_confidential_blocks_remote_backend() {
+        let router = BackendRouter::new();
+        router.register(Arc::new(MockRemoteBackend {
+            name: "cloud-be",
+            formats: vec![ModelFormat::Gguf],
+        }));
+
+        let selected = router.select_with_privacy(
+            ModelFormat::Gguf,
+            None,
+            Some(DataSensitivity::Confidential),
+        );
+        assert!(
+            selected.is_none(),
+            "Remote backend should be blocked for confidential data"
+        );
+    }
+
+    #[test]
+    fn select_with_privacy_restricted_blocks_remote_backend() {
+        let router = BackendRouter::new();
+        router.register(Arc::new(MockRemoteBackend {
+            name: "cloud-be",
+            formats: vec![ModelFormat::Gguf],
+        }));
+
+        let selected =
+            router.select_with_privacy(ModelFormat::Gguf, None, Some(DataSensitivity::Restricted));
+        assert!(selected.is_none());
+    }
+
+    #[test]
+    fn select_with_privacy_prefers_local_over_remote_for_confidential() {
+        let router = BackendRouter::new();
+        router.register(Arc::new(MockRemoteBackend {
+            name: "cloud-be",
+            formats: vec![ModelFormat::Gguf],
+        }));
+        router.register(Arc::new(MockBackend {
+            name: "local-be",
+            formats: vec![ModelFormat::Gguf],
+        }));
+
+        let selected = router
+            .select_with_privacy(ModelFormat::Gguf, None, Some(DataSensitivity::Confidential))
+            .unwrap();
+        assert_eq!(selected.id().0, "local-be");
+    }
+
+    #[test]
+    fn select_with_privacy_preferred_remote_skipped_for_confidential() {
+        let router = BackendRouter::new();
+        router.register(Arc::new(MockRemoteBackend {
+            name: "cloud-be",
+            formats: vec![ModelFormat::Gguf],
+        }));
+        router.register(Arc::new(MockBackend {
+            name: "local-be",
+            formats: vec![ModelFormat::Gguf],
+        }));
+
+        // Explicitly prefer the remote backend, but data is confidential
+        let selected = router
+            .select_with_privacy(
+                ModelFormat::Gguf,
+                Some("cloud-be"),
+                Some(DataSensitivity::Confidential),
+            )
+            .unwrap();
+        // Should skip cloud-be and fall back to local-be
+        assert_eq!(selected.id().0, "local-be");
+    }
+
+    #[test]
+    fn select_with_privacy_internal_allows_remote() {
+        let router = BackendRouter::new();
+        router.register(Arc::new(MockRemoteBackend {
+            name: "cloud-be",
+            formats: vec![ModelFormat::Gguf],
+        }));
+
+        let selected = router
+            .select_with_privacy(ModelFormat::Gguf, None, Some(DataSensitivity::Internal))
+            .unwrap();
+        assert_eq!(selected.id().0, "cloud-be");
+    }
+
     #[test]
     fn select_with_privacy_public_data_allows_remote() {
         let router = BackendRouter::new();

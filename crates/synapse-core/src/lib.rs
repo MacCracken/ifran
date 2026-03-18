@@ -18,4 +18,5 @@ pub mod rlhf;
 pub mod scoring;
 pub mod storage;
 pub mod tenant;
+pub mod training_events;
 pub mod versioning;

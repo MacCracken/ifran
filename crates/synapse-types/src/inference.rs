@@ -170,6 +170,65 @@ mod tests {
         let result = serde_json::from_str::<FinishReason>("\"invalid\"");
         assert!(result.is_err());
     }
+
+    #[test]
+    fn data_sensitivity_serde_roundtrip() {
+        let values = [
+            DataSensitivity::Public,
+            DataSensitivity::Internal,
+            DataSensitivity::Confidential,
+            DataSensitivity::Restricted,
+        ];
+        for v in &values {
+            let json = serde_json::to_string(v).unwrap();
+            let back: DataSensitivity = serde_json::from_str(&json).unwrap();
+            assert_eq!(*v, back);
+        }
+    }
+
+    #[test]
+    fn data_sensitivity_json_values() {
+        assert_eq!(
+            serde_json::to_string(&DataSensitivity::Public).unwrap(),
+            "\"public\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DataSensitivity::Confidential).unwrap(),
+            "\"confidential\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DataSensitivity::Restricted).unwrap(),
+            "\"restricted\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DataSensitivity::Internal).unwrap(),
+            "\"internal\""
+        );
+    }
+
+    #[test]
+    fn inference_request_with_sensitivity() {
+        let req = InferenceRequest {
+            prompt: "classified data".into(),
+            max_tokens: Some(50),
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: None,
+            sensitivity: Some(DataSensitivity::Confidential),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("\"confidential\""));
+        let back: InferenceRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.sensitivity, Some(DataSensitivity::Confidential));
+    }
+
+    #[test]
+    fn data_sensitivity_invalid_json() {
+        let result = serde_json::from_str::<DataSensitivity>("\"top_secret\"");
+        assert!(result.is_err());
+    }
 }
 
 #[cfg(test)]

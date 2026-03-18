@@ -26,10 +26,10 @@ pub struct Allocation {
 /// Per-device tracking state.
 #[derive(Debug, Clone)]
 struct DeviceState {
-    pub index: u32,
-    pub total_memory_mb: u64,
-    pub allocated_mb: u64,
-    pub compute_capability: Option<(u32, u32)>,
+    index: u32,
+    total_memory_mb: u64,
+    allocated_mb: u64,
+    compute_capability: Option<(u32, u32)>,
 }
 
 impl DeviceState {
@@ -104,9 +104,8 @@ impl DeviceAllocator {
             .enumerate()
             .filter(|(_, d)| {
                 d.available_mb() >= required
-                    && min_compute_capability.is_none_or(|min| {
-                        d.compute_capability.is_some_and(|cc| cc >= min)
-                    })
+                    && min_compute_capability
+                        .is_none_or(|min| d.compute_capability.is_some_and(|cc| cc >= min))
             })
             .map(|(i, d)| (i, d.available_mb()))
             .collect();
@@ -162,7 +161,10 @@ impl DeviceAllocator {
 
     /// Release a previously allocated set of devices.
     pub async fn deallocate(&self, allocation_id: AllocationId) -> Result<()> {
+        // Acquire locks in the same order as allocate(): devices first, then allocations.
+        let mut devices = self.devices.write().await;
         let mut allocations = self.allocations.write().await;
+
         let alloc = allocations.remove(&allocation_id).ok_or_else(|| {
             SynapseError::HardwareError(format!("Allocation {allocation_id} not found"))
         })?;
@@ -170,12 +172,15 @@ impl DeviceAllocator {
         let per_device_mb = alloc.memory_per_device_mb;
         let device_ids = alloc.device_ids.clone();
 
-        let mut devices = self.devices.write().await;
         for &dev_id in &device_ids {
             if let Some(device) = devices.iter_mut().find(|d| d.index == dev_id) {
                 device.allocated_mb = device.allocated_mb.saturating_sub(per_device_mb);
             }
         }
+
+        // Drop locks before emitting events to avoid holding them unnecessarily.
+        drop(allocations);
+        drop(devices);
 
         if let Some(ref bus) = self.event_bus {
             bus.emit_released(allocation_id, device_ids);

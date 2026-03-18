@@ -12,8 +12,14 @@ pub async fn register_node(
     State(state): State<AppState>,
     Json(body): Json<RegisterNodeRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let node = state.fleet_manager.register(body).await;
-    Ok(Json(serde_json::to_value(&node).unwrap()))
+    let node = state
+        .fleet_manager
+        .register(body)
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    let value = serde_json::to_value(&node)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(value))
 }
 
 /// Heartbeat request body.
@@ -39,7 +45,13 @@ pub async fn heartbeat(
             body.gpu_temperature_c,
         )
         .await
-        .map_err(|e| (StatusCode::NOT_FOUND, e))?;
+        .map_err(|e| {
+            let status = match &e {
+                synapse_types::SynapseError::ValidationError(_) => StatusCode::BAD_REQUEST,
+                _ => StatusCode::NOT_FOUND,
+            };
+            (status, e.to_string())
+        })?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -52,7 +64,14 @@ pub async fn list_nodes(State(state): State<AppState>) -> Json<serde_json::Value
 /// GET /fleet/stats — fleet statistics.
 pub async fn fleet_stats(State(state): State<AppState>) -> Json<serde_json::Value> {
     let stats = state.fleet_manager.stats().await;
-    Json(serde_json::to_value(&stats).unwrap())
+    Json(serde_json::json!({
+        "total_nodes": stats.total_nodes,
+        "online": stats.online,
+        "suspect": stats.suspect,
+        "offline": stats.offline,
+        "total_gpus": stats.total_gpus,
+        "total_gpu_memory_mb": stats.total_gpu_memory_mb,
+    }))
 }
 
 /// DELETE /fleet/nodes/{id} — remove a node.

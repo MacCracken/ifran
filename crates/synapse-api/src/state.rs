@@ -18,6 +18,7 @@ use synapse_core::rag::store::RagStore;
 use synapse_core::rlhf::store::AnnotationStore;
 use synapse_core::storage::db::ModelDatabase;
 use synapse_core::tenant::store::TenantStore;
+use synapse_core::training_events::TrainingEventBus;
 use synapse_core::versioning::store::VersionStore;
 use synapse_train::distributed::coordinator::DistributedCoordinator;
 use synapse_train::executor::ExecutorKind;
@@ -50,6 +51,7 @@ pub struct AppState {
     pub version_store: Option<Arc<Mutex<VersionStore>>>,
     pub bridge_client: Option<Arc<BridgeClient>>,
     pub bridge_server: Option<Arc<BridgeServer>>,
+    pub training_event_bus: Arc<TrainingEventBus>,
     pub gpu_event_bus: Arc<GpuEventBus>,
     pub telemetry: Option<Arc<TelemetryLoop>>,
     pub fleet_manager: Arc<FleetManager>,
@@ -113,6 +115,9 @@ impl AppState {
         } else {
             None
         };
+
+        // Training event bus
+        let training_event_bus = Arc::new(TrainingEventBus::new(256));
 
         // GPU event bus
         let gpu_event_bus = Arc::new(GpuEventBus::new(256));
@@ -179,6 +184,7 @@ impl AppState {
             version_store: version_store.map(|s| Arc::new(Mutex::new(s))),
             bridge_client,
             bridge_server,
+            training_event_bus,
             gpu_event_bus,
             telemetry,
             fleet_manager: Arc::new(fleet_manager),

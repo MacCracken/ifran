@@ -77,6 +77,10 @@ pub fn build(state: AppState) -> Router {
             post(distributed::fail_job),
         )
         .route(
+            "/training/distributed/jobs/{id}/auto-place",
+            post(distributed::auto_place),
+        )
+        .route(
             "/training/distributed/jobs/{id}/aggregate",
             post(distributed::aggregate),
         )
@@ -160,6 +164,8 @@ pub fn build(state: AppState) -> Router {
         .route("/fleet/nodes/{id}/heartbeat", post(fleet::heartbeat))
         .route("/fleet/nodes/{id}", delete(fleet::remove_node))
         .route("/fleet/stats", get(fleet::fleet_stats))
+        // Training events (SSE)
+        .route("/system/training/events", get(system::training_events))
         // GPU telemetry
         .route("/system/gpu/telemetry", get(system::gpu_telemetry))
         // Model discovery

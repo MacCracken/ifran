@@ -1,8 +1,8 @@
-//! Encrypted storage detection and daimon key management integration.
+//! Encrypted storage detection and optional key management integration.
 //!
 //! Detects whether the model storage directory is backed by an encrypted
-//! filesystem (LUKS/dm-crypt). On Agnosticos, integrates with daimon's
-//! key management service to unlock volumes at startup.
+//! filesystem (LUKS/dm-crypt). Optionally integrates with a key management
+//! service (e.g., daimon on Agnosticos) to unlock volumes at startup.
 
 use std::path::Path;
 use synapse_types::SynapseError;
@@ -81,8 +81,8 @@ pub fn check_encryption(path: &Path) -> EncryptionStatus {
             }
         }
 
-        // Fallback: if it's a mapper device, check via dmsetup or assume encrypted
-        // on Agnosticos where all mapper devices are LUKS
+        // Fallback: if it's a mapper device without a readable dm/uuid,
+        // assume encrypted — mapper devices are typically LUKS/dm-crypt.
         if device.starts_with("/dev/mapper/") {
             return EncryptionStatus::Encrypted { device };
         }
@@ -112,11 +112,11 @@ pub fn verify_encryption_requirement(
     Ok(status)
 }
 
-/// Request daimon to unlock an encrypted volume (Agnosticos integration).
+/// Request a key management service to unlock an encrypted volume.
 ///
-/// Contacts the daimon key management service to request unlocking
-/// of the volume backing the given path. Returns Ok if the volume
-/// is already unlocked or was successfully unlocked.
+/// When running on Agnosticos, contacts the daimon key management service.
+/// The `daimon_endpoint` parameter allows pointing at any compatible service.
+/// Returns Ok if the volume is already unlocked or was successfully unlocked.
 pub async fn request_unlock(path: &Path, daimon_endpoint: &str) -> Result<()> {
     let path_str = path.to_string_lossy();
     tracing::info!(path = %path_str, "Requesting volume unlock from daimon");

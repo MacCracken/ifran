@@ -178,10 +178,18 @@ async fn discover_openai_compatible(
 /// Try to extract parameter count from model name (e.g., "llama-7b" -> "7b").
 fn extract_param_count(name: &str) -> Option<String> {
     let lower = name.to_lowercase();
-    let patterns = ["70b", "34b", "13b", "7b", "3b", "1.5b", "0.5b"];
+    // Check from largest to smallest to avoid partial matches (e.g., "70b" before "7b")
+    let patterns = [
+        "405b", "236b", "180b", "72b", "70b", "65b", "34b", "32b", "14b", "13b", "8b", "7b", "3b",
+        "2b", "1.5b", "0.5b",
+    ];
     for p in patterns {
-        if lower.contains(p) {
-            return Some(p.to_string());
+        // Check for word boundary: pattern must be preceded by non-alphanumeric or start of string
+        if let Some(pos) = lower.find(p) {
+            let before_ok = pos == 0 || !lower.as_bytes()[pos - 1].is_ascii_alphanumeric();
+            if before_ok {
+                return Some(p.to_string());
+            }
         }
     }
     None

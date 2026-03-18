@@ -47,6 +47,9 @@ pub enum SynapseError {
     #[error("RAG pipeline error: {0}")]
     RagError(String),
 
+    #[error("Validation error: {0}")]
+    ValidationError(String),
+
     #[error("Tenant not found: {0}")]
     TenantNotFound(String),
 
@@ -133,6 +136,7 @@ mod tests {
             SynapseError::MarketplaceError("x".into()),
             SynapseError::DistributedError("x".into()),
             SynapseError::RagError("x".into()),
+            SynapseError::ValidationError("x".into()),
             SynapseError::TenantNotFound("x".into()),
             SynapseError::Unauthorized("x".into()),
             SynapseError::Other("x".into()),

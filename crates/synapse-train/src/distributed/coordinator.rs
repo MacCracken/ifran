@@ -160,6 +160,43 @@ impl DistributedCoordinator {
         Ok(paths)
     }
 
+    /// Automatically place workers using fleet node resources and a placement policy.
+    ///
+    /// This enables distributed training without SecureYeoman — workers are
+    /// assigned directly to fleet nodes based on available GPU resources.
+    pub async fn auto_place(
+        &self,
+        job_id: DistributedJobId,
+        nodes: &[super::placement::NodeResources],
+        policy: &dyn super::placement::PlacementPolicy,
+    ) -> Result<Vec<WorkerAssignment>> {
+        let jobs = self.jobs.read().await;
+        let state = jobs.get(&job_id).ok_or_else(|| {
+            SynapseError::DistributedError(format!("Distributed job {job_id} not found"))
+        })?;
+
+        if !state.workers.is_empty() {
+            return Err(SynapseError::DistributedError(
+                "Workers already assigned — cannot auto-place".into(),
+            ));
+        }
+
+        let world_size = state.config.world_size;
+        // Default to 1 GPU per worker if not specified
+        let gpus_per_worker = 1u32;
+
+        drop(jobs); // Release read lock before acquiring write lock
+
+        let assignments = policy.place(world_size, gpus_per_worker, nodes)?;
+
+        // Assign each worker
+        for worker in &assignments {
+            self.assign_worker(job_id, worker.clone()).await?;
+        }
+
+        Ok(assignments)
+    }
+
     /// Fail a distributed job.
     pub async fn fail_job(&self, job_id: DistributedJobId) -> Result<()> {
         let mut jobs = self.jobs.write().await;
@@ -391,5 +428,67 @@ mod tests {
     async fn get_nonexistent_job() {
         let coord = DistributedCoordinator::new();
         assert!(coord.get_job(uuid::Uuid::new_v4()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn auto_place_with_gpu_affinity() {
+        use crate::distributed::placement::*;
+
+        let coord = DistributedCoordinator::new();
+        let job_id = coord.create_job(test_config(), "node-1").await.unwrap();
+
+        let nodes = vec![NodeResources {
+            node_id: "node-1".into(),
+            endpoint: "http://node-1:8420".into(),
+            available_gpu_ids: vec![0, 1, 2, 3],
+            available_gpu_memory_mb: 96000,
+            gpu_utilization_pct: Some(10.0),
+            cost_per_gpu_hour: None,
+        }];
+
+        let policy = GpuAffinityPolicy;
+        let assignments = coord.auto_place(job_id, &nodes, &policy).await.unwrap();
+
+        assert_eq!(assignments.len(), 2); // world_size = 2
+        assert_eq!(assignments[0].rank, 0);
+        assert_eq!(assignments[1].rank, 1);
+
+        // Job should now have 2 workers assigned
+        let job = coord.get_job(job_id).await.unwrap();
+        assert_eq!(job.workers.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn auto_place_rejects_if_workers_already_assigned() {
+        use crate::distributed::placement::*;
+
+        let coord = DistributedCoordinator::new();
+        let job_id = coord.create_job(test_config(), "node-1").await.unwrap();
+
+        // Manually assign a worker first
+        coord
+            .assign_worker(
+                job_id,
+                WorkerAssignment {
+                    rank: 0,
+                    instance_id: "node-1".into(),
+                    endpoint: "http://node-1:8420".into(),
+                    device_ids: vec![0],
+                },
+            )
+            .await
+            .unwrap();
+
+        let nodes = vec![NodeResources {
+            node_id: "node-1".into(),
+            endpoint: "http://node-1:8420".into(),
+            available_gpu_ids: vec![0, 1, 2, 3],
+            available_gpu_memory_mb: 96000,
+            gpu_utilization_pct: None,
+            cost_per_gpu_hour: None,
+        }];
+
+        let result = coord.auto_place(job_id, &nodes, &GpuAffinityPolicy).await;
+        assert!(result.is_err());
     }
 }

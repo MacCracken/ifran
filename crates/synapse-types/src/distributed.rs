@@ -157,6 +157,46 @@ mod tests {
     }
 
     #[test]
+    fn placement_policy_kind_serde_roundtrip() {
+        let values = [
+            PlacementPolicyKind::GpuAffinity,
+            PlacementPolicyKind::Balanced,
+            PlacementPolicyKind::CostAware,
+        ];
+        for v in &values {
+            let json = serde_json::to_string(v).unwrap();
+            let back: PlacementPolicyKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(*v, back);
+        }
+    }
+
+    #[test]
+    fn placement_policy_kind_json_values() {
+        assert_eq!(
+            serde_json::to_string(&PlacementPolicyKind::GpuAffinity).unwrap(),
+            "\"gpu_affinity\""
+        );
+        assert_eq!(
+            serde_json::to_string(&PlacementPolicyKind::Balanced).unwrap(),
+            "\"balanced\""
+        );
+        assert_eq!(
+            serde_json::to_string(&PlacementPolicyKind::CostAware).unwrap(),
+            "\"cost_aware\""
+        );
+    }
+
+    #[test]
+    fn distributed_config_with_placement_policy() {
+        let mut config = make_test_config();
+        config.placement_policy = Some(PlacementPolicyKind::CostAware);
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("\"cost_aware\""));
+        let back: DistributedTrainingConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.placement_policy, Some(PlacementPolicyKind::CostAware));
+    }
+
+    #[test]
     fn distributed_job_state_serde() {
         let state = DistributedJobState {
             job_id: Uuid::new_v4(),

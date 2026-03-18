@@ -131,6 +131,7 @@ async fn probe_nvidia() -> synapse_types::error::Result<Vec<GpuTelemetry>> {
     for line in stdout.lines() {
         let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
         if parts.len() < 6 {
+            tracing::debug!(line, "Skipping malformed nvidia-smi telemetry line");
             continue;
         }
 
