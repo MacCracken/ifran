@@ -637,7 +637,7 @@ mod tests {
         )
         .await
         .unwrap();
-        cancel_job(
+        let _ = cancel_job(
             State(state.clone()),
             Extension(TenantId::default_tenant()),
             Path(created.id),

@@ -227,11 +227,9 @@ mod tests {
     #[test]
     fn check_no_drift() {
         let det = DriftDetector::open_in_memory(2.0).unwrap();
-        det.record_baseline("model", &vec![0.80, 0.85, 0.82, 0.88, 0.84], &t())
+        det.record_baseline("model", &[0.80, 0.85, 0.82, 0.88, 0.84], &t())
             .unwrap();
-        let result = det
-            .check_drift("model", &vec![0.83, 0.84, 0.82], &t())
-            .unwrap();
+        let result = det.check_drift("model", &[0.83, 0.84, 0.82], &t()).unwrap();
         assert!(!result.drifted);
         assert_eq!(result.severity, DriftSeverity::None);
     }
@@ -239,12 +237,10 @@ mod tests {
     #[test]
     fn check_drift_detected() {
         let det = DriftDetector::open_in_memory(2.0).unwrap();
-        det.record_baseline("model", &vec![0.80, 0.85, 0.82, 0.88, 0.84], &t())
+        det.record_baseline("model", &[0.80, 0.85, 0.82, 0.88, 0.84], &t())
             .unwrap();
         // Much lower scores -> drift
-        let result = det
-            .check_drift("model", &vec![0.50, 0.52, 0.48], &t())
-            .unwrap();
+        let result = det.check_drift("model", &[0.50, 0.52, 0.48], &t()).unwrap();
         assert!(result.drifted);
         assert!(result.z_score.abs() > 2.0);
     }

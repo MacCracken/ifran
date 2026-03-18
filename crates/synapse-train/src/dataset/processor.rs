@@ -312,8 +312,6 @@ fn character_noise(text: &str, word_prob: f64, rng: &mut StdRng) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write as _;
-
     fn seeded_rng() -> StdRng {
         StdRng::seed_from_u64(42)
     }

@@ -376,9 +376,9 @@ mod tests {
         }
 
         // Concurrently check is_loaded
-        for i in 0..20 {
+        for id in ids.iter().take(20) {
             let manager = manager.clone();
-            let id = ids[i];
+            let id = *id;
             handles.push(tokio::spawn(async move {
                 let _ = manager.is_loaded(&id).await;
                 let _ = manager.get_loaded(&id).await;

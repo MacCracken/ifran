@@ -241,7 +241,7 @@ where
             .map_err(|e| SynapseError::TrainingError(format!("Write error: {e}")))?;
 
         processed += 1;
-        if processed % 10 == 0 {
+        if processed.is_multiple_of(10) {
             let _ = labeler.update_progress(job_id, processed, total).await;
         }
     }
@@ -259,8 +259,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write as _;
-
     #[test]
     fn auto_label_config_defaults() {
         let json = r#"{"source_path":"/data.jsonl","model_name":"llama"}"#;

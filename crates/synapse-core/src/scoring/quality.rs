@@ -207,7 +207,7 @@ mod tests {
             ("Q?".into(), "Another solid response with detail.".into()),
         ];
         let high = filter_high_quality(&pairs, 0.5);
-        assert!(high.len() >= 1); // empty response filtered out
+        assert!(!high.is_empty()); // empty response filtered out
     }
 
     #[test]

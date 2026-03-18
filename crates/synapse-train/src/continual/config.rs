@@ -172,7 +172,7 @@ mod tests {
 
     #[test]
     fn buffer_capacity_zero() {
-        let mut buf = ReplayBuffer::new(0);
+        let buf = ReplayBuffer::new(0);
         assert_eq!(buf.capacity(), 0);
         // Adding to a zero-capacity buffer: first remove(0) panics or the
         // check `len() >= capacity` is true immediately — let's verify.

@@ -166,7 +166,7 @@ mod tests {
             reason: Some("test reason".into()),
         };
         let cloned = status.clone();
-        assert_eq!(cloned.allowed, true);
+        assert!(cloned.allowed);
         assert_eq!(cloned.remaining_gpu_hours, 5.5);
         assert_eq!(cloned.reason.as_deref(), Some("test reason"));
     }

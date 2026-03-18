@@ -213,7 +213,6 @@ fn run_to_response(run: &synapse_core::eval::runner::EvalRunState) -> EvalRunRes
 mod tests {
     use super::*;
     use synapse_core::eval::runner::EvalRunState;
-    use synapse_types::eval::*;
 
     #[test]
     fn create_eval_request_deserialize() {

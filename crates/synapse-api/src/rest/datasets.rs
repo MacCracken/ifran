@@ -352,7 +352,7 @@ pub async fn preview_dataset(
 ) -> Result<Json<PreviewDatasetResponse>, (StatusCode, String)> {
     let path = req.path.clone();
     let format = req.format;
-    let limit = req.limit.min(50).max(1);
+    let limit = req.limit.clamp(1, 50);
 
     let result =
         tokio::task::spawn_blocking(move || -> Result<(Vec<serde_json::Value>, bool), String> {
