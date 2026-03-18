@@ -2165,7 +2165,7 @@ dependencies = [
 
 [[package]]
 name = "synapse-api"
-version = "2026.3.18"
+version = "2026.3.18-1"
 dependencies = [
  "async-stream",
  "axum 0.8.8",
@@ -2198,7 +2198,7 @@ dependencies = [
 
 [[package]]
 name = "synapse-backends"
-version = "2026.3.18"
+version = "2026.3.18-1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2218,7 +2218,7 @@ dependencies = [
 
 [[package]]
 name = "synapse-bridge"
-version = "2026.3.18"
+version = "2026.3.18-1"
 dependencies = [
  "chrono",
  "prost",
@@ -2239,7 +2239,7 @@ dependencies = [
 
 [[package]]
 name = "synapse-cli"
-version = "2026.3.18"
+version = "2026.3.18-1"
 dependencies = [
  "axum 0.8.8",
  "chrono",
@@ -2262,7 +2262,7 @@ dependencies = [
 
 [[package]]
 name = "synapse-core"
-version = "2026.3.18"
+version = "2026.3.18-1"
 dependencies = [
  "anyhow",
  "blake3",
@@ -2287,7 +2287,7 @@ dependencies = [
 
 [[package]]
 name = "synapse-train"
-version = "2026.3.18"
+version = "2026.3.18-1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2308,7 +2308,7 @@ dependencies = [
 
 [[package]]
 name = "synapse-types"
-version = "2026.3.18"
+version = "2026.3.18-1"
 dependencies = [
  "chrono",
  "proptest",

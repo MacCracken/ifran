@@ -41,19 +41,21 @@ jobs:
           fi
           echo "Tag '${VERSION}' does not exist, proceeding"
 
-      - name: Update VERSION file
+      - name: Update VERSION file and Cargo.toml
         run: |
           echo "${{ inputs.version }}" > VERSION
-          echo "Updated VERSION file to: $(cat VERSION)"
+          sed -i 's/^version = ".*"/version = "${{ inputs.version }}"/' Cargo.toml
+          cargo generate-lockfile
+          echo "Updated VERSION and Cargo.toml to: $(cat VERSION)"
 
       - name: Configure git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Commit VERSION update
+      - name: Commit version update
         run: |
-          git add VERSION
+          git add VERSION Cargo.toml Cargo.lock
           git commit -m "release: ${{ inputs.version }}"
 
       - name: Create annotated tag

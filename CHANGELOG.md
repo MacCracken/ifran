@@ -5,6 +5,56 @@ All notable changes to Synapse will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 
+## [2026.3.18-1]
+
+### Added
+
+#### GPU Improvements
+- `synapse-core/hardware/allocator`: Compute capability filtering — `allocate()` accepts `min_compute_capability` to restrict to GPUs meeting precision requirements (e.g., BF16 needs Ampere+)
+- `synapse-core/hardware/telemetry`: Periodic GPU telemetry loop — polls utilization, temperature, memory via nvidia-smi/ROCm sysfs at configurable intervals
+- `synapse-core/hardware/events`: GPU event bus — broadcasts `Allocated`/`Released` events via tokio broadcast channel for observability
+- `synapse-api/rest/system`: `GET /system/gpu/telemetry` endpoint for live GPU metrics
+
+#### Fleet Management
+- `synapse-core/fleet/manager`: Fleet node management — registration, heartbeat processing, 3-tier health states (Online/Suspect/Offline), fleet statistics
+- `synapse-api/rest/fleet`: REST endpoints — `POST /fleet/nodes`, `POST /fleet/nodes/{id}/heartbeat`, `GET /fleet/nodes`, `GET /fleet/stats`, `DELETE /fleet/nodes/{id}`
+- `synapse-core/config`: `[fleet]` config section with `enabled`, `suspect_timeout_secs`, `offline_timeout_secs`, `health_check_interval_secs`
+- Fleet self-registration on startup when `fleet.enabled = true`
+
+#### Distributed Training
+- `synapse-train/distributed/placement`: Pluggable placement policies — `GpuAffinityPolicy` (pack onto fewest nodes), `BalancedPolicy` (round-robin), `CostAwarePolicy` (cheapest first)
+- `synapse-train/distributed/coordinator`: `auto_place()` method — assigns workers using fleet nodes + placement policies without requiring SecureYeoman
+- `synapse-api/rest/distributed`: `POST /training/distributed/jobs/{id}/auto-place` endpoint for fleet-based worker placement
+
+#### Privacy & Routing
+- `synapse-types/inference`: `DataSensitivity` enum — `Public`, `Internal`, `Confidential`, `Restricted`
+- `synapse-types/backend`: `BackendLocality` enum — `Local`, `Remote` on `BackendCapabilities`
+- `synapse-backends/router`: `select_with_privacy()` — restricts to local backends for confidential/restricted data
+
+#### Model Discovery
+- `synapse-core/registry/discovery`: Auto-discovery of local inference servers — probes Ollama, LM Studio, LocalAI
+- `synapse-api/rest/system`: `GET /models/discover` endpoint
+
+#### Standalone Operation
+- `synapse-core/training_events`: Local training event bus — broadcasts job lifecycle events (started, progress, cancelled, completed, failed, worker assigned, checkpoint ready) without SY dependency
+- `synapse-api/rest/system`: `GET /system/training/events` SSE endpoint for real-time training monitoring
+- Training and distributed training handlers now emit local events before optionally forwarding to SY bridge
+- Daimon endpoint now configurable via `DAIMON_ENDPOINT` env var (no longer hardcoded)
+
+#### Versioning & CI
+- `scripts/version-set.sh`: Single-command version updater — syncs VERSION file, Cargo.toml, and Cargo.lock with CalVer validation
+- Release automation now syncs both VERSION and Cargo.toml when creating tags
+- Release page: pre-release flag based on CalVer suffix, CHANGELOG.md integration, installation instructions
+
+### Fixed
+- **SECURITY**: Fleet node registration validates id (1-128 chars, alphanumeric+hyphens), endpoint (http/https), gpu_count (<=64), memory (<=10TB)
+- **SECURITY**: Heartbeat telemetry validates utilization (0-100%), temperature (-50 to 250C), rejects NaN/Infinity
+- **SECURITY**: Placement policies reject `gpus_per_worker == 0` (prevented infinite loop)
+- **BUG**: Fixed lock-ordering deadlock in `DeviceAllocator::deallocate()` — now acquires locks in same order as `allocate()`
+- **BUG**: Bridge integration tests now correctly expect `Degraded` state when no SY server is running
+- Removed AGNOS-specific assumptions from encrypted storage detection
+- 1,238 tests across all crates (up from 1,043)
+
 ## [2026.3.15]
 
 ### Added

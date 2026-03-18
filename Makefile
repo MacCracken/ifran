@@ -81,9 +81,10 @@ docker-release:
 
 # === Version ===
 
+version-set:
+	@./scripts/version-set.sh $(v)
+
 version-sync:
-	@echo "Syncing version $(VERSION) to Cargo.toml"
-	@sed -i 's/^version = .*/version = "$(VERSION)"/' Cargo.toml
-	@echo "Version set to $(VERSION)"
+	@./scripts/version-set.sh $(VERSION)
 
 .DEFAULT_GOAL := build

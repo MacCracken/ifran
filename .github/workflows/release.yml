@@ -148,28 +148,86 @@ jobs:
           VERSION=$(cat VERSION | tr -d '[:space:]')
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-      - name: Generate changelog
+      - name: Determine if pre-release
+        id: prerelease
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if [[ "$VERSION" == *-* ]]; then
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate release notes
         id: changelog
         run: |
+          VERSION="${{ steps.version.outputs.version }}"
           PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -E '^[0-9]' | head -n 2 | tail -n 1 || echo "")
           CURRENT_TAG="${GITHUB_REF_NAME}"
 
-          echo "## What's Changed" > changelog.md
+          cat > changelog.md << 'HEADER'
+          ## Highlights
+
+          See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for the full list of changes.
+
+          HEADER
+
+          # Extract CHANGELOG.md section for this version
+          if [ -f CHANGELOG.md ]; then
+            # Extract content between this version header and the next version header
+            SECTION=$(sed -n "/^## \[${VERSION}\]/,/^## \[/p" CHANGELOG.md | sed '1d;$d')
+            if [ -n "$SECTION" ]; then
+              echo "$SECTION" >> changelog.md
+              echo "" >> changelog.md
+            fi
+          fi
+
+          echo "---" >> changelog.md
+          echo "" >> changelog.md
+          echo "## Commits" >> changelog.md
           echo "" >> changelog.md
 
           if [ -n "$PREVIOUS_TAG" ]; then
-            echo "Changes since ${PREVIOUS_TAG}:" >> changelog.md
-            echo "" >> changelog.md
             git log "${PREVIOUS_TAG}..${CURRENT_TAG}" --pretty=format:"- %s (%h)" --no-merges >> changelog.md
           else
-            echo "Initial release." >> changelog.md
-            echo "" >> changelog.md
-            git log --pretty=format:"- %s (%h)" --no-merges >> changelog.md
+            git log --pretty=format:"- %s (%h)" --no-merges -20 >> changelog.md
           fi
 
           echo "" >> changelog.md
           echo "" >> changelog.md
-          echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREVIOUS_TAG}...${CURRENT_TAG}" >> changelog.md
+
+          if [ -n "$PREVIOUS_TAG" ]; then
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREVIOUS_TAG}...${CURRENT_TAG}" >> changelog.md
+          fi
+
+          echo "" >> changelog.md
+          cat >> changelog.md << 'INSTALL'
+          ---
+
+          ## Installation
+
+          ### Binary
+
+          Download the tarball for your architecture, extract, and run:
+
+          ```bash
+          tar xzf synapse-*-linux-amd64.tar.gz
+          ./synapse-*/synapse serve
+          ```
+
+          ### Container
+
+          ```bash
+          docker pull ghcr.io/maccracken/synapse:latest
+          docker run -p 8420:8420 ghcr.io/maccracken/synapse:latest
+          ```
+
+          ### Verify
+
+          ```bash
+          sha256sum -c synapse-*-linux-amd64.tar.gz.sha256
+          ```
+          INSTALL
 
       - name: Download release artifacts (amd64)
         uses: actions/download-artifact@v4
@@ -194,7 +252,8 @@ jobs:
         with:
           name: "Synapse ${{ steps.version.outputs.version }}"
           body_path: changelog.md
-          prerelease: true
+          prerelease: ${{ steps.prerelease.outputs.is_prerelease }}
+          make_latest: ${{ steps.prerelease.outputs.is_prerelease == 'false' }}
           files: |
             artifacts/release-amd64/*
             artifacts/release-arm64/*
@@ -257,6 +316,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Determine if pre-release
+        id: prerelease
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if [[ "$VERSION" == *-* ]]; then
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -264,8 +333,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=${{ steps.version.outputs.version }}
-            type=raw,value=latest
-            type=raw,value=alpha
+            type=raw,value=latest,enable=${{ steps.prerelease.outputs.is_prerelease == 'false' }}
 
       - name: Build and push multi-arch container image
         uses: docker/build-push-action@v6
