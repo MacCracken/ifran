@@ -19,35 +19,20 @@ pub async fn list_models(
         .list(&tenant_id)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let total = models.len();
-    let limit = page.safe_limit() as usize;
-    let offset = (page.offset as usize).min(total);
-    let data: Vec<serde_json::Value> = models
-        .iter()
-        .skip(offset)
-        .take(limit)
-        .map(|m| {
-            serde_json::json!({
-                "id": m.id.to_string(),
-                "name": m.name,
-                "repo_id": m.repo_id,
-                "format": format!("{:?}", m.format).to_lowercase(),
-                "quant": format!("{:?}", m.quant),
-                "size_bytes": m.size_bytes,
-                "parameter_count": m.parameter_count,
-                "architecture": m.architecture,
-                "local_path": m.local_path,
-                "pulled_at": m.pulled_at.to_rfc3339(),
-            })
+    Ok(Json(PaginatedResponse::from_slice(&models, &page, |m| {
+        serde_json::json!({
+            "id": m.id.to_string(),
+            "name": m.name,
+            "repo_id": m.repo_id,
+            "format": format!("{:?}", m.format).to_lowercase(),
+            "quant": format!("{:?}", m.quant),
+            "size_bytes": m.size_bytes,
+            "parameter_count": m.parameter_count,
+            "architecture": m.architecture,
+            "local_path": m.local_path,
+            "pulled_at": m.pulled_at.to_rfc3339(),
         })
-        .collect();
-
-    Ok(Json(PaginatedResponse::pre_sliced(
-        data,
-        total,
-        limit as u32,
-        offset as u32,
-    )))
+    })))
 }
 
 /// GET /models/:id — get a specific model by ID.

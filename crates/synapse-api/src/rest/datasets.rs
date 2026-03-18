@@ -69,19 +69,13 @@ pub async fn create_auto_label(
         output_path: Some(output_path.clone()),
     };
 
+    let label_config = config.clone();
+
     let job_id = state
         .auto_labeler
         .create_job(config)
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
-
-    // Retrieve config from the job for the background task
-    let job_state = state
-        .auto_labeler
-        .get_job(job_id)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let label_config = job_state.config;
 
     // Spawn background task
     let labeler = state.auto_labeler.clone();
@@ -172,20 +166,10 @@ pub async fn list_auto_label_jobs(
     Query(page): Query<PaginationQuery>,
 ) -> Json<PaginatedResponse<AutoLabelJobResponse>> {
     let jobs = state.auto_labeler.list_jobs().await;
-    let total = jobs.len();
-    let limit = page.safe_limit() as usize;
-    let offset = (page.offset as usize).min(total);
-    let data = jobs
-        .iter()
-        .skip(offset)
-        .take(limit)
-        .map(job_to_auto_label_response)
-        .collect();
-    Json(PaginatedResponse::pre_sliced(
-        data,
-        total,
-        limit as u32,
-        offset as u32,
+    Json(PaginatedResponse::from_slice(
+        &jobs,
+        &page,
+        job_to_auto_label_response,
     ))
 }
 
@@ -357,7 +341,7 @@ fn default_preview_limit() -> usize {
 #[derive(Serialize)]
 pub struct PreviewDatasetResponse {
     pub samples: Vec<serde_json::Value>,
-    pub total_rows: usize,
+    pub has_more: bool,
     pub format: synapse_types::training::DatasetFormat,
 }
 
@@ -371,7 +355,7 @@ pub async fn preview_dataset(
     let limit = req.limit.min(50).max(1);
 
     let result =
-        tokio::task::spawn_blocking(move || -> Result<(Vec<serde_json::Value>, usize), String> {
+        tokio::task::spawn_blocking(move || -> Result<(Vec<serde_json::Value>, bool), String> {
             use std::io::BufRead;
             let file =
                 std::fs::File::open(&path).map_err(|e| format!("Failed to open file: {e}"))?;
@@ -380,54 +364,52 @@ pub async fn preview_dataset(
             match format {
                 synapse_types::training::DatasetFormat::Jsonl => {
                     let mut samples = Vec::with_capacity(limit);
-                    let mut total = 0usize;
+                    let mut has_more = false;
                     for line in reader.lines() {
                         let line = line.map_err(|e| format!("Read error: {e}"))?;
-                        let line = line.trim().to_string();
-                        if line.is_empty() {
+                        if line.trim().is_empty() {
                             continue;
                         }
-                        total += 1;
-                        if samples.len() < limit {
-                            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
-                                samples.push(val);
-                            }
+                        if samples.len() >= limit {
+                            has_more = true;
+                            break;
+                        }
+                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(line.trim()) {
+                            samples.push(val);
                         }
                     }
-                    Ok((samples, total))
+                    Ok((samples, has_more))
                 }
                 synapse_types::training::DatasetFormat::Csv => {
                     let mut lines_iter = reader.lines();
                     let header_line = match lines_iter.next() {
                         Some(Ok(h)) if !h.trim().is_empty() => h,
-                        _ => return Ok((Vec::new(), 0)),
+                        _ => return Ok((Vec::new(), false)),
                     };
-                    let headers: Vec<&str> = header_line.split(',').map(|h| h.trim()).collect();
-                    // Collect headers as owned for the closure below
-                    let headers: Vec<String> = headers.into_iter().map(String::from).collect();
+                    let headers: Vec<String> = header_line
+                        .split(',')
+                        .map(|h| h.trim().to_string())
+                        .collect();
                     let mut samples = Vec::with_capacity(limit);
-                    let mut total = 0usize;
+                    let mut has_more = false;
                     for line in lines_iter {
                         let line = line.map_err(|e| format!("Read error: {e}"))?;
-                        let line = line.trim().to_string();
-                        if line.is_empty() {
+                        if line.trim().is_empty() {
                             continue;
                         }
-                        total += 1;
-                        if samples.len() < limit {
-                            let values: Vec<&str> = line.split(',').collect();
-                            let mut obj = serde_json::Map::new();
-                            for (i, header) in headers.iter().enumerate() {
-                                let val = values.get(i).unwrap_or(&"");
-                                obj.insert(
-                                    header.clone(),
-                                    serde_json::Value::String(val.to_string()),
-                                );
-                            }
-                            samples.push(serde_json::Value::Object(obj));
+                        if samples.len() >= limit {
+                            has_more = true;
+                            break;
                         }
+                        let values: Vec<&str> = line.split(',').collect();
+                        let mut obj = serde_json::Map::new();
+                        for (i, header) in headers.iter().enumerate() {
+                            let val = values.get(i).unwrap_or(&"");
+                            obj.insert(header.clone(), serde_json::Value::String(val.to_string()));
+                        }
+                        samples.push(serde_json::Value::Object(obj));
                     }
-                    Ok((samples, total))
+                    Ok((samples, has_more))
                 }
                 _ => Err(format!("Preview not supported for format {:?}", format)),
             }
@@ -443,7 +425,7 @@ pub async fn preview_dataset(
 
     Ok(Json(PreviewDatasetResponse {
         samples: result.0,
-        total_rows: result.1,
+        has_more: result.1,
         format,
     }))
 }
@@ -562,11 +544,11 @@ mod tests {
         ];
         let resp = PreviewDatasetResponse {
             samples,
-            total_rows: 100,
+            has_more: true,
             format: synapse_types::training::DatasetFormat::Jsonl,
         };
         let json = serde_json::to_value(&resp).unwrap();
-        assert_eq!(json["total_rows"], 100);
+        assert_eq!(json["has_more"], true);
         assert_eq!(json["format"], "jsonl");
         assert_eq!(json["samples"].as_array().unwrap().len(), 2);
     }

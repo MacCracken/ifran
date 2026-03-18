@@ -116,21 +116,7 @@ pub async fn list_jobs(
         .distributed_coordinator
         .list_jobs(tenant_id.as_ref())
         .await;
-    let total = jobs.len();
-    let limit = page.safe_limit() as usize;
-    let offset = (page.offset as usize).min(total);
-    let data = jobs
-        .iter()
-        .skip(offset)
-        .take(limit)
-        .map(job_to_response)
-        .collect();
-    Json(PaginatedResponse::pre_sliced(
-        data,
-        total,
-        limit as u32,
-        offset as u32,
-    ))
+    Json(PaginatedResponse::from_slice(&jobs, &page, job_to_response))
 }
 
 /// GET /training/distributed/jobs/:id — get a distributed job.

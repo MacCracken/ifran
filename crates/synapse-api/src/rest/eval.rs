@@ -170,21 +170,7 @@ pub async fn list_runs(
     Query(page): Query<PaginationQuery>,
 ) -> Json<PaginatedResponse<EvalRunResponse>> {
     let runs = state.eval_runner.list_runs(tenant_id.as_ref()).await;
-    let total = runs.len();
-    let limit = page.safe_limit() as usize;
-    let offset = (page.offset as usize).min(total);
-    let data = runs
-        .iter()
-        .skip(offset)
-        .take(limit)
-        .map(run_to_response)
-        .collect();
-    Json(PaginatedResponse::pre_sliced(
-        data,
-        total,
-        limit as u32,
-        offset as u32,
-    ))
+    Json(PaginatedResponse::from_slice(&runs, &page, run_to_response))
 }
 
 /// GET /eval/runs/:id — get a specific eval run.

@@ -43,7 +43,27 @@ pub struct PaginatedResponse<T: Serialize> {
 }
 
 impl<T: Serialize> PaginatedResponse<T> {
+    /// Paginate a slice, mapping only the page window to DTOs.
+    pub fn from_slice<S, F>(items: &[S], page: &PaginationQuery, map: F) -> Self
+    where
+        F: FnMut(&S) -> T,
+    {
+        let total = items.len();
+        let limit = page.safe_limit() as usize;
+        let offset = (page.offset as usize).min(total);
+        let data = items.iter().skip(offset).take(limit).map(map).collect();
+        Self {
+            data,
+            pagination: PaginationInfo {
+                total,
+                limit: limit as u32,
+                offset: offset as u32,
+            },
+        }
+    }
+
     /// Create a paginated response from a full list, applying offset and limit.
+    #[cfg(test)]
     pub fn from_vec(items: Vec<T>, limit: u32, offset: u32) -> Self {
         let total = items.len();
         let safe_limit = limit.clamp(1, MAX_LIMIT) as usize;

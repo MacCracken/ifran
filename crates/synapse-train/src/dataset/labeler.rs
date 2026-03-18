@@ -191,7 +191,8 @@ where
         .map_err(|e| SynapseError::TrainingError(format!("Failed to create output: {e}")))?;
     let mut writer = std::io::BufWriter::new(out_file);
 
-    let mut labeled = 0u64;
+    let label_key = config.label_field.clone();
+    let mut processed = 0u64;
     let mut total = 0u64;
 
     for line in reader.lines() {
@@ -226,7 +227,7 @@ where
         match infer_fn(full_prompt).await {
             Ok(label) => {
                 obj.insert(
-                    config.label_field.clone(),
+                    label_key.clone(),
                     serde_json::Value::String(label.trim().to_string()),
                 );
             }
@@ -239,9 +240,9 @@ where
         writeln!(writer, "{}", serde_json::to_string(&obj).unwrap())
             .map_err(|e| SynapseError::TrainingError(format!("Write error: {e}")))?;
 
-        labeled += 1;
-        if labeled % 10 == 0 {
-            let _ = labeler.update_progress(job_id, labeled, total).await;
+        processed += 1;
+        if processed % 10 == 0 {
+            let _ = labeler.update_progress(job_id, processed, total).await;
         }
     }
 
@@ -250,7 +251,7 @@ where
         .map_err(|e| SynapseError::TrainingError(format!("Flush failed: {e}")))?;
 
     // Final progress update
-    labeler.update_progress(job_id, labeled, total).await?;
+    labeler.update_progress(job_id, processed, total).await?;
 
     Ok(output_path.to_string())
 }
