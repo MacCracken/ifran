@@ -1,6 +1,6 @@
 //! REST handlers for model evaluation.
 
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use serde::{Deserialize, Serialize};
@@ -8,6 +8,7 @@ use synapse_types::TenantId;
 use synapse_types::eval::*;
 use synapse_types::inference::InferenceRequest;
 
+use super::pagination::{PaginatedResponse, PaginationQuery};
 use crate::state::AppState;
 
 /// Response for an eval run.
@@ -162,13 +163,19 @@ pub async fn create_run(
     Ok((StatusCode::CREATED, Json(run_to_response(&run))))
 }
 
-/// GET /eval/runs — list all eval runs.
+/// GET /eval/runs — list eval runs with pagination.
 pub async fn list_runs(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
-) -> Json<Vec<EvalRunResponse>> {
+    Query(page): Query<PaginationQuery>,
+) -> Json<PaginatedResponse<EvalRunResponse>> {
     let runs = state.eval_runner.list_runs(tenant_id.0.as_str()).await;
-    Json(runs.iter().map(run_to_response).collect())
+    let all: Vec<EvalRunResponse> = runs.iter().map(run_to_response).collect();
+    Json(PaginatedResponse::from_vec(
+        all,
+        page.safe_limit(),
+        page.offset,
+    ))
 }
 
 /// GET /eval/runs/:id — get a specific eval run.

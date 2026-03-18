@@ -54,6 +54,11 @@ pub fn build(state: AppState) -> Router {
         .route("/training/jobs/{id}", get(training::get_job))
         .route("/training/jobs/{id}/cancel", post(training::cancel_job))
         .route("/training/jobs/{id}/stream", get(training::stream_job))
+        .route(
+            "/training/jobs/{id}/checkpoints",
+            get(training::list_checkpoints),
+        )
+        .route("/training/jobs/{id}/metrics", get(training::get_metrics))
         // Distributed Training
         .route(
             "/training/distributed/jobs",
@@ -108,6 +113,8 @@ pub fn build(state: AppState) -> Router {
             get(datasets::get_auto_label_job),
         )
         .route("/datasets/augment", post(datasets::augment_dataset))
+        .route("/datasets/validate", post(datasets::validate_dataset))
+        .route("/datasets/preview", post(datasets::preview_dataset))
         // Marketplace
         .route("/marketplace/search", get(marketplace::search))
         .route("/marketplace/entries", get(marketplace::list_entries))

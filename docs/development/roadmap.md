@@ -4,7 +4,7 @@
 
 ### Test Coverage
 
-Current: **1,266 tests** across 7 crates. CI threshold: 65%.
+Current: **1,290 tests** across 7 crates. CI threshold: 65%.
 
 ---
 

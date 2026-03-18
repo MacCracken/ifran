@@ -1,6 +1,8 @@
 pub mod bridge;
 pub mod datasets;
 pub mod distributed;
+pub mod error;
+
 pub mod eval;
 pub mod experiment;
 pub mod fleet;
@@ -9,6 +11,7 @@ pub mod lineage;
 pub mod marketplace;
 pub mod models;
 pub mod openai_compat;
+pub mod pagination;
 pub mod rag;
 pub mod rlhf;
 pub mod router;

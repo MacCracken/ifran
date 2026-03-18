@@ -1,6 +1,6 @@
 //! REST handlers for distributed training job management.
 
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use serde::{Deserialize, Serialize};
@@ -9,6 +9,7 @@ use synapse_types::TenantId;
 use synapse_types::distributed::*;
 use synapse_types::training::{TrainingJobConfig, TrainingStatus};
 
+use super::pagination::{PaginatedResponse, PaginationQuery};
 use crate::state::AppState;
 
 /// Response for a distributed training job.
@@ -105,16 +106,22 @@ pub async fn create_job(
     Ok((StatusCode::CREATED, Json(job_to_response(&job))))
 }
 
-/// GET /training/distributed/jobs — list all distributed jobs.
+/// GET /training/distributed/jobs — list distributed jobs with pagination.
 pub async fn list_jobs(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
-) -> Json<Vec<DistributedJobResponse>> {
+    Query(page): Query<PaginationQuery>,
+) -> Json<PaginatedResponse<DistributedJobResponse>> {
     let jobs = state
         .distributed_coordinator
         .list_jobs(tenant_id.0.as_str())
         .await;
-    Json(jobs.iter().map(job_to_response).collect())
+    let all: Vec<DistributedJobResponse> = jobs.iter().map(job_to_response).collect();
+    Json(PaginatedResponse::from_vec(
+        all,
+        page.safe_limit(),
+        page.offset,
+    ))
 }
 
 /// GET /training/distributed/jobs/:id — get a distributed job.
@@ -407,8 +414,9 @@ fn job_to_response(job: &DistributedJobState) -> DistributedJobResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rest::pagination::PaginationQuery;
     use crate::state::AppState;
-    use axum::extract::Extension;
+    use axum::extract::{Extension, Query};
     use synapse_core::config::*;
     use synapse_types::TenantId;
     use synapse_types::training::*;
@@ -580,8 +588,16 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = test_state(&tmp);
 
-        let Json(jobs) = list_jobs(State(state), Extension(TenantId::default_tenant())).await;
-        assert!(jobs.is_empty());
+        let Json(resp) = list_jobs(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Query(PaginationQuery {
+                limit: 50,
+                offset: 0,
+            }),
+        )
+        .await;
+        assert!(resp.data.is_empty());
     }
 
     #[tokio::test]
@@ -614,8 +630,16 @@ mod tests {
         .await
         .unwrap();
 
-        let Json(jobs) = list_jobs(State(state), Extension(TenantId::default_tenant())).await;
-        assert_eq!(jobs.len(), 2);
+        let Json(resp) = list_jobs(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Query(PaginationQuery {
+                limit: 50,
+                offset: 0,
+            }),
+        )
+        .await;
+        assert_eq!(resp.data.len(), 2);
     }
 
     #[tokio::test]

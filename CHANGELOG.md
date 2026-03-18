@@ -16,12 +16,30 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - `synapse-api/rest/datasets`: Augmentation REST endpoint — `POST /datasets/augment` with configurable strategies, augment factor, word probability, and reproducible seeding
 - `synapse-api/state`: `auto_labeler` added to `AppState`
 
+#### Dataset Operations
+- `synapse-api/rest/datasets`: `POST /datasets/validate` — pre-flight data quality check (format compliance, row counts, error details)
+- `synapse-api/rest/datasets`: `POST /datasets/preview` — preview first N rows (default 5, max 50) from JSONL/CSV files with parsed JSON output
+
+#### Training Observability
+- `synapse-api/rest/training`: `GET /training/jobs/{id}/checkpoints` — list saved checkpoints with step, epoch, loss, path, timestamp
+- `synapse-api/rest/training`: `GET /training/jobs/{id}/metrics` — combined job state + checkpoint data for training dashboards
+
+#### Standardized Pagination
+- `synapse-api/rest/pagination`: Shared `PaginationQuery` (limit/offset) and `PaginatedResponse<T>` (`{ data: [...], pagination: { total, limit, offset } }`)
+- Applied to: `GET /models`, `GET /training/jobs`, `GET /training/distributed/jobs`, `GET /eval/runs`, `GET /datasets/auto-label/jobs`
+- Default limit: 50, max limit: 1000, all query params optional with sensible defaults
+
+#### Structured Error Responses
+- `synapse-api/rest/error`: `ApiError` type with `code`, `message`, and optional `hint` fields
+- `ApiErrorResponse` with builder helpers: `not_found()`, `bad_request()`, `internal()`, `with_hint()`
+- Implements `IntoResponse` for direct use in axum handlers
+
 ### Fixed
 - **Tenant isolation**: `DistributedCoordinator` now accepts `tenant_id` on all methods — `create_job`, `get_job`, `list_jobs`, `assign_worker`, `start_job`, `worker_completed`, `fail_job`, `auto_place`, `update_aggregate_loss`, `collect_checkpoint_paths` all filter by tenant
 - **Tenant isolation**: `EvalRunner` now accepts `tenant_id` on `create_run`, `get_run`, `list_runs` — cross-tenant access returns "not found"
 - **Tenant isolation**: All distributed training and eval REST handlers wire `TenantId` from auth middleware through to coordinator/runner (previously `_tenant_id` was unused)
 - Removed `// TODO: tenant-scope` comments from distributed and eval handlers
-- 1,266 tests across all crates (up from 1,238)
+- 1,290 tests across all crates (up from 1,238)
 
 ## [2026.3.18-1]
 

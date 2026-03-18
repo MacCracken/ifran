@@ -1,6 +1,6 @@
 //! REST handlers for dataset operations — auto-labeling and augmentation.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use serde::{Deserialize, Serialize};
@@ -8,6 +8,7 @@ use synapse_train::dataset::labeler::{AutoLabelJobId, AutoLabelStatus};
 use synapse_train::dataset::processor::AugmentationStrategy;
 use synapse_types::inference::InferenceRequest;
 
+use super::pagination::{PaginatedResponse, PaginationQuery};
 use crate::state::AppState;
 
 // --- Auto-labeling ---
@@ -164,12 +165,18 @@ pub async fn create_auto_label(
     Ok((StatusCode::CREATED, Json(job_to_auto_label_response(&job))))
 }
 
-/// GET /datasets/auto-label/jobs — list all auto-labeling jobs.
+/// GET /datasets/auto-label/jobs — list auto-labeling jobs with pagination.
 pub async fn list_auto_label_jobs(
     State(state): State<AppState>,
-) -> Json<Vec<AutoLabelJobResponse>> {
+    Query(page): Query<PaginationQuery>,
+) -> Json<PaginatedResponse<AutoLabelJobResponse>> {
     let jobs = state.auto_labeler.list_jobs().await;
-    Json(jobs.iter().map(job_to_auto_label_response).collect())
+    let all: Vec<AutoLabelJobResponse> = jobs.iter().map(job_to_auto_label_response).collect();
+    Json(PaginatedResponse::from_vec(
+        all,
+        page.safe_limit(),
+        page.offset,
+    ))
 }
 
 /// GET /datasets/auto-label/jobs/:id — get auto-labeling job status.
@@ -277,6 +284,145 @@ pub async fn augment_dataset(
     }))
 }
 
+// --- Validation & Preview ---
+
+/// Request to validate a dataset file.
+#[derive(Deserialize)]
+pub struct ValidateDatasetRequest {
+    pub path: String,
+    pub format: synapse_types::training::DatasetFormat,
+}
+
+/// Response for dataset validation.
+#[derive(Serialize)]
+pub struct ValidateDatasetResponse {
+    pub valid: bool,
+    pub total_rows: usize,
+    pub invalid_rows: usize,
+    pub errors: Vec<String>,
+}
+
+/// POST /datasets/validate — validate a dataset file for format compliance.
+pub async fn validate_dataset(
+    State(_state): State<AppState>,
+    Json(req): Json<ValidateDatasetRequest>,
+) -> Result<Json<ValidateDatasetResponse>, (StatusCode, String)> {
+    let path = req.path.clone();
+    let format = req.format;
+
+    let result = tokio::task::spawn_blocking(move || {
+        synapse_train::dataset::validator::validate(std::path::Path::new(&path), format)
+    })
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Task failed: {e}"),
+        )
+    })?
+    .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+
+    Ok(Json(ValidateDatasetResponse {
+        valid: result.valid,
+        total_rows: result.total_rows,
+        invalid_rows: result.invalid_rows,
+        errors: result.errors,
+    }))
+}
+
+/// Request to preview a dataset file.
+#[derive(Deserialize)]
+pub struct PreviewDatasetRequest {
+    pub path: String,
+    pub format: synapse_types::training::DatasetFormat,
+    #[serde(default = "default_preview_limit")]
+    pub limit: usize,
+}
+
+fn default_preview_limit() -> usize {
+    5
+}
+
+/// Response for dataset preview.
+#[derive(Serialize)]
+pub struct PreviewDatasetResponse {
+    pub samples: Vec<serde_json::Value>,
+    pub total_rows: usize,
+    pub format: synapse_types::training::DatasetFormat,
+}
+
+/// POST /datasets/preview — preview first N rows of a dataset file.
+pub async fn preview_dataset(
+    State(_state): State<AppState>,
+    Json(req): Json<PreviewDatasetRequest>,
+) -> Result<Json<PreviewDatasetResponse>, (StatusCode, String)> {
+    let path = req.path.clone();
+    let format = req.format;
+    let limit = req.limit.min(50).max(1);
+
+    let result =
+        tokio::task::spawn_blocking(move || -> Result<(Vec<serde_json::Value>, usize), String> {
+            let content =
+                std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {e}"))?;
+
+            match format {
+                synapse_types::training::DatasetFormat::Jsonl => {
+                    let lines: Vec<&str> =
+                        content.lines().filter(|l| !l.trim().is_empty()).collect();
+                    let total = lines.len();
+                    let samples: Vec<serde_json::Value> = lines
+                        .into_iter()
+                        .take(limit)
+                        .filter_map(|line| serde_json::from_str(line).ok())
+                        .collect();
+                    Ok((samples, total))
+                }
+                synapse_types::training::DatasetFormat::Csv => {
+                    let lines: Vec<&str> =
+                        content.lines().filter(|l| !l.trim().is_empty()).collect();
+                    if lines.is_empty() {
+                        return Ok((Vec::new(), 0));
+                    }
+                    let headers: Vec<&str> = lines[0].split(',').map(|h| h.trim()).collect();
+                    let data_lines = &lines[1..];
+                    let total = data_lines.len();
+                    let samples: Vec<serde_json::Value> = data_lines
+                        .iter()
+                        .take(limit)
+                        .map(|line| {
+                            let values: Vec<&str> = line.split(',').collect();
+                            let mut obj = serde_json::Map::new();
+                            for (i, header) in headers.iter().enumerate() {
+                                let val = values.get(i).unwrap_or(&"");
+                                obj.insert(
+                                    header.to_string(),
+                                    serde_json::Value::String(val.to_string()),
+                                );
+                            }
+                            serde_json::Value::Object(obj)
+                        })
+                        .collect();
+                    Ok((samples, total))
+                }
+                _ => Err(format!("Preview not supported for format {:?}", format)),
+            }
+        })
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Task failed: {e}"),
+            )
+        })?
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+
+    Ok(Json(PreviewDatasetResponse {
+        samples: result.0,
+        total_rows: result.1,
+        format,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,5 +482,67 @@ mod tests {
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["original_count"], 100);
         assert_eq!(json["augmented_count"], 250);
+    }
+
+    #[test]
+    fn validate_request_deserialize() {
+        let json = r#"{"path": "/data/train.jsonl", "format": "jsonl"}"#;
+        let req: ValidateDatasetRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.path, "/data/train.jsonl");
+        assert_eq!(req.format, synapse_types::training::DatasetFormat::Jsonl);
+    }
+
+    #[test]
+    fn validate_request_csv_format() {
+        let json = r#"{"path": "/data/train.csv", "format": "csv"}"#;
+        let req: ValidateDatasetRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.format, synapse_types::training::DatasetFormat::Csv);
+    }
+
+    #[test]
+    fn validate_response_serializes() {
+        let resp = ValidateDatasetResponse {
+            valid: true,
+            total_rows: 1000,
+            invalid_rows: 2,
+            errors: vec!["Line 5: invalid json".into()],
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["valid"], true);
+        assert_eq!(json["total_rows"], 1000);
+        assert_eq!(json["invalid_rows"], 2);
+        assert_eq!(json["errors"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn preview_request_deserialize_defaults() {
+        let json = r#"{"path": "/data/train.jsonl", "format": "jsonl"}"#;
+        let req: PreviewDatasetRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.path, "/data/train.jsonl");
+        assert_eq!(req.limit, 5); // default
+    }
+
+    #[test]
+    fn preview_request_deserialize_with_limit() {
+        let json = r#"{"path": "/data/train.jsonl", "format": "jsonl", "limit": 10}"#;
+        let req: PreviewDatasetRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.limit, 10);
+    }
+
+    #[test]
+    fn preview_response_serializes() {
+        let samples = vec![
+            serde_json::json!({"text": "hello"}),
+            serde_json::json!({"text": "world"}),
+        ];
+        let resp = PreviewDatasetResponse {
+            samples,
+            total_rows: 100,
+            format: synapse_types::training::DatasetFormat::Jsonl,
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["total_rows"], 100);
+        assert_eq!(json["format"], "jsonl");
+        assert_eq!(json["samples"].as_array().unwrap().len(), 2);
     }
 }

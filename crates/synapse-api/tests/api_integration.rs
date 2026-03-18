@@ -286,7 +286,8 @@ async fn training_list_jobs_empty() {
     assert_eq!(resp.status(), StatusCode::OK);
     let body = resp.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(json.as_array().unwrap().is_empty());
+    assert!(json["data"].as_array().unwrap().is_empty());
+    assert!(json["pagination"]["total"].is_number());
 }
 
 #[tokio::test]
@@ -360,7 +361,7 @@ async fn eval_list_runs_empty() {
     assert_eq!(resp.status(), StatusCode::OK);
     let body = resp.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(json.as_array().unwrap().is_empty());
+    assert!(json["data"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -525,7 +526,7 @@ async fn distributed_list_jobs_empty() {
     assert_eq!(resp.status(), StatusCode::OK);
     let body = resp.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(json.as_array().unwrap().is_empty());
+    assert!(json["data"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -1167,7 +1168,7 @@ async fn eval_list_after_create() {
     assert_eq!(resp.status(), StatusCode::OK);
     let body = resp.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json.as_array().unwrap().len(), 2);
+    assert_eq!(json["data"].as_array().unwrap().len(), 2);
 }
 
 #[tokio::test]
@@ -1362,7 +1363,8 @@ async fn training_create_and_list() {
     assert_eq!(resp.status(), StatusCode::OK);
     let body = resp.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json.as_array().unwrap().len(), 2);
+    assert_eq!(json["data"].as_array().unwrap().len(), 2);
+    assert_eq!(json["pagination"]["total"], 2);
 }
 
 // -- Model edge cases --
@@ -1938,7 +1940,8 @@ async fn eval_list_runs() {
     assert_eq!(resp.status(), StatusCode::OK);
     let body = resp.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(json.is_array());
+    assert!(json["data"].is_array());
+    assert!(json["pagination"].is_object());
 }
 
 #[tokio::test]

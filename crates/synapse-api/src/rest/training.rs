@@ -2,7 +2,7 @@
 
 use std::convert::Infallible;
 
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use axum::response::sse::{Event, Sse};
@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use synapse_core::training_events::TrainingEvent;
 use synapse_types::TenantId;
 use synapse_types::training::{TrainingJobConfig, TrainingJobId, TrainingStatus};
+
+use super::pagination::{PaginatedResponse, PaginationQuery};
 
 use crate::state::AppState;
 
@@ -87,13 +89,19 @@ pub async fn create_job(
     Ok((StatusCode::CREATED, Json(job_to_response(&job))))
 }
 
-/// GET /training/jobs — list all training jobs.
+/// GET /training/jobs — list training jobs with pagination.
 pub async fn list_jobs(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
-) -> Json<Vec<JobResponse>> {
+    Query(page): Query<PaginationQuery>,
+) -> Json<PaginatedResponse<JobResponse>> {
     let jobs = state.job_manager.list_jobs(None, &tenant_id).await;
-    Json(jobs.iter().map(job_to_response).collect())
+    let all: Vec<JobResponse> = jobs.iter().map(job_to_response).collect();
+    Json(PaginatedResponse::from_vec(
+        all,
+        page.safe_limit(),
+        page.offset,
+    ))
 }
 
 /// GET /training/jobs/:id — get a specific job's status.
@@ -197,6 +205,83 @@ pub async fn stream_job(
     ))
 }
 
+/// Response for training job metrics summary.
+#[derive(Debug, Serialize)]
+pub struct MetricsResponse {
+    pub job_id: TrainingJobId,
+    pub current_step: u64,
+    pub total_steps: u64,
+    pub current_loss: Option<f64>,
+    pub current_epoch: f32,
+    pub progress_percent: f64,
+    pub checkpoints: Vec<synapse_types::training::CheckpointInfo>,
+}
+
+/// GET /training/jobs/:id/checkpoints — list checkpoints for a training job.
+pub async fn list_checkpoints(
+    State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
+    Path(id): Path<TrainingJobId>,
+) -> Result<Json<Vec<synapse_types::training::CheckpointInfo>>, (StatusCode, String)> {
+    // Verify the job exists
+    state
+        .job_manager
+        .get_job(id, &tenant_id)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+
+    let checkpoints_dir = state.config.training.checkpoints_dir.clone();
+    let checkpoints = tokio::task::spawn_blocking(move || {
+        synapse_train::checkpoint::store::CheckpointStore::new(checkpoints_dir).list(id)
+    })
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Task failed: {e}"),
+        )
+    })?
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(checkpoints))
+}
+
+/// GET /training/jobs/:id/metrics — get training metrics summary for a job.
+pub async fn get_metrics(
+    State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
+    Path(id): Path<TrainingJobId>,
+) -> Result<Json<MetricsResponse>, (StatusCode, String)> {
+    let job = state
+        .job_manager
+        .get_job(id, &tenant_id)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+
+    let checkpoints_dir = state.config.training.checkpoints_dir.clone();
+    let checkpoints = tokio::task::spawn_blocking(move || {
+        synapse_train::checkpoint::store::CheckpointStore::new(checkpoints_dir).list(id)
+    })
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Task failed: {e}"),
+        )
+    })?
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(MetricsResponse {
+        job_id: job.id,
+        current_step: job.current_step,
+        total_steps: job.total_steps,
+        current_loss: job.current_loss,
+        current_epoch: job.current_epoch,
+        progress_percent: job.progress_percent(),
+        checkpoints,
+    }))
+}
+
 fn job_to_response(job: &synapse_train::job::status::JobState) -> JobResponse {
     JobResponse {
         id: job.id,
@@ -216,8 +301,9 @@ fn job_to_response(job: &synapse_train::job::status::JobState) -> JobResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rest::pagination::PaginationQuery;
     use crate::state::AppState;
-    use axum::extract::Extension;
+    use axum::extract::{Extension, Query};
     use synapse_core::config::*;
     use synapse_types::TenantId;
     use synapse_types::training::*;
@@ -383,8 +469,16 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = test_state(&tmp);
 
-        let Json(jobs) = list_jobs(State(state), Extension(TenantId::default_tenant())).await;
-        assert!(jobs.is_empty());
+        let Json(resp) = list_jobs(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Query(PaginationQuery {
+                limit: 50,
+                offset: 0,
+            }),
+        )
+        .await;
+        assert!(resp.data.is_empty());
     }
 
     #[tokio::test]
@@ -416,8 +510,16 @@ mod tests {
         .await
         .unwrap();
 
-        let Json(jobs) = list_jobs(State(state), Extension(TenantId::default_tenant())).await;
-        assert_eq!(jobs.len(), 2);
+        let Json(resp) = list_jobs(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Query(PaginationQuery {
+                limit: 50,
+                offset: 0,
+            }),
+        )
+        .await;
+        assert_eq!(resp.data.len(), 2);
     }
 
     #[tokio::test]
@@ -587,5 +689,108 @@ mod tests {
             body_str.contains("cancelled"),
             "SSE body should contain cancelled status, got: {body_str}"
         );
+    }
+
+    #[test]
+    fn metrics_response_serializes() {
+        let resp = MetricsResponse {
+            job_id: uuid::Uuid::new_v4(),
+            current_step: 500,
+            total_steps: 1000,
+            current_loss: Some(0.35),
+            current_epoch: 1.5,
+            progress_percent: 50.0,
+            checkpoints: vec![],
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["current_step"], 500);
+        assert_eq!(json["total_steps"], 1000);
+        assert_eq!(json["progress_percent"], 50.0);
+        assert!(json["checkpoints"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_checkpoints_job_not_found() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        let result = list_checkpoints(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path(uuid::Uuid::new_v4()),
+        )
+        .await;
+        assert_eq!(result.unwrap_err().0, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn list_checkpoints_empty() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        // Create a job first
+        let req = CreateJobRequest {
+            config: test_job_config(),
+            auto_start: false,
+        };
+        let (_, Json(created)) = create_job(
+            State(state.clone()),
+            Extension(TenantId::default_tenant()),
+            Json(req),
+        )
+        .await
+        .unwrap();
+
+        let Json(checkpoints) = list_checkpoints(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path(created.id),
+        )
+        .await
+        .unwrap();
+        assert!(checkpoints.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_metrics_job_not_found() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        let result = get_metrics(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path(uuid::Uuid::new_v4()),
+        )
+        .await;
+        assert_eq!(result.unwrap_err().0, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn get_metrics_success() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+
+        let req = CreateJobRequest {
+            config: test_job_config(),
+            auto_start: false,
+        };
+        let (_, Json(created)) = create_job(
+            State(state.clone()),
+            Extension(TenantId::default_tenant()),
+            Json(req),
+        )
+        .await
+        .unwrap();
+
+        let Json(metrics) = get_metrics(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path(created.id),
+        )
+        .await
+        .unwrap();
+        assert_eq!(metrics.job_id, created.id);
+        assert_eq!(metrics.current_step, 0);
+        assert!(metrics.checkpoints.is_empty());
     }
 }

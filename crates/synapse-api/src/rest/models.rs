@@ -2,21 +2,24 @@
 
 use crate::state::AppState;
 use axum::Json;
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use synapse_types::TenantId;
 
-/// GET /models — list all models in the catalog.
+use super::pagination::{PaginatedResponse, PaginationQuery};
+
+/// GET /models — list models with pagination.
 pub async fn list_models(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+    Query(page): Query<PaginationQuery>,
+) -> Result<Json<PaginatedResponse<serde_json::Value>>, StatusCode> {
     let db = state.db.lock().await;
     let models = db
         .list(&tenant_id)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let data: Vec<serde_json::Value> = models
+    let all: Vec<serde_json::Value> = models
         .iter()
         .map(|m| {
             serde_json::json!({
@@ -34,7 +37,11 @@ pub async fn list_models(
         })
         .collect();
 
-    Ok(Json(serde_json::json!({ "data": data })))
+    Ok(Json(PaginatedResponse::from_vec(
+        all,
+        page.safe_limit(),
+        page.offset,
+    )))
 }
 
 /// GET /models/:id — get a specific model by ID.
@@ -104,7 +111,9 @@ pub async fn delete_model(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rest::pagination::PaginationQuery;
     use crate::state::AppState;
+    use axum::extract::Query;
     use synapse_core::config::*;
     use synapse_core::storage::db::ModelDatabase;
     use synapse_types::model::{ModelFormat, ModelInfo, QuantLevel};
@@ -167,15 +176,25 @@ mod tests {
         model
     }
 
+    fn default_page() -> Query<PaginationQuery> {
+        Query(PaginationQuery {
+            limit: 50,
+            offset: 0,
+        })
+    }
+
     #[tokio::test]
     async fn list_models_empty() {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = test_state(&tmp);
-        let result = list_models(State(state), Extension(TenantId::default_tenant()))
-            .await
-            .unwrap();
-        let json = result.0;
-        assert_eq!(json["data"].as_array().unwrap().len(), 0);
+        let result = list_models(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            default_page(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.0.data.len(), 0);
     }
 
     #[tokio::test]
@@ -184,10 +203,14 @@ mod tests {
         let state = test_state(&tmp);
         insert_model(&tmp.path().join("test.db"));
 
-        let result = list_models(State(state), Extension(TenantId::default_tenant()))
-            .await
-            .unwrap();
-        let data = result.0["data"].as_array().unwrap();
+        let result = list_models(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            default_page(),
+        )
+        .await
+        .unwrap();
+        let data = &result.0.data;
         assert_eq!(data.len(), 1);
         assert_eq!(data[0]["name"], "test-model");
         assert_eq!(data[0]["format"], "gguf");
@@ -289,10 +312,14 @@ mod tests {
         let state = test_state(&tmp);
         insert_model(&tmp.path().join("test.db"));
 
-        let result = list_models(State(state), Extension(TenantId::default_tenant()))
-            .await
-            .unwrap();
-        let model = &result.0["data"][0];
+        let result = list_models(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            default_page(),
+        )
+        .await
+        .unwrap();
+        let model = &result.0.data[0];
 
         // Verify all expected fields are present
         assert!(model["id"].is_string());

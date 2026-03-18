@@ -6,7 +6,7 @@ use synapse_types::error::Result;
 use synapse_types::training::DatasetFormat;
 
 /// Validation result.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 pub struct ValidationResult {
     pub valid: bool,
     pub total_rows: usize,
