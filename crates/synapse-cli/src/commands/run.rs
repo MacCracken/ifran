@@ -74,6 +74,7 @@ pub async fn execute(model: &str) -> Result<()> {
             top_k: None,
             stop_sequences: None,
             system_prompt: None,
+            sensitivity: None,
         };
 
         // Use streaming for interactive feel

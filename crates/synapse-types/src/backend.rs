@@ -29,6 +29,17 @@ pub struct BackendCapabilities {
     pub supports_streaming: bool,
     pub supports_embeddings: bool,
     pub supports_vision: bool,
+    pub locality: BackendLocality,
+}
+
+/// Whether a backend runs locally or calls a remote API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BackendLocality {
+    /// Runs on local hardware, data never leaves the machine.
+    Local,
+    /// Calls an external API.
+    Remote,
 }
 
 /// Device configuration for model loading.
@@ -91,6 +102,7 @@ mod tests {
             supports_streaming: true,
             supports_embeddings: false,
             supports_vision: true,
+            locality: BackendLocality::Local,
         };
         let json = serde_json::to_string(&caps).unwrap();
         let back: BackendCapabilities = serde_json::from_str(&json).unwrap();

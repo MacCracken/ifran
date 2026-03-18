@@ -5,6 +5,7 @@ pub mod dataset;
 pub mod drift;
 pub mod eval;
 pub mod experiment;
+pub mod fleet;
 pub mod hardware;
 pub mod lifecycle;
 pub mod lineage;

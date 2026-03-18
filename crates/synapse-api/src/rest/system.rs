@@ -55,6 +55,23 @@ pub async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
     }))
 }
 
+/// GET /system/gpu/telemetry — latest GPU telemetry readings.
+pub async fn gpu_telemetry(State(state): State<AppState>) -> Json<serde_json::Value> {
+    match &state.telemetry {
+        Some(tl) => {
+            let readings = tl.latest().await;
+            Json(serde_json::json!({ "readings": readings }))
+        }
+        None => Json(serde_json::json!({ "readings": [], "message": "telemetry disabled" })),
+    }
+}
+
+/// GET /models/discover — discover models from local inference servers.
+pub async fn discover_models() -> Json<serde_json::Value> {
+    let models = synapse_core::registry::discovery::discover_all().await;
+    Json(serde_json::json!({ "models": models }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,9 +112,11 @@ mod tests {
             },
             hardware: synapse_core::config::HardwareConfig {
                 gpu_memory_reserve_mb: 512,
+                telemetry_interval_secs: 0,
             },
             security: synapse_core::config::SecurityConfig::default(),
             budget: synapse_core::config::BudgetConfig::default(),
+            fleet: synapse_core::config::FleetConfig::default(),
         };
 
         let state = AppState::new(config).unwrap();

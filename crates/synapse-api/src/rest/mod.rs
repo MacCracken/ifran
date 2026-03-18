@@ -2,6 +2,7 @@ pub mod bridge;
 pub mod distributed;
 pub mod eval;
 pub mod experiment;
+pub mod fleet;
 pub mod inference;
 pub mod lineage;
 pub mod marketplace;

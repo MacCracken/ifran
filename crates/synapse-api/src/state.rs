@@ -8,6 +8,9 @@ use synapse_bridge::server::BridgeServer;
 use synapse_core::config::SynapseConfig;
 use synapse_core::eval::runner::EvalRunner;
 use synapse_core::experiment::store::ExperimentStore;
+use synapse_core::fleet::manager::FleetManager;
+use synapse_core::hardware::events::GpuEventBus;
+use synapse_core::hardware::telemetry::{TelemetryConfig, TelemetryLoop};
 use synapse_core::lifecycle::manager::ModelManager;
 use synapse_core::lineage::store::LineageStore;
 use synapse_core::marketplace::catalog::MarketplaceCatalog;
@@ -47,6 +50,9 @@ pub struct AppState {
     pub version_store: Option<Arc<Mutex<VersionStore>>>,
     pub bridge_client: Option<Arc<BridgeClient>>,
     pub bridge_server: Option<Arc<BridgeServer>>,
+    pub gpu_event_bus: Arc<GpuEventBus>,
+    pub telemetry: Option<Arc<TelemetryLoop>>,
+    pub fleet_manager: Arc<FleetManager>,
 }
 
 impl AppState {
@@ -108,6 +114,30 @@ impl AppState {
             None
         };
 
+        // GPU event bus
+        let gpu_event_bus = Arc::new(GpuEventBus::new(256));
+
+        // GPU telemetry loop
+        let telemetry = if config.hardware.telemetry_interval_secs > 0 {
+            Some(Arc::new(TelemetryLoop::start(TelemetryConfig {
+                interval: std::time::Duration::from_secs(config.hardware.telemetry_interval_secs),
+                enabled: true,
+            })))
+        } else {
+            None
+        };
+
+        // Fleet manager
+        let fleet_manager = FleetManager::new(
+            std::time::Duration::from_secs(config.fleet.suspect_timeout_secs),
+            std::time::Duration::from_secs(config.fleet.offline_timeout_secs),
+        );
+        if config.fleet.enabled {
+            fleet_manager.start_health_check_loop(std::time::Duration::from_secs(
+                config.fleet.health_check_interval_secs,
+            ));
+        }
+
         // Initialize bridge if enabled
         let (bridge_client, bridge_server) = if config.bridge.enabled {
             let endpoint =
@@ -149,6 +179,9 @@ impl AppState {
             version_store: version_store.map(|s| Arc::new(Mutex::new(s))),
             bridge_client,
             bridge_server,
+            gpu_event_bus,
+            telemetry,
+            fleet_manager: Arc::new(fleet_manager),
         })
     }
 }
@@ -186,9 +219,11 @@ mod tests {
             },
             hardware: HardwareConfig {
                 gpu_memory_reserve_mb: 512,
+                telemetry_interval_secs: 0, // disabled in tests (no tokio runtime for sync tests)
             },
             security: SecurityConfig::default(),
             budget: BudgetConfig::default(),
+            fleet: FleetConfig::default(),
         }
     }
 

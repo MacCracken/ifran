@@ -14,6 +14,8 @@ pub struct SynapseConfig {
     pub security: SecurityConfig,
     #[serde(default)]
     pub budget: BudgetConfig,
+    #[serde(default)]
+    pub fleet: FleetConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,6 +55,51 @@ pub struct BridgeConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HardwareConfig {
     pub gpu_memory_reserve_mb: u64,
+    /// Telemetry polling interval in seconds (default: 10). Set to 0 to disable.
+    #[serde(default = "default_telemetry_interval")]
+    pub telemetry_interval_secs: u64,
+}
+
+fn default_telemetry_interval() -> u64 {
+    10
+}
+
+/// Fleet management configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FleetConfig {
+    /// Enable fleet management.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Seconds without heartbeat before a node becomes Suspect.
+    #[serde(default = "default_suspect_timeout")]
+    pub suspect_timeout_secs: u64,
+    /// Seconds without heartbeat before a node becomes Offline.
+    #[serde(default = "default_offline_timeout")]
+    pub offline_timeout_secs: u64,
+    /// Health check interval in seconds.
+    #[serde(default = "default_health_check_interval")]
+    pub health_check_interval_secs: u64,
+}
+
+fn default_suspect_timeout() -> u64 {
+    30
+}
+fn default_offline_timeout() -> u64 {
+    90
+}
+fn default_health_check_interval() -> u64 {
+    15
+}
+
+impl Default for FleetConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            suspect_timeout_secs: default_suspect_timeout(),
+            offline_timeout_secs: default_offline_timeout(),
+            health_check_interval_secs: default_health_check_interval(),
+        }
+    }
 }
 
 /// Security settings for the API server.
@@ -177,9 +224,11 @@ impl Default for SynapseConfig {
             },
             hardware: HardwareConfig {
                 gpu_memory_reserve_mb: 512,
+                telemetry_interval_secs: 10,
             },
             security: SecurityConfig::default(),
             budget: BudgetConfig::default(),
+            fleet: FleetConfig::default(),
         }
     }
 }

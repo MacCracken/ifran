@@ -10,6 +10,17 @@ pub struct InferenceRequest {
     pub top_k: Option<u32>,
     pub stop_sequences: Option<Vec<String>>,
     pub system_prompt: Option<String>,
+    pub sensitivity: Option<DataSensitivity>,
+}
+
+/// Data sensitivity level for privacy-aware routing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DataSensitivity {
+    Public,
+    Internal,
+    Confidential,
+    Restricted,
 }
 
 /// Result of an inference request.
@@ -59,6 +70,7 @@ mod tests {
             top_k: Some(40),
             stop_sequences: Some(vec!["</s>".into()]),
             system_prompt: Some("You are helpful.".into()),
+            sensitivity: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         let back: InferenceRequest = serde_json::from_str(&json).unwrap();
@@ -212,6 +224,7 @@ mod proptests {
                 top_k: None,
                 stop_sequences: None,
                 system_prompt: None,
+                sensitivity: None,
             };
             let json = serde_json::to_string(&req).unwrap();
             let back: InferenceRequest = serde_json::from_str(&json).unwrap();

@@ -67,6 +67,7 @@ pub async fn inference(
         top_k: body.top_k,
         stop_sequences: None,
         system_prompt: body.system_prompt,
+        sensitivity: None,
     };
 
     let resp = backend
@@ -123,6 +124,7 @@ pub async fn inference_stream(
         top_k: body.top_k,
         stop_sequences: None,
         system_prompt: body.system_prompt,
+        sensitivity: None,
     };
 
     let mut rx = backend
@@ -180,9 +182,11 @@ mod tests {
             },
             hardware: HardwareConfig {
                 gpu_memory_reserve_mb: 512,
+                telemetry_interval_secs: 0,
             },
             security: SecurityConfig::default(),
             budget: BudgetConfig::default(),
+            fleet: FleetConfig::default(),
         };
         AppState::new(config).unwrap()
     }

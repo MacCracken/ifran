@@ -157,6 +157,7 @@ pub async fn execute_distributed(
         },
         world_size,
         strategy: dist_strategy,
+        placement_policy: None,
     };
 
     let instance_id = std::env::var("SYNAPSE_INSTANCE_ID").unwrap_or_else(|_| "local".to_string());

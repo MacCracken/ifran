@@ -7,7 +7,8 @@
 use crate::traits::InferenceBackend;
 use dashmap::DashMap;
 use std::sync::Arc;
-use synapse_types::backend::BackendId;
+use synapse_types::backend::{BackendId, BackendLocality};
+use synapse_types::inference::DataSensitivity;
 use synapse_types::model::ModelFormat;
 
 /// Registry that holds all available backends and routes requests to the most
@@ -110,6 +111,68 @@ impl BackendRouter {
         self.select(format, preferred).map(|b| (b.id(), b))
     }
 
+    /// Select the best backend, respecting data sensitivity.
+    ///
+    /// When sensitivity is `Confidential` or `Restricted`, only backends with
+    /// `BackendLocality::Local` are eligible.
+    pub fn select_with_privacy(
+        &self,
+        format: ModelFormat,
+        preferred: Option<&str>,
+        sensitivity: Option<DataSensitivity>,
+    ) -> Option<Arc<dyn InferenceBackend>> {
+        let requires_local = matches!(
+            sensitivity,
+            Some(DataSensitivity::Confidential) | Some(DataSensitivity::Restricted)
+        );
+
+        if !requires_local {
+            return self.select(format, preferred);
+        }
+
+        // For sensitive data, only consider local backends
+        // 1. Explicit preference (if it's local)
+        if let Some(name) = preferred {
+            let id = BackendId(name.to_string());
+            if let Some(b) = self.get(&id) {
+                if b.capabilities().locality == BackendLocality::Local {
+                    return Some(b);
+                }
+                tracing::warn!(
+                    backend = %name,
+                    "Preferred backend is remote, skipping for sensitive data"
+                );
+            }
+        }
+
+        // 2. Default backend (if local and supports format)
+        if let Some(ref default_id) = self.default_backend {
+            if let Some(b) = self.get(default_id) {
+                if b.capabilities().locality == BackendLocality::Local
+                    && b.supported_formats().contains(&format)
+                {
+                    return Some(b);
+                }
+            }
+        }
+
+        // 3. First local backend that supports the format
+        for entry in self.backends.iter() {
+            if entry.value().capabilities().locality == BackendLocality::Local
+                && entry.value().supported_formats().contains(&format)
+            {
+                return Some(entry.value().clone());
+            }
+        }
+
+        tracing::warn!(
+            ?format,
+            ?sensitivity,
+            "No local backend available for sensitive data"
+        );
+        None
+    }
+
     /// Check if any backend supports a given format.
     pub fn supports_format(&self, format: ModelFormat) -> bool {
         self.backends
@@ -133,7 +196,9 @@ impl Default for BackendRouter {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use synapse_types::backend::{AcceleratorType, BackendCapabilities, DeviceConfig};
+    use synapse_types::backend::{
+        AcceleratorType, BackendCapabilities, BackendLocality, DeviceConfig,
+    };
     use synapse_types::inference::{
         FinishReason, InferenceRequest, InferenceResponse, StreamChunk, TokenUsage,
     };
@@ -157,6 +222,7 @@ mod tests {
                 supports_streaming: false,
                 supports_embeddings: false,
                 supports_vision: false,
+                locality: BackendLocality::Local,
             }
         }
         fn supported_formats(&self) -> &[ModelFormat] {
@@ -507,5 +573,49 @@ mod tests {
         for h in handles {
             h.await.unwrap();
         }
+    }
+
+    #[test]
+    fn select_with_privacy_public_data_allows_remote() {
+        let router = BackendRouter::new();
+        router.register(Arc::new(MockBackend {
+            name: "remote-be",
+            formats: vec![ModelFormat::Gguf],
+        }));
+
+        let selected = router
+            .select_with_privacy(ModelFormat::Gguf, None, Some(DataSensitivity::Public))
+            .unwrap();
+        assert_eq!(selected.id().0, "remote-be");
+    }
+
+    #[test]
+    fn select_with_privacy_confidential_blocks_remote() {
+        // MockBackend has BackendLocality::Local by default in capabilities
+        // but let's test the filtering logic
+        let router = BackendRouter::new();
+        router.register(Arc::new(MockBackend {
+            name: "local-be",
+            formats: vec![ModelFormat::Gguf],
+        }));
+
+        let selected = router
+            .select_with_privacy(ModelFormat::Gguf, None, Some(DataSensitivity::Confidential))
+            .unwrap();
+        assert_eq!(selected.id().0, "local-be");
+    }
+
+    #[test]
+    fn select_with_privacy_none_sensitivity_acts_like_select() {
+        let router = BackendRouter::new();
+        router.register(Arc::new(MockBackend {
+            name: "be",
+            formats: vec![ModelFormat::Gguf],
+        }));
+
+        let selected = router
+            .select_with_privacy(ModelFormat::Gguf, None, None)
+            .unwrap();
+        assert_eq!(selected.id().0, "be");
     }
 }

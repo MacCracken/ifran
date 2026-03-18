@@ -234,9 +234,11 @@ mod tests {
             },
             hardware: HardwareConfig {
                 gpu_memory_reserve_mb: 512,
+                telemetry_interval_secs: 0,
             },
             security: SecurityConfig::default(),
             budget: BudgetConfig::default(),
+            fleet: FleetConfig::default(),
         };
         AppState::new(config).unwrap()
     }

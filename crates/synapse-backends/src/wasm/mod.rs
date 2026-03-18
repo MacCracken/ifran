@@ -9,7 +9,9 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use synapse_types::SynapseError;
-use synapse_types::backend::{AcceleratorType, BackendCapabilities, BackendId, DeviceConfig};
+use synapse_types::backend::{
+    AcceleratorType, BackendCapabilities, BackendId, BackendLocality, DeviceConfig,
+};
 use synapse_types::error::Result;
 use synapse_types::inference::{
     FinishReason, InferenceRequest, InferenceResponse, StreamChunk, TokenUsage,
@@ -84,6 +86,7 @@ impl InferenceBackend for WasmBackend {
             supports_streaming: false,
             supports_embeddings: false,
             supports_vision: false,
+            locality: BackendLocality::Local,
         }
     }
 
@@ -284,6 +287,7 @@ mod tests {
             top_p: None,
             top_k: None,
             stop_sequences: None,
+            sensitivity: None,
         };
         let resp = backend.infer(&handle, &req).await.unwrap();
         assert_eq!(resp.text, "mock response to: hello");
@@ -300,6 +304,7 @@ mod tests {
             top_p: None,
             top_k: None,
             stop_sequences: None,
+            sensitivity: None,
         };
         assert!(
             backend
@@ -324,6 +329,7 @@ mod tests {
             top_p: None,
             top_k: None,
             stop_sequences: None,
+            sensitivity: None,
         };
         assert!(backend.infer_stream(&handle, req).await.is_err());
     }
@@ -343,6 +349,7 @@ mod tests {
             top_p: None,
             top_k: None,
             stop_sequences: None,
+            sensitivity: None,
         };
         let resp = backend.infer(&handle, &req).await.unwrap();
         assert!(resp.text.contains("wasm-stub"));

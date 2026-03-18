@@ -8,7 +8,9 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use synapse_types::SynapseError;
-use synapse_types::backend::{AcceleratorType, BackendCapabilities, BackendId, DeviceConfig};
+use synapse_types::backend::{
+    AcceleratorType, BackendCapabilities, BackendId, BackendLocality, DeviceConfig,
+};
 use synapse_types::error::Result;
 use synapse_types::inference::{InferenceRequest, InferenceResponse, StreamChunk};
 use synapse_types::model::{ModelFormat, ModelManifest};
@@ -55,6 +57,7 @@ impl InferenceBackend for OnnxBackend {
             supports_streaming: false,
             supports_embeddings: true,
             supports_vision: true,
+            locality: BackendLocality::Local,
         }
     }
 
@@ -255,6 +258,7 @@ mod tests {
             top_p: None,
             top_k: None,
             stop_sequences: None,
+            sensitivity: None,
         };
         assert!(backend.infer(&handle, &req).await.is_err());
         assert!(backend.infer_stream(&handle, req).await.is_err());

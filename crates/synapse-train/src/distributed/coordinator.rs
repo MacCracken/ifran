@@ -209,6 +209,7 @@ mod tests {
             },
             world_size: 2,
             strategy: DistributedStrategy::DataParallel,
+            placement_policy: None,
         }
     }
 

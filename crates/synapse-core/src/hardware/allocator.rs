@@ -5,6 +5,7 @@
 //! jobs compete for the same devices.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use synapse_types::SynapseError;
 use synapse_types::error::Result;
 use tokio::sync::RwLock;
@@ -28,6 +29,7 @@ struct DeviceState {
     pub index: u32,
     pub total_memory_mb: u64,
     pub allocated_mb: u64,
+    pub compute_capability: Option<(u32, u32)>,
 }
 
 impl DeviceState {
@@ -41,6 +43,7 @@ pub struct DeviceAllocator {
     devices: RwLock<Vec<DeviceState>>,
     allocations: RwLock<HashMap<AllocationId, Allocation>>,
     reserve_mb: u64,
+    event_bus: Option<Arc<super::events::GpuEventBus>>,
 }
 
 impl DeviceAllocator {
@@ -52,6 +55,17 @@ impl DeviceAllocator {
             devices: RwLock::new(Vec::new()),
             allocations: RwLock::new(HashMap::new()),
             reserve_mb,
+            event_bus: None,
+        }
+    }
+
+    /// Create a new allocator with an event bus for GPU lifecycle notifications.
+    pub fn with_event_bus(reserve_mb: u64, event_bus: Arc<super::events::GpuEventBus>) -> Self {
+        Self {
+            devices: RwLock::new(Vec::new()),
+            allocations: RwLock::new(HashMap::new()),
+            reserve_mb,
+            event_bus: Some(event_bus),
         }
     }
 
@@ -64,6 +78,7 @@ impl DeviceAllocator {
                 index: gpu.index as u32,
                 total_memory_mb: gpu.memory_total_mb,
                 allocated_mb: 0,
+                compute_capability: gpu.compute_capability,
             });
         }
     }
@@ -77,6 +92,7 @@ impl DeviceAllocator {
         memory_per_device_mb: u64,
         count: u32,
         job_label: &str,
+        min_compute_capability: Option<(u32, u32)>,
     ) -> Result<Allocation> {
         let mut devices = self.devices.write().await;
         let allocations_guard = &mut *self.allocations.write().await;
@@ -86,7 +102,12 @@ impl DeviceAllocator {
         let mut candidates: Vec<(usize, u64)> = devices
             .iter()
             .enumerate()
-            .filter(|(_, d)| d.available_mb() >= required)
+            .filter(|(_, d)| {
+                d.available_mb() >= required
+                    && min_compute_capability.is_none_or(|min| {
+                        d.compute_capability.is_some_and(|cc| cc >= min)
+                    })
+            })
             .map(|(i, d)| (i, d.available_mb()))
             .collect();
 
@@ -126,6 +147,16 @@ impl DeviceAllocator {
         };
 
         allocations_guard.insert(alloc.id, alloc.clone());
+
+        if let Some(ref bus) = self.event_bus {
+            bus.emit_allocated(
+                alloc.id,
+                alloc.device_ids.clone(),
+                alloc.memory_mb,
+                job_label,
+            );
+        }
+
         Ok(alloc)
     }
 
@@ -137,12 +168,17 @@ impl DeviceAllocator {
         })?;
 
         let per_device_mb = alloc.memory_per_device_mb;
+        let device_ids = alloc.device_ids.clone();
 
         let mut devices = self.devices.write().await;
-        for &dev_id in &alloc.device_ids {
+        for &dev_id in &device_ids {
             if let Some(device) = devices.iter_mut().find(|d| d.index == dev_id) {
                 device.allocated_mb = device.allocated_mb.saturating_sub(per_device_mb);
             }
+        }
+
+        if let Some(ref bus) = self.event_bus {
+            bus.emit_released(allocation_id, device_ids);
         }
 
         Ok(())
@@ -199,7 +235,7 @@ mod tests {
         let alloc = DeviceAllocator::new(512);
         alloc.init_from_hardware(&mock_gpus(2, 8192)).await;
 
-        let a = alloc.allocate(4000, 1, "inference").await.unwrap();
+        let a = alloc.allocate(4000, 1, "inference", None).await.unwrap();
         assert_eq!(a.device_ids.len(), 1);
         assert_eq!(a.memory_mb, 4000);
     }
@@ -209,7 +245,7 @@ mod tests {
         let alloc = DeviceAllocator::new(512);
         alloc.init_from_hardware(&mock_gpus(4, 16384)).await;
 
-        let a = alloc.allocate(8000, 2, "training").await.unwrap();
+        let a = alloc.allocate(8000, 2, "training", None).await.unwrap();
         assert_eq!(a.device_ids.len(), 2);
     }
 
@@ -218,7 +254,7 @@ mod tests {
         let alloc = DeviceAllocator::new(512);
         alloc.init_from_hardware(&mock_gpus(1, 4096)).await;
 
-        let result = alloc.allocate(4000, 1, "big-model").await;
+        let result = alloc.allocate(4000, 1, "big-model", None).await;
         assert!(result.is_err());
     }
 
@@ -227,7 +263,7 @@ mod tests {
         let alloc = DeviceAllocator::new(0);
         alloc.init_from_hardware(&mock_gpus(1, 8192)).await;
 
-        let result = alloc.allocate(1000, 3, "distributed").await;
+        let result = alloc.allocate(1000, 3, "distributed", None).await;
         assert!(result.is_err());
     }
 
@@ -236,7 +272,7 @@ mod tests {
         let alloc = DeviceAllocator::new(0);
         alloc.init_from_hardware(&mock_gpus(1, 8192)).await;
 
-        let a = alloc.allocate(4000, 1, "job-1").await.unwrap();
+        let a = alloc.allocate(4000, 1, "job-1", None).await.unwrap();
         assert_eq!(alloc.available_memory().await[0].1, 4192);
 
         alloc.deallocate(a.id).await.unwrap();
@@ -256,9 +292,9 @@ mod tests {
         alloc.init_from_hardware(&mock_gpus(2, 8192)).await;
 
         // First allocation gets device with most free memory (either one)
-        let a1 = alloc.allocate(4000, 1, "job-1").await.unwrap();
+        let a1 = alloc.allocate(4000, 1, "job-1", None).await.unwrap();
         // Second allocation should pick the OTHER device (more free memory)
-        let a2 = alloc.allocate(4000, 1, "job-2").await.unwrap();
+        let a2 = alloc.allocate(4000, 1, "job-2", None).await.unwrap();
         assert_ne!(a1.device_ids[0], a2.device_ids[0]);
     }
 
@@ -268,15 +304,15 @@ mod tests {
         alloc.init_from_hardware(&mock_gpus(2, 8192)).await;
 
         assert!(alloc.list_allocations().await.is_empty());
-        alloc.allocate(1000, 1, "job-1").await.unwrap();
-        alloc.allocate(1000, 1, "job-2").await.unwrap();
+        alloc.allocate(1000, 1, "job-1", None).await.unwrap();
+        alloc.allocate(1000, 1, "job-2", None).await.unwrap();
         assert_eq!(alloc.list_allocations().await.len(), 2);
     }
 
     #[tokio::test]
     async fn no_devices_allocation_fails() {
         let alloc = DeviceAllocator::new(0);
-        let result = alloc.allocate(1000, 1, "job").await;
+        let result = alloc.allocate(1000, 1, "job", None).await;
         assert!(result.is_err());
     }
 
@@ -293,7 +329,7 @@ mod tests {
         let alloc = DeviceAllocator::new(0);
         alloc.init_from_hardware(&mock_gpus(4, 8192)).await;
         // Request all 4 devices
-        let a = alloc.allocate(4000, 4, "full-use").await.unwrap();
+        let a = alloc.allocate(4000, 4, "full-use", None).await.unwrap();
         assert_eq!(a.device_ids.len(), 4);
         assert_eq!(a.memory_mb, 4000 * 4);
         assert_eq!(alloc.list_allocations().await.len(), 1);
@@ -305,13 +341,13 @@ mod tests {
         alloc.init_from_hardware(&mock_gpus(1, 8192)).await;
 
         // Allocate nearly all memory
-        let a1 = alloc.allocate(7000, 1, "job-1").await.unwrap();
+        let a1 = alloc.allocate(7000, 1, "job-1", None).await.unwrap();
         // Should not fit another 7000
-        assert!(alloc.allocate(7000, 1, "job-2").await.is_err());
+        assert!(alloc.allocate(7000, 1, "job-2", None).await.is_err());
 
         // Free and re-allocate
         alloc.deallocate(a1.id).await.unwrap();
-        let a2 = alloc.allocate(7000, 1, "job-2").await.unwrap();
+        let a2 = alloc.allocate(7000, 1, "job-2", None).await.unwrap();
         assert_eq!(a2.device_ids.len(), 1);
     }
 
@@ -325,7 +361,10 @@ mod tests {
         for i in 0..8 {
             let alloc = alloc.clone();
             handles.push(tokio::spawn(async move {
-                let a = alloc.allocate(1000, 1, &format!("job-{i}")).await.unwrap();
+                let a = alloc
+                    .allocate(1000, 1, &format!("job-{i}"), None)
+                    .await
+                    .unwrap();
                 a.id
             }));
         }
@@ -354,8 +393,8 @@ mod tests {
         let alloc = DeviceAllocator::new(0);
         alloc.init_from_hardware(&mock_gpus(2, 8192)).await;
 
-        alloc.allocate(2000, 1, "job-1").await.unwrap();
-        alloc.allocate(3000, 1, "job-2").await.unwrap();
+        alloc.allocate(2000, 1, "job-1", None).await.unwrap();
+        alloc.allocate(3000, 1, "job-2", None).await.unwrap();
 
         let avail = alloc.available_memory().await;
         // One device got 2000 allocated, the other got 3000 (fair scheduling picks least-loaded)
@@ -369,12 +408,94 @@ mod tests {
         let alloc = DeviceAllocator::new(0);
         alloc.init_from_hardware(&mock_gpus(2, u64::MAX)).await;
         // u64::MAX * 2 would overflow
-        let result = alloc.allocate(u64::MAX, 2, "overflow-job").await;
+        let result = alloc.allocate(u64::MAX, 2, "overflow-job", None).await;
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(
             err_msg.contains("overflow"),
             "Expected overflow error, got: {err_msg}"
         );
+    }
+
+    #[tokio::test]
+    async fn allocate_filters_by_compute_capability() {
+        let alloc = DeviceAllocator::new(0);
+        let gpus = vec![
+            GpuDevice {
+                index: 0,
+                name: "Old GPU".into(),
+                accelerator: AcceleratorKind::Cuda,
+                memory_total_mb: 8192,
+                memory_free_mb: 8192,
+                compute_capability: Some((7, 0)),
+            },
+            GpuDevice {
+                index: 1,
+                name: "New GPU".into(),
+                accelerator: AcceleratorKind::Cuda,
+                memory_total_mb: 8192,
+                memory_free_mb: 8192,
+                compute_capability: Some((8, 9)),
+            },
+        ];
+        alloc.init_from_hardware(&gpus).await;
+
+        // Require compute 8.0+ — only device 1 qualifies
+        let a = alloc
+            .allocate(4000, 1, "bf16-model", Some((8, 0)))
+            .await
+            .unwrap();
+        assert_eq!(a.device_ids, vec![1]);
+    }
+
+    #[tokio::test]
+    async fn allocate_no_device_meets_compute_requirement() {
+        let alloc = DeviceAllocator::new(0);
+        let gpus = vec![GpuDevice {
+            index: 0,
+            name: "Old GPU".into(),
+            accelerator: AcceleratorKind::Cuda,
+            memory_total_mb: 8192,
+            memory_free_mb: 8192,
+            compute_capability: Some((7, 0)),
+        }];
+        alloc.init_from_hardware(&gpus).await;
+
+        let result = alloc.allocate(4000, 1, "needs-ampere", Some((8, 0))).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn allocate_none_compute_cap_skips_filter() {
+        let alloc = DeviceAllocator::new(0);
+        alloc.init_from_hardware(&mock_gpus(2, 8192)).await;
+        // None means no filtering
+        let a = alloc.allocate(4000, 1, "any-gpu", None).await.unwrap();
+        assert_eq!(a.device_ids.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn event_bus_receives_allocate_and_deallocate() {
+        let bus = Arc::new(crate::hardware::events::GpuEventBus::new(16));
+        let alloc = DeviceAllocator::with_event_bus(0, bus.clone());
+        alloc.init_from_hardware(&mock_gpus(1, 8192)).await;
+
+        let mut rx = bus.subscribe();
+
+        let a = alloc.allocate(4000, 1, "test-job", None).await.unwrap();
+        let event = rx.try_recv().unwrap();
+        match event {
+            crate::hardware::events::GpuEvent::Allocated { job_label, .. } => {
+                assert_eq!(job_label, "test-job");
+            }
+            _ => panic!("Expected Allocated event"),
+        }
+
+        alloc.deallocate(a.id).await.unwrap();
+        let event = rx.try_recv().unwrap();
+        match event {
+            crate::hardware::events::GpuEvent::Released { .. } => {}
+            _ => panic!("Expected Released event"),
+        }
     }
 }

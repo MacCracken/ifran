@@ -2,8 +2,8 @@
 
 use crate::middleware;
 use crate::rest::{
-    bridge, distributed, eval, experiment, inference, lineage, marketplace, models, openai_compat,
-    rag, rlhf, system, tenants, training, versioning,
+    bridge, distributed, eval, experiment, fleet, inference, lineage, marketplace, models,
+    openai_compat, rag, rlhf, system, tenants, training, versioning,
 };
 use crate::state::AppState;
 use axum::Router;
@@ -152,6 +152,18 @@ pub fn build(state: AppState) -> Router {
             "/v1/chat/completions",
             post(openai_compat::chat_completions),
         )
+        // Fleet management
+        .route(
+            "/fleet/nodes",
+            post(fleet::register_node).get(fleet::list_nodes),
+        )
+        .route("/fleet/nodes/{id}/heartbeat", post(fleet::heartbeat))
+        .route("/fleet/nodes/{id}", delete(fleet::remove_node))
+        .route("/fleet/stats", get(fleet::fleet_stats))
+        // GPU telemetry
+        .route("/system/gpu/telemetry", get(system::gpu_telemetry))
+        // Model discovery
+        .route("/models/discover", get(system::discover_models))
         .merge(admin_routes)
         // Middleware stack (axum applies bottom-up: last .layer() runs first)
         // 1. Auth (innermost — runs last on request, first on response)

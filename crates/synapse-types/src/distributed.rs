@@ -16,6 +16,17 @@ pub struct DistributedTrainingConfig {
     pub world_size: u32,
     /// Parallelism strategy.
     pub strategy: DistributedStrategy,
+    /// Optional placement policy for worker distribution.
+    pub placement_policy: Option<PlacementPolicyKind>,
+}
+
+/// Placement policy for distributing workers across nodes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlacementPolicyKind {
+    GpuAffinity,
+    Balanced,
+    CostAware,
 }
 
 /// Parallelism strategy for distributed training.
@@ -132,6 +143,7 @@ mod tests {
             },
             world_size: 4,
             strategy: DistributedStrategy::DataParallel,
+            placement_policy: None,
         }
     }
 

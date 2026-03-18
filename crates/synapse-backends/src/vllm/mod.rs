@@ -8,7 +8,9 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use synapse_types::SynapseError;
-use synapse_types::backend::{AcceleratorType, BackendCapabilities, BackendId, DeviceConfig};
+use synapse_types::backend::{
+    AcceleratorType, BackendCapabilities, BackendId, BackendLocality, DeviceConfig,
+};
 use synapse_types::error::Result;
 use synapse_types::inference::{
     FinishReason, InferenceRequest, InferenceResponse, StreamChunk, TokenUsage,
@@ -55,6 +57,7 @@ impl InferenceBackend for VllmBackend {
             supports_streaming: true,
             supports_embeddings: false,
             supports_vision: true,
+            locality: BackendLocality::Remote,
         }
     }
 
@@ -354,6 +357,7 @@ mod tests {
             top_k: None,
             stop_sequences: None,
             system_prompt: None,
+            sensitivity: None,
         };
         let msgs = build_messages(&req);
         assert_eq!(msgs.len(), 1);
@@ -370,6 +374,7 @@ mod tests {
             top_k: None,
             stop_sequences: None,
             system_prompt: Some("Be helpful.".into()),
+            sensitivity: None,
         };
         let msgs = build_messages(&req);
         assert_eq!(msgs.len(), 2);
@@ -544,6 +549,7 @@ mod tests {
             top_k: None,
             stop_sequences: None,
             system_prompt: None,
+            sensitivity: None,
         };
 
         let resp = backend
@@ -568,6 +574,7 @@ mod tests {
             top_k: None,
             stop_sequences: None,
             system_prompt: None,
+            sensitivity: None,
         };
         let result = backend
             .infer(&ModelHandle("nonexistent".into()), &req)
@@ -600,6 +607,7 @@ mod tests {
             top_k: None,
             stop_sequences: None,
             system_prompt: None,
+            sensitivity: None,
         };
         let result = backend.infer(&ModelHandle("vllm-test".into()), &req).await;
         assert!(matches!(result, Err(SynapseError::BackendError(_))));

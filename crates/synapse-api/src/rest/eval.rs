@@ -111,6 +111,7 @@ pub async fn create_run(
                         top_k: None,
                         stop_sequences: None,
                         system_prompt: None,
+                        sensitivity: None,
                     };
 
                     let resp = backend.infer(&handle, &req).await?;

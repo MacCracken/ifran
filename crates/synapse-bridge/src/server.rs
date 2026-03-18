@@ -309,6 +309,7 @@ impl SynapseBridge for SynapseBridgeService {
             top_k: None,
             stop_sequences: None,
             system_prompt: None,
+            sensitivity: None,
         };
 
         let resp = backend
@@ -355,6 +356,7 @@ impl SynapseBridge for SynapseBridgeService {
             top_k: None,
             stop_sequences: None,
             system_prompt: None,
+            sensitivity: None,
         };
 
         let mut rx = backend

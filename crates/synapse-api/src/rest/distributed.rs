@@ -64,6 +64,7 @@ pub async fn create_job(
         base_config: req.base_config,
         world_size: req.world_size,
         strategy: req.strategy,
+        placement_policy: None,
     };
 
     let instance_id =
@@ -322,9 +323,11 @@ mod tests {
             },
             hardware: HardwareConfig {
                 gpu_memory_reserve_mb: 512,
+                telemetry_interval_secs: 0,
             },
             security: SecurityConfig::default(),
             budget: BudgetConfig::default(),
+            fleet: FleetConfig::default(),
         };
         AppState::new(config).unwrap()
     }
@@ -766,6 +769,7 @@ mod tests {
                 base_config: test_job_config(),
                 world_size: 4,
                 strategy: DistributedStrategy::PipelineParallel,
+                placement_policy: None,
             },
             coordinator: "node-1".into(),
             workers: vec![WorkerAssignment {

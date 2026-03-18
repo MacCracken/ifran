@@ -8,7 +8,9 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use synapse_types::SynapseError;
-use synapse_types::backend::{AcceleratorType, BackendCapabilities, BackendId, DeviceConfig};
+use synapse_types::backend::{
+    AcceleratorType, BackendCapabilities, BackendId, BackendLocality, DeviceConfig,
+};
 use synapse_types::error::Result;
 use synapse_types::inference::{
     FinishReason, InferenceRequest, InferenceResponse, StreamChunk, TokenUsage,
@@ -59,6 +61,7 @@ impl InferenceBackend for OllamaBackend {
             supports_streaming: true,
             supports_embeddings: true,
             supports_vision: true,
+            locality: BackendLocality::Local,
         }
     }
 
@@ -365,6 +368,7 @@ mod tests {
             top_k: None,
             stop_sequences: None,
             system_prompt: None,
+            sensitivity: None,
         };
         let msgs = build_ollama_messages(&req);
         assert_eq!(msgs.len(), 1);
@@ -382,6 +386,7 @@ mod tests {
             top_k: None,
             stop_sequences: None,
             system_prompt: Some("Be concise.".into()),
+            sensitivity: None,
         };
         let msgs = build_ollama_messages(&req);
         assert_eq!(msgs.len(), 2);
@@ -498,6 +503,7 @@ mod tests {
             top_k: None,
             stop_sequences: None,
             system_prompt: None,
+            sensitivity: None,
         };
 
         let resp = backend
@@ -523,6 +529,7 @@ mod tests {
             top_k: None,
             stop_sequences: None,
             system_prompt: None,
+            sensitivity: None,
         };
         let result = backend
             .infer(&ModelHandle("nonexistent".into()), &req)
@@ -555,6 +562,7 @@ mod tests {
             top_k: None,
             stop_sequences: None,
             system_prompt: None,
+            sensitivity: None,
         };
         let result = backend
             .infer(&ModelHandle("ollama-test".into()), &req)

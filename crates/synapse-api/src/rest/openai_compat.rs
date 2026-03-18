@@ -121,6 +121,7 @@ pub async fn chat_completions(
         top_k: None,
         stop_sequences: None,
         system_prompt,
+        sensitivity: None,
     };
 
     if body.stream {
@@ -240,9 +241,11 @@ mod tests {
             },
             hardware: HardwareConfig {
                 gpu_memory_reserve_mb: 512,
+                telemetry_interval_secs: 0,
             },
             security: SecurityConfig::default(),
             budget: BudgetConfig::default(),
+            fleet: FleetConfig::default(),
         };
         AppState::new(config).unwrap()
     }
