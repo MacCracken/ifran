@@ -4,7 +4,7 @@
 
 ### Test Coverage
 
-Current: **1,043 tests** across 7 crates. CI threshold: 65%.
+Current: **1,266 tests** across 7 crates. CI threshold: 65%.
 
 ---
 
@@ -15,7 +15,6 @@ Hardening and operational improvements identified during security audit.
 - [ ] **Per-IP rate limiting** — current rate limiter is global (`NotKeyed`); replace with per-IP keyed limiter using `DashMap`-backed state to prevent one client starving others
 - [ ] **Job memory eviction** — `JobManager` keeps all jobs (including terminal) in memory forever; add TTL-based eviction for completed/failed/cancelled jobs (e.g., 24h retention)
 - [ ] **Disabled tenant in-flight cancellation** — when a tenant is disabled, cancel their running training jobs; currently in-flight jobs run to completion
-- [ ] **Tenant-scope distributed coordinator** — `DistributedCoordinator` and `EvalRunner` are not yet tenant-filtered; add `tenant_id` field and filtering (marked with TODO in handlers)
 - [ ] **Lineage ancestry depth limit** — `get_ancestry()` traverses the full graph unboundedly; add configurable max depth (e.g., 10,000 nodes) to prevent OOM on deep/wide DAGs
 
 ## Post-v1 Considerations

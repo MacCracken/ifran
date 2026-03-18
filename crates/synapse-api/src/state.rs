@@ -20,6 +20,7 @@ use synapse_core::storage::db::ModelDatabase;
 use synapse_core::tenant::store::TenantStore;
 use synapse_core::training_events::TrainingEventBus;
 use synapse_core::versioning::store::VersionStore;
+use synapse_train::dataset::labeler::AutoLabeler;
 use synapse_train::distributed::coordinator::DistributedCoordinator;
 use synapse_train::executor::ExecutorKind;
 use synapse_train::experiment::runner::ExperimentHandle;
@@ -41,6 +42,7 @@ pub struct AppState {
     pub job_manager: Arc<JobManager>,
     pub eval_runner: Arc<EvalRunner>,
     pub marketplace_catalog: Arc<Mutex<MarketplaceCatalog>>,
+    pub auto_labeler: Arc<AutoLabeler>,
     pub distributed_coordinator: Arc<DistributedCoordinator>,
     pub experiment_store: Option<Arc<Mutex<ExperimentStore>>>,
     pub experiment_runners: Arc<Mutex<HashMap<ExperimentId, ExperimentHandle>>>,
@@ -81,6 +83,7 @@ impl AppState {
         let eval_runner = EvalRunner::new();
         let marketplace_db_path = config.storage.database.with_file_name("marketplace.db");
         let marketplace_catalog = MarketplaceCatalog::open(&marketplace_db_path)?;
+        let auto_labeler = AutoLabeler::new();
         let distributed_coordinator = DistributedCoordinator::new();
 
         // Optional feature stores — fail silently if DB can't be opened.
@@ -174,6 +177,7 @@ impl AppState {
             job_manager: Arc::new(job_manager),
             eval_runner: Arc::new(eval_runner),
             marketplace_catalog: Arc::new(Mutex::new(marketplace_catalog)),
+            auto_labeler: Arc::new(auto_labeler),
             distributed_coordinator: Arc::new(distributed_coordinator),
             experiment_store: experiment_store.map(|s| Arc::new(Mutex::new(s))),
             experiment_runners: Arc::new(Mutex::new(HashMap::new())),

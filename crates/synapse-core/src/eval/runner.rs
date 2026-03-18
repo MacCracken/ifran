@@ -19,6 +19,7 @@ pub struct EvalRunner {
 pub struct EvalRunState {
     pub run_id: EvalRunId,
     pub config: EvalConfig,
+    pub tenant_id: String,
     pub status: EvalStatus,
     pub results: Vec<EvalResult>,
     pub error: Option<String>,
@@ -31,12 +32,13 @@ impl EvalRunner {
         }
     }
 
-    /// Create a new eval run. Returns the run ID.
-    pub async fn create_run(&self, config: EvalConfig) -> Result<EvalRunId> {
+    /// Create a new eval run scoped to a tenant. Returns the run ID.
+    pub async fn create_run(&self, config: EvalConfig, tenant_id: &str) -> Result<EvalRunId> {
         let run_id = uuid::Uuid::new_v4();
         let state = EvalRunState {
             run_id,
             config,
+            tenant_id: tenant_id.to_string(),
             status: EvalStatus::Queued,
             results: Vec::new(),
             error: None,
@@ -45,19 +47,29 @@ impl EvalRunner {
         Ok(run_id)
     }
 
-    /// Get the state of an eval run.
-    pub async fn get_run(&self, run_id: EvalRunId) -> Result<EvalRunState> {
+    /// Get the state of an eval run, verifying tenant ownership.
+    pub async fn get_run(&self, run_id: EvalRunId, tenant_id: &str) -> Result<EvalRunState> {
+        let runs = self.runs.read().await;
+        let run = runs
+            .get(&run_id)
+            .ok_or_else(|| SynapseError::EvalError(format!("Eval run {run_id} not found")))?;
+        if run.tenant_id != tenant_id {
+            return Err(SynapseError::EvalError(format!(
+                "Eval run {run_id} not found"
+            )));
+        }
+        Ok(run.clone())
+    }
+
+    /// List eval runs for a specific tenant.
+    pub async fn list_runs(&self, tenant_id: &str) -> Vec<EvalRunState> {
         self.runs
             .read()
             .await
-            .get(&run_id)
+            .values()
+            .filter(|r| r.tenant_id == tenant_id)
             .cloned()
-            .ok_or_else(|| SynapseError::EvalError(format!("Eval run {run_id} not found")))
-    }
-
-    /// List all eval runs.
-    pub async fn list_runs(&self) -> Vec<EvalRunState> {
-        self.runs.read().await.values().cloned().collect()
+            .collect()
     }
 
     /// Mark a run as started.
@@ -418,6 +430,9 @@ impl Default for EvalRunner {
 mod tests {
     use super::*;
 
+    const TENANT: &str = "default";
+    const TENANT_B: &str = "acme";
+
     #[tokio::test]
     async fn create_and_get_run() {
         let runner = EvalRunner::new();
@@ -427,9 +442,29 @@ mod tests {
             sample_limit: Some(10),
             dataset_path: Some("/tmp/eval.jsonl".into()),
         };
-        let run_id = runner.create_run(config).await.unwrap();
-        let state = runner.get_run(run_id).await.unwrap();
+        let run_id = runner.create_run(config, TENANT).await.unwrap();
+        let state = runner.get_run(run_id, TENANT).await.unwrap();
         assert_eq!(state.status, EvalStatus::Queued);
+        assert_eq!(state.tenant_id, TENANT);
+    }
+
+    #[tokio::test]
+    async fn tenant_isolation() {
+        let runner = EvalRunner::new();
+        let config = EvalConfig {
+            model_name: "m".into(),
+            benchmarks: vec![],
+            sample_limit: None,
+            dataset_path: None,
+        };
+        let run_a = runner.create_run(config.clone(), TENANT).await.unwrap();
+        let run_b = runner.create_run(config, TENANT_B).await.unwrap();
+
+        assert_eq!(runner.list_runs(TENANT).await.len(), 1);
+        assert_eq!(runner.list_runs(TENANT_B).await.len(), 1);
+
+        assert!(runner.get_run(run_a, TENANT_B).await.is_err());
+        assert!(runner.get_run(run_b, TENANT).await.is_err());
     }
 
     #[tokio::test]
@@ -441,15 +476,15 @@ mod tests {
             sample_limit: None,
             dataset_path: None,
         };
-        let run_id = runner.create_run(config).await.unwrap();
+        let run_id = runner.create_run(config, TENANT).await.unwrap();
         runner.start_run(run_id).await.unwrap();
         assert_eq!(
-            runner.get_run(run_id).await.unwrap().status,
+            runner.get_run(run_id, TENANT).await.unwrap().status,
             EvalStatus::Running
         );
         runner.complete_run(run_id).await.unwrap();
         assert_eq!(
-            runner.get_run(run_id).await.unwrap().status,
+            runner.get_run(run_id, TENANT).await.unwrap().status,
             EvalStatus::Completed
         );
     }
@@ -463,9 +498,9 @@ mod tests {
             sample_limit: None,
             dataset_path: None,
         };
-        let run_id = runner.create_run(config).await.unwrap();
+        let run_id = runner.create_run(config, TENANT).await.unwrap();
         runner.fail_run(run_id, "OOM".into()).await.unwrap();
-        let state = runner.get_run(run_id).await.unwrap();
+        let state = runner.get_run(run_id, TENANT).await.unwrap();
         assert_eq!(state.status, EvalStatus::Failed);
         assert_eq!(state.error, Some("OOM".into()));
     }
@@ -479,9 +514,9 @@ mod tests {
             sample_limit: None,
             dataset_path: None,
         };
-        runner.create_run(config.clone()).await.unwrap();
-        runner.create_run(config).await.unwrap();
-        assert_eq!(runner.list_runs().await.len(), 2);
+        runner.create_run(config.clone(), TENANT).await.unwrap();
+        runner.create_run(config, TENANT).await.unwrap();
+        assert_eq!(runner.list_runs(TENANT).await.len(), 2);
     }
 
     #[tokio::test]
@@ -502,7 +537,7 @@ mod tests {
             sample_limit: None,
             dataset_path: Some(tmp.path().to_string_lossy().to_string()),
         };
-        let run_id = runner.create_run(config).await.unwrap();
+        let run_id = runner.create_run(config, TENANT).await.unwrap();
         runner.start_run(run_id).await.unwrap();
 
         let mock_infer = |_prompt: String| async { Ok("Paris is the answer".to_string()) };
@@ -538,7 +573,7 @@ mod tests {
             sample_limit: None,
             dataset_path: None,
         };
-        let run_id = runner.create_run(config).await.unwrap();
+        let run_id = runner.create_run(config, TENANT).await.unwrap();
         runner.start_run(run_id).await.unwrap();
 
         let mock_infer = |_prompt: String| async { Ok("A".to_string()) };
@@ -574,7 +609,7 @@ mod tests {
             sample_limit: None,
             dataset_path: None,
         };
-        let run_id = runner.create_run(config).await.unwrap();
+        let run_id = runner.create_run(config, TENANT).await.unwrap();
         runner.start_run(run_id).await.unwrap();
 
         let mock_infer = |_prompt: String| async { Ok("yes".to_string()) };

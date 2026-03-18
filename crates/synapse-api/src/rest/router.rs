@@ -2,8 +2,8 @@
 
 use crate::middleware;
 use crate::rest::{
-    bridge, distributed, eval, experiment, fleet, inference, lineage, marketplace, models,
-    openai_compat, rag, rlhf, system, tenants, training, versioning,
+    bridge, datasets, distributed, eval, experiment, fleet, inference, lineage, marketplace,
+    models, openai_compat, rag, rlhf, system, tenants, training, versioning,
 };
 use crate::state::AppState;
 use axum::Router;
@@ -98,6 +98,16 @@ pub fn build(state: AppState) -> Router {
         // Eval
         .route("/eval/runs", post(eval::create_run).get(eval::list_runs))
         .route("/eval/runs/{id}", get(eval::get_run))
+        // Datasets
+        .route(
+            "/datasets/auto-label",
+            post(datasets::create_auto_label).get(datasets::list_auto_label_jobs),
+        )
+        .route(
+            "/datasets/auto-label/jobs/{id}",
+            get(datasets::get_auto_label_job),
+        )
+        .route("/datasets/augment", post(datasets::augment_dataset))
         // Marketplace
         .route("/marketplace/search", get(marketplace::search))
         .route("/marketplace/entries", get(marketplace::list_entries))

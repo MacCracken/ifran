@@ -5,6 +5,24 @@ All notable changes to Synapse will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 
+## [2026.3.18-2]
+
+### Added
+
+#### AI Training Studio Backend
+- `synapse-train/dataset/labeler`: Auto-labeling pipeline — `AutoLabeler` job manager with `run_labeling()` function that reads unlabeled JSONL, calls model inference per sample, writes labeled JSONL with progress tracking
+- `synapse-api/rest/datasets`: Auto-labeling REST endpoints — `POST /datasets/auto-label` (create+start), `GET /datasets/auto-label/jobs` (list), `GET /datasets/auto-label/jobs/{id}` (status)
+- `synapse-train/dataset/processor`: Data augmentation strategies — 5 offline text augmentation methods: synonym replacement, random insertion, random deletion, random swap, character noise
+- `synapse-api/rest/datasets`: Augmentation REST endpoint — `POST /datasets/augment` with configurable strategies, augment factor, word probability, and reproducible seeding
+- `synapse-api/state`: `auto_labeler` added to `AppState`
+
+### Fixed
+- **Tenant isolation**: `DistributedCoordinator` now accepts `tenant_id` on all methods — `create_job`, `get_job`, `list_jobs`, `assign_worker`, `start_job`, `worker_completed`, `fail_job`, `auto_place`, `update_aggregate_loss`, `collect_checkpoint_paths` all filter by tenant
+- **Tenant isolation**: `EvalRunner` now accepts `tenant_id` on `create_run`, `get_run`, `list_runs` — cross-tenant access returns "not found"
+- **Tenant isolation**: All distributed training and eval REST handlers wire `TenantId` from auth middleware through to coordinator/runner (previously `_tenant_id` was unused)
+- Removed `// TODO: tenant-scope` comments from distributed and eval handlers
+- 1,266 tests across all crates (up from 1,238)
+
 ## [2026.3.18-1]
 
 ### Added

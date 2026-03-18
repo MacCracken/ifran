@@ -24,17 +24,19 @@ impl DistributedCoordinator {
         }
     }
 
-    /// Create a new distributed training job.
+    /// Create a new distributed training job scoped to a tenant.
     pub async fn create_job(
         &self,
         config: DistributedTrainingConfig,
         coordinator_instance: &str,
+        tenant_id: &str,
     ) -> Result<DistributedJobId> {
         let job_id = uuid::Uuid::new_v4();
         let state = DistributedJobState {
             job_id,
             config,
             coordinator: coordinator_instance.to_string(),
+            tenant_id: tenant_id.to_string(),
             workers: Vec::new(),
             status: TrainingStatus::Queued,
             aggregate_loss: None,
@@ -44,16 +46,33 @@ impl DistributedCoordinator {
         Ok(job_id)
     }
 
-    /// Get the state of a distributed job.
-    pub async fn get_job(&self, job_id: DistributedJobId) -> Result<DistributedJobState> {
-        self.jobs.read().await.get(&job_id).cloned().ok_or_else(|| {
+    /// Get the state of a distributed job, verifying tenant ownership.
+    pub async fn get_job(
+        &self,
+        job_id: DistributedJobId,
+        tenant_id: &str,
+    ) -> Result<DistributedJobState> {
+        let jobs = self.jobs.read().await;
+        let job = jobs.get(&job_id).ok_or_else(|| {
             SynapseError::DistributedError(format!("Distributed job {job_id} not found"))
-        })
+        })?;
+        if job.tenant_id != tenant_id {
+            return Err(SynapseError::DistributedError(format!(
+                "Distributed job {job_id} not found"
+            )));
+        }
+        Ok(job.clone())
     }
 
-    /// List all distributed jobs.
-    pub async fn list_jobs(&self) -> Vec<DistributedJobState> {
-        self.jobs.read().await.values().cloned().collect()
+    /// List distributed jobs for a specific tenant.
+    pub async fn list_jobs(&self, tenant_id: &str) -> Vec<DistributedJobState> {
+        self.jobs
+            .read()
+            .await
+            .values()
+            .filter(|j| j.tenant_id == tenant_id)
+            .cloned()
+            .collect()
     }
 
     /// Assign a worker to a distributed job.
@@ -61,11 +80,18 @@ impl DistributedCoordinator {
         &self,
         job_id: DistributedJobId,
         worker: WorkerAssignment,
+        tenant_id: &str,
     ) -> Result<()> {
         let mut jobs = self.jobs.write().await;
         let state = jobs.get_mut(&job_id).ok_or_else(|| {
             SynapseError::DistributedError(format!("Distributed job {job_id} not found"))
         })?;
+
+        if state.tenant_id != tenant_id {
+            return Err(SynapseError::DistributedError(format!(
+                "Distributed job {job_id} not found"
+            )));
+        }
 
         if worker.rank as usize >= state.config.world_size as usize {
             return Err(SynapseError::DistributedError(format!(
@@ -87,11 +113,17 @@ impl DistributedCoordinator {
     }
 
     /// Start the distributed job (all workers must be assigned).
-    pub async fn start_job(&self, job_id: DistributedJobId) -> Result<()> {
+    pub async fn start_job(&self, job_id: DistributedJobId, tenant_id: &str) -> Result<()> {
         let mut jobs = self.jobs.write().await;
         let state = jobs.get_mut(&job_id).ok_or_else(|| {
             SynapseError::DistributedError(format!("Distributed job {job_id} not found"))
         })?;
+
+        if state.tenant_id != tenant_id {
+            return Err(SynapseError::DistributedError(format!(
+                "Distributed job {job_id} not found"
+            )));
+        }
 
         if state.workers.len() != state.config.world_size as usize {
             return Err(SynapseError::DistributedError(format!(
@@ -109,11 +141,22 @@ impl DistributedCoordinator {
     ///
     /// Guard: once all workers have reported, further calls are no-ops
     /// to prevent over-counting from duplicate completion reports.
-    pub async fn worker_completed(&self, job_id: DistributedJobId, _rank: u32) -> Result<()> {
+    pub async fn worker_completed(
+        &self,
+        job_id: DistributedJobId,
+        _rank: u32,
+        tenant_id: &str,
+    ) -> Result<()> {
         let mut jobs = self.jobs.write().await;
         let state = jobs.get_mut(&job_id).ok_or_else(|| {
             SynapseError::DistributedError(format!("Distributed job {job_id} not found"))
         })?;
+
+        if state.tenant_id != tenant_id {
+            return Err(SynapseError::DistributedError(format!(
+                "Distributed job {job_id} not found"
+            )));
+        }
 
         // Guard against duplicate completions pushing count past world_size
         if state.completed_workers >= state.config.world_size {
@@ -131,11 +174,21 @@ impl DistributedCoordinator {
     }
 
     /// Update aggregate loss for a job.
-    pub async fn update_aggregate_loss(&self, job_id: DistributedJobId, loss: f64) -> Result<()> {
+    pub async fn update_aggregate_loss(
+        &self,
+        job_id: DistributedJobId,
+        loss: f64,
+        tenant_id: &str,
+    ) -> Result<()> {
         let mut jobs = self.jobs.write().await;
         let state = jobs.get_mut(&job_id).ok_or_else(|| {
             SynapseError::DistributedError(format!("Distributed job {job_id} not found"))
         })?;
+        if state.tenant_id != tenant_id {
+            return Err(SynapseError::DistributedError(format!(
+                "Distributed job {job_id} not found"
+            )));
+        }
         state.aggregate_loss = Some(loss);
         Ok(())
     }
@@ -145,11 +198,18 @@ impl DistributedCoordinator {
         &self,
         job_id: DistributedJobId,
         base_output_dir: &std::path::Path,
+        tenant_id: &str,
     ) -> Result<Vec<std::path::PathBuf>> {
         let jobs = self.jobs.read().await;
         let state = jobs.get(&job_id).ok_or_else(|| {
             SynapseError::DistributedError(format!("Distributed job {job_id} not found"))
         })?;
+
+        if state.tenant_id != tenant_id {
+            return Err(SynapseError::DistributedError(format!(
+                "Distributed job {job_id} not found"
+            )));
+        }
 
         let paths: Vec<std::path::PathBuf> = state
             .workers
@@ -169,11 +229,18 @@ impl DistributedCoordinator {
         job_id: DistributedJobId,
         nodes: &[super::placement::NodeResources],
         policy: &dyn super::placement::PlacementPolicy,
+        tenant_id: &str,
     ) -> Result<Vec<WorkerAssignment>> {
         let jobs = self.jobs.read().await;
         let state = jobs.get(&job_id).ok_or_else(|| {
             SynapseError::DistributedError(format!("Distributed job {job_id} not found"))
         })?;
+
+        if state.tenant_id != tenant_id {
+            return Err(SynapseError::DistributedError(format!(
+                "Distributed job {job_id} not found"
+            )));
+        }
 
         if !state.workers.is_empty() {
             return Err(SynapseError::DistributedError(
@@ -191,18 +258,24 @@ impl DistributedCoordinator {
 
         // Assign each worker
         for worker in &assignments {
-            self.assign_worker(job_id, worker.clone()).await?;
+            self.assign_worker(job_id, worker.clone(), tenant_id)
+                .await?;
         }
 
         Ok(assignments)
     }
 
     /// Fail a distributed job.
-    pub async fn fail_job(&self, job_id: DistributedJobId) -> Result<()> {
+    pub async fn fail_job(&self, job_id: DistributedJobId, tenant_id: &str) -> Result<()> {
         let mut jobs = self.jobs.write().await;
         let state = jobs.get_mut(&job_id).ok_or_else(|| {
             SynapseError::DistributedError(format!("Distributed job {job_id} not found"))
         })?;
+        if state.tenant_id != tenant_id {
+            return Err(SynapseError::DistributedError(format!(
+                "Distributed job {job_id} not found"
+            )));
+        }
         state.status = TrainingStatus::Failed;
         Ok(())
     }
@@ -218,6 +291,9 @@ impl Default for DistributedCoordinator {
 mod tests {
     use super::*;
     use synapse_types::training::*;
+
+    const TENANT: &str = "default";
+    const TENANT_B: &str = "acme";
 
     fn test_config() -> DistributedTrainingConfig {
         DistributedTrainingConfig {
@@ -253,16 +329,44 @@ mod tests {
     #[tokio::test]
     async fn create_and_get_job() {
         let coord = DistributedCoordinator::new();
-        let job_id = coord.create_job(test_config(), "node-1").await.unwrap();
-        let state = coord.get_job(job_id).await.unwrap();
+        let job_id = coord
+            .create_job(test_config(), "node-1", TENANT)
+            .await
+            .unwrap();
+        let state = coord.get_job(job_id, TENANT).await.unwrap();
         assert_eq!(state.coordinator, "node-1");
         assert_eq!(state.status, TrainingStatus::Queued);
+        assert_eq!(state.tenant_id, TENANT);
+    }
+
+    #[tokio::test]
+    async fn tenant_isolation() {
+        let coord = DistributedCoordinator::new();
+        let job_a = coord
+            .create_job(test_config(), "node-1", TENANT)
+            .await
+            .unwrap();
+        let job_b = coord
+            .create_job(test_config(), "node-1", TENANT_B)
+            .await
+            .unwrap();
+
+        // Each tenant sees only their own jobs
+        assert_eq!(coord.list_jobs(TENANT).await.len(), 1);
+        assert_eq!(coord.list_jobs(TENANT_B).await.len(), 1);
+
+        // Cross-tenant access is denied
+        assert!(coord.get_job(job_a, TENANT_B).await.is_err());
+        assert!(coord.get_job(job_b, TENANT).await.is_err());
     }
 
     #[tokio::test]
     async fn assign_workers_and_start() {
         let coord = DistributedCoordinator::new();
-        let job_id = coord.create_job(test_config(), "node-1").await.unwrap();
+        let job_id = coord
+            .create_job(test_config(), "node-1", TENANT)
+            .await
+            .unwrap();
 
         coord
             .assign_worker(
@@ -273,12 +377,13 @@ mod tests {
                     endpoint: "http://node-1:9000".into(),
                     device_ids: vec![0],
                 },
+                TENANT,
             )
             .await
             .unwrap();
 
         // Can't start yet — only 1 of 2 workers assigned
-        assert!(coord.start_job(job_id).await.is_err());
+        assert!(coord.start_job(job_id, TENANT).await.is_err());
 
         coord
             .assign_worker(
@@ -289,13 +394,14 @@ mod tests {
                     endpoint: "http://node-2:9000".into(),
                     device_ids: vec![0],
                 },
+                TENANT,
             )
             .await
             .unwrap();
 
-        coord.start_job(job_id).await.unwrap();
+        coord.start_job(job_id, TENANT).await.unwrap();
         assert_eq!(
-            coord.get_job(job_id).await.unwrap().status,
+            coord.get_job(job_id, TENANT).await.unwrap().status,
             TrainingStatus::Running
         );
     }
@@ -303,7 +409,10 @@ mod tests {
     #[tokio::test]
     async fn duplicate_rank_rejected() {
         let coord = DistributedCoordinator::new();
-        let job_id = coord.create_job(test_config(), "node-1").await.unwrap();
+        let job_id = coord
+            .create_job(test_config(), "node-1", TENANT)
+            .await
+            .unwrap();
 
         let worker = WorkerAssignment {
             rank: 0,
@@ -311,14 +420,20 @@ mod tests {
             endpoint: "http://node-1:9000".into(),
             device_ids: vec![0],
         };
-        coord.assign_worker(job_id, worker.clone()).await.unwrap();
-        assert!(coord.assign_worker(job_id, worker).await.is_err());
+        coord
+            .assign_worker(job_id, worker.clone(), TENANT)
+            .await
+            .unwrap();
+        assert!(coord.assign_worker(job_id, worker, TENANT).await.is_err());
     }
 
     #[tokio::test]
     async fn worker_completion_lifecycle() {
         let coord = DistributedCoordinator::new();
-        let job_id = coord.create_job(test_config(), "node-1").await.unwrap();
+        let job_id = coord
+            .create_job(test_config(), "node-1", TENANT)
+            .await
+            .unwrap();
 
         for rank in 0..2 {
             coord
@@ -330,21 +445,22 @@ mod tests {
                         endpoint: format!("http://node-{}:9000", rank + 1),
                         device_ids: vec![0],
                     },
+                    TENANT,
                 )
                 .await
                 .unwrap();
         }
-        coord.start_job(job_id).await.unwrap();
+        coord.start_job(job_id, TENANT).await.unwrap();
 
-        coord.worker_completed(job_id, 0).await.unwrap();
+        coord.worker_completed(job_id, 0, TENANT).await.unwrap();
         assert_eq!(
-            coord.get_job(job_id).await.unwrap().status,
+            coord.get_job(job_id, TENANT).await.unwrap().status,
             TrainingStatus::Running
         );
 
-        coord.worker_completed(job_id, 1).await.unwrap();
+        coord.worker_completed(job_id, 1, TENANT).await.unwrap();
         assert_eq!(
-            coord.get_job(job_id).await.unwrap().status,
+            coord.get_job(job_id, TENANT).await.unwrap().status,
             TrainingStatus::Completed
         );
     }
@@ -352,10 +468,13 @@ mod tests {
     #[tokio::test]
     async fn fail_job() {
         let coord = DistributedCoordinator::new();
-        let job_id = coord.create_job(test_config(), "node-1").await.unwrap();
-        coord.fail_job(job_id).await.unwrap();
+        let job_id = coord
+            .create_job(test_config(), "node-1", TENANT)
+            .await
+            .unwrap();
+        coord.fail_job(job_id, TENANT).await.unwrap();
         assert_eq!(
-            coord.get_job(job_id).await.unwrap().status,
+            coord.get_job(job_id, TENANT).await.unwrap().status,
             TrainingStatus::Failed
         );
     }
@@ -363,24 +482,39 @@ mod tests {
     #[tokio::test]
     async fn list_jobs() {
         let coord = DistributedCoordinator::new();
-        coord.create_job(test_config(), "node-1").await.unwrap();
-        coord.create_job(test_config(), "node-2").await.unwrap();
-        assert_eq!(coord.list_jobs().await.len(), 2);
+        coord
+            .create_job(test_config(), "node-1", TENANT)
+            .await
+            .unwrap();
+        coord
+            .create_job(test_config(), "node-2", TENANT)
+            .await
+            .unwrap();
+        assert_eq!(coord.list_jobs(TENANT).await.len(), 2);
     }
 
     #[tokio::test]
     async fn update_aggregate_loss() {
         let coord = DistributedCoordinator::new();
-        let job_id = coord.create_job(test_config(), "node-1").await.unwrap();
-        coord.update_aggregate_loss(job_id, 0.42).await.unwrap();
-        let job = coord.get_job(job_id).await.unwrap();
+        let job_id = coord
+            .create_job(test_config(), "node-1", TENANT)
+            .await
+            .unwrap();
+        coord
+            .update_aggregate_loss(job_id, 0.42, TENANT)
+            .await
+            .unwrap();
+        let job = coord.get_job(job_id, TENANT).await.unwrap();
         assert_eq!(job.aggregate_loss, Some(0.42));
     }
 
     #[tokio::test]
     async fn collect_checkpoint_paths() {
         let coord = DistributedCoordinator::new();
-        let job_id = coord.create_job(test_config(), "node-1").await.unwrap();
+        let job_id = coord
+            .create_job(test_config(), "node-1", TENANT)
+            .await
+            .unwrap();
 
         for rank in 0..2 {
             coord
@@ -392,13 +526,14 @@ mod tests {
                         endpoint: format!("http://node-{}:9000", rank + 1),
                         device_ids: vec![0],
                     },
+                    TENANT,
                 )
                 .await
                 .unwrap();
         }
 
         let paths = coord
-            .collect_checkpoint_paths(job_id, std::path::Path::new("/output"))
+            .collect_checkpoint_paths(job_id, std::path::Path::new("/output"), TENANT)
             .await
             .unwrap();
         assert_eq!(paths.len(), 2);
@@ -409,7 +544,10 @@ mod tests {
     #[tokio::test]
     async fn rank_exceeds_world_size() {
         let coord = DistributedCoordinator::new();
-        let job_id = coord.create_job(test_config(), "node-1").await.unwrap();
+        let job_id = coord
+            .create_job(test_config(), "node-1", TENANT)
+            .await
+            .unwrap();
         let result = coord
             .assign_worker(
                 job_id,
@@ -419,6 +557,7 @@ mod tests {
                     endpoint: "http://node-x:9000".into(),
                     device_ids: vec![0],
                 },
+                TENANT,
             )
             .await;
         assert!(result.is_err());
@@ -427,7 +566,7 @@ mod tests {
     #[tokio::test]
     async fn get_nonexistent_job() {
         let coord = DistributedCoordinator::new();
-        assert!(coord.get_job(uuid::Uuid::new_v4()).await.is_err());
+        assert!(coord.get_job(uuid::Uuid::new_v4(), TENANT).await.is_err());
     }
 
     #[tokio::test]
@@ -435,7 +574,10 @@ mod tests {
         use crate::distributed::placement::*;
 
         let coord = DistributedCoordinator::new();
-        let job_id = coord.create_job(test_config(), "node-1").await.unwrap();
+        let job_id = coord
+            .create_job(test_config(), "node-1", TENANT)
+            .await
+            .unwrap();
 
         let nodes = vec![NodeResources {
             node_id: "node-1".into(),
@@ -447,14 +589,17 @@ mod tests {
         }];
 
         let policy = GpuAffinityPolicy;
-        let assignments = coord.auto_place(job_id, &nodes, &policy).await.unwrap();
+        let assignments = coord
+            .auto_place(job_id, &nodes, &policy, TENANT)
+            .await
+            .unwrap();
 
         assert_eq!(assignments.len(), 2); // world_size = 2
         assert_eq!(assignments[0].rank, 0);
         assert_eq!(assignments[1].rank, 1);
 
         // Job should now have 2 workers assigned
-        let job = coord.get_job(job_id).await.unwrap();
+        let job = coord.get_job(job_id, TENANT).await.unwrap();
         assert_eq!(job.workers.len(), 2);
     }
 
@@ -463,7 +608,10 @@ mod tests {
         use crate::distributed::placement::*;
 
         let coord = DistributedCoordinator::new();
-        let job_id = coord.create_job(test_config(), "node-1").await.unwrap();
+        let job_id = coord
+            .create_job(test_config(), "node-1", TENANT)
+            .await
+            .unwrap();
 
         // Manually assign a worker first
         coord
@@ -475,6 +623,7 @@ mod tests {
                     endpoint: "http://node-1:8420".into(),
                     device_ids: vec![0],
                 },
+                TENANT,
             )
             .await
             .unwrap();
@@ -488,7 +637,36 @@ mod tests {
             cost_per_gpu_hour: None,
         }];
 
-        let result = coord.auto_place(job_id, &nodes, &GpuAffinityPolicy).await;
+        let result = coord
+            .auto_place(job_id, &nodes, &GpuAffinityPolicy, TENANT)
+            .await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn cross_tenant_operations_denied() {
+        let coord = DistributedCoordinator::new();
+        let job_id = coord
+            .create_job(test_config(), "node-1", TENANT)
+            .await
+            .unwrap();
+
+        // Assign worker with wrong tenant
+        let worker = WorkerAssignment {
+            rank: 0,
+            instance_id: "node-1".into(),
+            endpoint: "http://node-1:9000".into(),
+            device_ids: vec![0],
+        };
+        assert!(coord.assign_worker(job_id, worker, TENANT_B).await.is_err());
+
+        // Start with wrong tenant
+        assert!(coord.start_job(job_id, TENANT_B).await.is_err());
+
+        // Fail with wrong tenant
+        assert!(coord.fail_job(job_id, TENANT_B).await.is_err());
+
+        // Worker completed with wrong tenant
+        assert!(coord.worker_completed(job_id, 0, TENANT_B).await.is_err());
     }
 }

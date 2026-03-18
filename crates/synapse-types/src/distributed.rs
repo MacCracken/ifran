@@ -61,6 +61,8 @@ pub struct DistributedJobState {
     pub config: DistributedTrainingConfig,
     /// Instance ID of the coordinator node.
     pub coordinator: String,
+    /// Tenant that owns this job.
+    pub tenant_id: String,
     pub workers: Vec<WorkerAssignment>,
     pub status: TrainingStatus,
     /// Aggregated loss across all workers.
@@ -202,6 +204,7 @@ mod tests {
             job_id: Uuid::new_v4(),
             config: make_test_config(),
             coordinator: "node-1".into(),
+            tenant_id: "default".into(),
             workers: vec![
                 WorkerAssignment {
                     rank: 0,

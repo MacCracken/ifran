@@ -163,7 +163,9 @@ pub async fn execute_distributed(
     let instance_id = std::env::var("SYNAPSE_INSTANCE_ID").unwrap_or_else(|_| "local".to_string());
 
     let coordinator = DistributedCoordinator::new();
-    let job_id = coordinator.create_job(config, &instance_id).await?;
+    let job_id = coordinator
+        .create_job(config, &instance_id, "default")
+        .await?;
 
     eprintln!("Created distributed training job: {job_id}");
     eprintln!("Strategy: {strategy}");
@@ -179,12 +181,13 @@ pub async fn execute_distributed(
                 endpoint: "local".to_string(),
                 device_ids: vec![0],
             },
+            "default",
         )
         .await?;
     eprintln!("Assigned local worker as rank 0 (coordinator)");
 
     if world_size == 1 {
-        coordinator.start_job(job_id).await?;
+        coordinator.start_job(job_id, "default").await?;
         eprintln!("Started distributed job with single worker.");
     } else {
         eprintln!(

@@ -43,7 +43,7 @@ pub struct CreateEvalRequest {
 /// POST /eval/runs — create a new eval run and execute benchmarks.
 pub async fn create_run(
     State(state): State<AppState>,
-    Extension(_tenant_id): Extension<TenantId>,
+    Extension(tenant_id): Extension<TenantId>,
     Json(req): Json<CreateEvalRequest>,
 ) -> Result<(StatusCode, Json<EvalRunResponse>), (StatusCode, String)> {
     let config = EvalConfig {
@@ -55,7 +55,7 @@ pub async fn create_run(
 
     let run_id = state
         .eval_runner
-        .create_run(config)
+        .create_run(config, tenant_id.0.as_str())
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
@@ -81,7 +81,6 @@ pub async fn create_run(
                 let model_manager = model_manager.clone();
                 let model_name = model_name.clone();
                 async move {
-                    // TODO: tenant-scope eval runs
                     let loaded = model_manager.list_loaded(None).await;
                     let loaded_model = loaded
                         .iter()
@@ -156,7 +155,7 @@ pub async fn create_run(
 
     let run = state
         .eval_runner
-        .get_run(run_id)
+        .get_run(run_id, tenant_id.0.as_str())
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -166,21 +165,21 @@ pub async fn create_run(
 /// GET /eval/runs — list all eval runs.
 pub async fn list_runs(
     State(state): State<AppState>,
-    Extension(_tenant_id): Extension<TenantId>,
+    Extension(tenant_id): Extension<TenantId>,
 ) -> Json<Vec<EvalRunResponse>> {
-    let runs = state.eval_runner.list_runs().await;
+    let runs = state.eval_runner.list_runs(tenant_id.0.as_str()).await;
     Json(runs.iter().map(run_to_response).collect())
 }
 
 /// GET /eval/runs/:id — get a specific eval run.
 pub async fn get_run(
     State(state): State<AppState>,
-    Extension(_tenant_id): Extension<TenantId>,
+    Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<EvalRunId>,
 ) -> Result<Json<EvalRunResponse>, (StatusCode, String)> {
     let run = state
         .eval_runner
-        .get_run(id)
+        .get_run(id, tenant_id.0.as_str())
         .await
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
     Ok(Json(run_to_response(&run)))
@@ -286,6 +285,7 @@ mod tests {
                 sample_limit: Some(50),
                 dataset_path: None,
             },
+            tenant_id: "default".into(),
             status: EvalStatus::Queued,
             results: vec![],
             error: None,
@@ -309,6 +309,7 @@ mod tests {
                 sample_limit: None,
                 dataset_path: Some("/data.jsonl".into()),
             },
+            tenant_id: "default".into(),
             status: EvalStatus::Completed,
             results: vec![EvalResult {
                 run_id: uuid::Uuid::nil(),
@@ -340,6 +341,7 @@ mod tests {
                 sample_limit: None,
                 dataset_path: None,
             },
+            tenant_id: "default".into(),
             status: EvalStatus::Failed,
             results: vec![],
             error: Some("GPU out of memory".into()),

@@ -1,4 +1,5 @@
 pub mod bridge;
+pub mod datasets;
 pub mod distributed;
 pub mod eval;
 pub mod experiment;

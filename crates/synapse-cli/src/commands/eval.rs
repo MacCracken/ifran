@@ -21,7 +21,7 @@ pub async fn execute(
         dataset_path: dataset.map(String::from),
     };
 
-    let run_id = runner.create_run(config).await?;
+    let run_id = runner.create_run(config, "default").await?;
     runner.start_run(run_id).await?;
 
     let dataset_path = dataset.ok_or_else(|| {
