@@ -56,7 +56,7 @@ pub async fn create_run(
 
     let run_id = state
         .eval_runner
-        .create_run(config, tenant_id.0.as_str())
+        .create_run(config, tenant_id.as_ref())
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
@@ -156,7 +156,7 @@ pub async fn create_run(
 
     let run = state
         .eval_runner
-        .get_run(run_id, tenant_id.0.as_str())
+        .get_run(run_id, tenant_id.as_ref())
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -169,12 +169,21 @@ pub async fn list_runs(
     Extension(tenant_id): Extension<TenantId>,
     Query(page): Query<PaginationQuery>,
 ) -> Json<PaginatedResponse<EvalRunResponse>> {
-    let runs = state.eval_runner.list_runs(tenant_id.0.as_str()).await;
-    let all: Vec<EvalRunResponse> = runs.iter().map(run_to_response).collect();
-    Json(PaginatedResponse::from_vec(
-        all,
-        page.safe_limit(),
-        page.offset,
+    let runs = state.eval_runner.list_runs(tenant_id.as_ref()).await;
+    let total = runs.len();
+    let limit = page.safe_limit() as usize;
+    let offset = (page.offset as usize).min(total);
+    let data = runs
+        .iter()
+        .skip(offset)
+        .take(limit)
+        .map(run_to_response)
+        .collect();
+    Json(PaginatedResponse::pre_sliced(
+        data,
+        total,
+        limit as u32,
+        offset as u32,
     ))
 }
 
@@ -186,7 +195,7 @@ pub async fn get_run(
 ) -> Result<Json<EvalRunResponse>, (StatusCode, String)> {
     let run = state
         .eval_runner
-        .get_run(id, tenant_id.0.as_str())
+        .get_run(id, tenant_id.as_ref())
         .await
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
     Ok(Json(run_to_response(&run)))

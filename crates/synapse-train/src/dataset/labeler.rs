@@ -166,29 +166,13 @@ impl Default for AutoLabeler {
     }
 }
 
-/// Count lines in a JSONL file.
-pub fn count_samples(path: &str) -> Result<u64> {
-    let file = std::fs::File::open(path)
-        .map_err(|e| SynapseError::TrainingError(format!("Failed to open {path}: {e}")))?;
-    let reader = std::io::BufReader::new(file);
-    let count = reader
-        .lines()
-        .filter_map(|l| l.ok())
-        .filter(|l| !l.trim().is_empty())
-        .count();
-    Ok(count as u64)
-}
-
 /// Execute the labeling pipeline: reads source JSONL, calls infer_fn per sample,
-/// writes labeled JSONL.
+/// writes labeled JSONL. Counts samples in a single pass (no double-read).
 ///
 /// The `infer_fn` takes a prompt string and returns the model's label text.
 pub async fn run_labeling<F, Fut>(
-    source_path: &str,
+    config: &AutoLabelConfig,
     output_path: &str,
-    prompt_field: &str,
-    label_field: &str,
-    system_prompt: Option<&str>,
     labeler: &AutoLabeler,
     job_id: AutoLabelJobId,
     infer_fn: F,
@@ -197,10 +181,9 @@ where
     F: Fn(String) -> Fut,
     Fut: std::future::Future<Output = Result<String>>,
 {
-    let total = count_samples(source_path)?;
-    labeler.update_progress(job_id, 0, total).await?;
+    labeler.update_progress(job_id, 0, 0).await?;
 
-    let file = std::fs::File::open(source_path)
+    let file = std::fs::File::open(&config.source_path)
         .map_err(|e| SynapseError::TrainingError(format!("Failed to open source: {e}")))?;
     let reader = std::io::BufReader::new(file);
 
@@ -209,6 +192,7 @@ where
     let mut writer = std::io::BufWriter::new(out_file);
 
     let mut labeled = 0u64;
+    let mut total = 0u64;
 
     for line in reader.lines() {
         let line = line.map_err(|e| SynapseError::TrainingError(format!("Read error: {e}")))?;
@@ -216,12 +200,13 @@ where
         if line.is_empty() {
             continue;
         }
+        total += 1;
 
         let mut obj: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&line)
             .map_err(|e| SynapseError::TrainingError(format!("Invalid JSON: {e}")))?;
 
         // Extract prompt text
-        let prompt_text = match obj.get(prompt_field) {
+        let prompt_text = match obj.get(&config.prompt_field) {
             Some(serde_json::Value::String(s)) => s.clone(),
             _ => {
                 // Write unchanged if no prompt field
@@ -232,7 +217,7 @@ where
         };
 
         // Build full prompt with optional system prompt
-        let full_prompt = match system_prompt {
+        let full_prompt = match &config.system_prompt {
             Some(sys) => format!("{sys}\n\n{prompt_text}"),
             None => prompt_text,
         };
@@ -241,7 +226,7 @@ where
         match infer_fn(full_prompt).await {
             Ok(label) => {
                 obj.insert(
-                    label_field.to_string(),
+                    config.label_field.clone(),
                     serde_json::Value::String(label.trim().to_string()),
                 );
             }
@@ -386,7 +371,7 @@ mod tests {
             temperature: None,
             output_path: Some(output.path().to_string_lossy().to_string()),
         };
-        let id = labeler.create_job(config).await.unwrap();
+        let id = labeler.create_job(config.clone()).await.unwrap();
         labeler.start_job(id).await.unwrap();
 
         let mock_infer = |prompt: String| async move {
@@ -398,11 +383,8 @@ mod tests {
         };
 
         let result = run_labeling(
-            &input.path().to_string_lossy(),
+            &config,
             &output.path().to_string_lossy(),
-            "prompt",
-            "expected",
-            None,
             &labeler,
             id,
             mock_infer,
@@ -442,7 +424,7 @@ mod tests {
             temperature: None,
             output_path: None,
         };
-        let id = labeler.create_job(config).await.unwrap();
+        let id = labeler.create_job(config.clone()).await.unwrap();
         labeler.start_job(id).await.unwrap();
 
         let mock_infer = |prompt: String| async move {
@@ -452,11 +434,8 @@ mod tests {
         };
 
         run_labeling(
-            &input.path().to_string_lossy(),
+            &config,
             &output.path().to_string_lossy(),
-            "prompt",
-            "label",
-            Some("Classify sentiment:"),
             &labeler,
             id,
             mock_infer,

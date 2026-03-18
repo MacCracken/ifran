@@ -75,17 +75,21 @@ pub async fn create_auto_label(
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
+    // Retrieve config from the job for the background task
+    let job_state = state
+        .auto_labeler
+        .get_job(job_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let label_config = job_state.config;
+
     // Spawn background task
     let labeler = state.auto_labeler.clone();
     let backends = state.backends.clone();
     let model_manager = state.model_manager.clone();
-    let model_name = req.model_name.clone();
-    let source_path = req.source_path;
-    let label_field = req.label_field;
-    let prompt_field = req.prompt_field;
-    let system_prompt = req.system_prompt;
-    let max_tokens = req.max_tokens.unwrap_or(256);
-    let temperature = req.temperature.unwrap_or(0.0);
+    let model_name = label_config.model_name.clone();
+    let max_tokens = label_config.max_tokens.unwrap_or(256);
+    let temperature = label_config.temperature.unwrap_or(0.0);
 
     tokio::spawn(async move {
         if let Err(e) = labeler.start_job(job_id).await {
@@ -135,11 +139,8 @@ pub async fn create_auto_label(
         };
 
         match synapse_train::dataset::labeler::run_labeling(
-            &source_path,
+            &label_config,
             &output_path,
-            &prompt_field,
-            &label_field,
-            system_prompt.as_deref(),
             &labeler,
             job_id,
             infer_fn,
@@ -171,11 +172,20 @@ pub async fn list_auto_label_jobs(
     Query(page): Query<PaginationQuery>,
 ) -> Json<PaginatedResponse<AutoLabelJobResponse>> {
     let jobs = state.auto_labeler.list_jobs().await;
-    let all: Vec<AutoLabelJobResponse> = jobs.iter().map(job_to_auto_label_response).collect();
-    Json(PaginatedResponse::from_vec(
-        all,
-        page.safe_limit(),
-        page.offset,
+    let total = jobs.len();
+    let limit = page.safe_limit() as usize;
+    let offset = (page.offset as usize).min(total);
+    let data = jobs
+        .iter()
+        .skip(offset)
+        .take(limit)
+        .map(job_to_auto_label_response)
+        .collect();
+    Json(PaginatedResponse::pre_sliced(
+        data,
+        total,
+        limit as u32,
+        offset as u32,
     ))
 }
 
@@ -362,46 +372,61 @@ pub async fn preview_dataset(
 
     let result =
         tokio::task::spawn_blocking(move || -> Result<(Vec<serde_json::Value>, usize), String> {
-            let content =
-                std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {e}"))?;
+            use std::io::BufRead;
+            let file =
+                std::fs::File::open(&path).map_err(|e| format!("Failed to open file: {e}"))?;
+            let reader = std::io::BufReader::new(file);
 
             match format {
                 synapse_types::training::DatasetFormat::Jsonl => {
-                    let lines: Vec<&str> =
-                        content.lines().filter(|l| !l.trim().is_empty()).collect();
-                    let total = lines.len();
-                    let samples: Vec<serde_json::Value> = lines
-                        .into_iter()
-                        .take(limit)
-                        .filter_map(|line| serde_json::from_str(line).ok())
-                        .collect();
+                    let mut samples = Vec::with_capacity(limit);
+                    let mut total = 0usize;
+                    for line in reader.lines() {
+                        let line = line.map_err(|e| format!("Read error: {e}"))?;
+                        let line = line.trim().to_string();
+                        if line.is_empty() {
+                            continue;
+                        }
+                        total += 1;
+                        if samples.len() < limit {
+                            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
+                                samples.push(val);
+                            }
+                        }
+                    }
                     Ok((samples, total))
                 }
                 synapse_types::training::DatasetFormat::Csv => {
-                    let lines: Vec<&str> =
-                        content.lines().filter(|l| !l.trim().is_empty()).collect();
-                    if lines.is_empty() {
-                        return Ok((Vec::new(), 0));
-                    }
-                    let headers: Vec<&str> = lines[0].split(',').map(|h| h.trim()).collect();
-                    let data_lines = &lines[1..];
-                    let total = data_lines.len();
-                    let samples: Vec<serde_json::Value> = data_lines
-                        .iter()
-                        .take(limit)
-                        .map(|line| {
+                    let mut lines_iter = reader.lines();
+                    let header_line = match lines_iter.next() {
+                        Some(Ok(h)) if !h.trim().is_empty() => h,
+                        _ => return Ok((Vec::new(), 0)),
+                    };
+                    let headers: Vec<&str> = header_line.split(',').map(|h| h.trim()).collect();
+                    // Collect headers as owned for the closure below
+                    let headers: Vec<String> = headers.into_iter().map(String::from).collect();
+                    let mut samples = Vec::with_capacity(limit);
+                    let mut total = 0usize;
+                    for line in lines_iter {
+                        let line = line.map_err(|e| format!("Read error: {e}"))?;
+                        let line = line.trim().to_string();
+                        if line.is_empty() {
+                            continue;
+                        }
+                        total += 1;
+                        if samples.len() < limit {
                             let values: Vec<&str> = line.split(',').collect();
                             let mut obj = serde_json::Map::new();
                             for (i, header) in headers.iter().enumerate() {
                                 let val = values.get(i).unwrap_or(&"");
                                 obj.insert(
-                                    header.to_string(),
+                                    header.clone(),
                                     serde_json::Value::String(val.to_string()),
                                 );
                             }
-                            serde_json::Value::Object(obj)
-                        })
-                        .collect();
+                            samples.push(serde_json::Value::Object(obj));
+                        }
+                    }
                     Ok((samples, total))
                 }
                 _ => Err(format!("Preview not supported for format {:?}", format)),

@@ -96,11 +96,20 @@ pub async fn list_jobs(
     Query(page): Query<PaginationQuery>,
 ) -> Json<PaginatedResponse<JobResponse>> {
     let jobs = state.job_manager.list_jobs(None, &tenant_id).await;
-    let all: Vec<JobResponse> = jobs.iter().map(job_to_response).collect();
-    Json(PaginatedResponse::from_vec(
-        all,
-        page.safe_limit(),
-        page.offset,
+    let total = jobs.len();
+    let limit = page.safe_limit() as usize;
+    let offset = (page.offset as usize).min(total);
+    let data = jobs
+        .iter()
+        .skip(offset)
+        .take(limit)
+        .map(job_to_response)
+        .collect();
+    Json(PaginatedResponse::pre_sliced(
+        data,
+        total,
+        limit as u32,
+        offset as u32,
     ))
 }
 
@@ -217,21 +226,13 @@ pub struct MetricsResponse {
     pub checkpoints: Vec<synapse_types::training::CheckpointInfo>,
 }
 
-/// GET /training/jobs/:id/checkpoints — list checkpoints for a training job.
-pub async fn list_checkpoints(
-    State(state): State<AppState>,
-    Extension(tenant_id): Extension<TenantId>,
-    Path(id): Path<TrainingJobId>,
-) -> Result<Json<Vec<synapse_types::training::CheckpointInfo>>, (StatusCode, String)> {
-    // Verify the job exists
-    state
-        .job_manager
-        .get_job(id, &tenant_id)
-        .await
-        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
-
+/// Load checkpoints for a job from disk.
+async fn load_checkpoints(
+    state: &AppState,
+    id: TrainingJobId,
+) -> Result<Vec<synapse_types::training::CheckpointInfo>, (StatusCode, String)> {
     let checkpoints_dir = state.config.training.checkpoints_dir.clone();
-    let checkpoints = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         synapse_train::checkpoint::store::CheckpointStore::new(checkpoints_dir).list(id)
     })
     .await
@@ -241,9 +242,22 @@ pub async fn list_checkpoints(
             format!("Task failed: {e}"),
         )
     })?
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
 
-    Ok(Json(checkpoints))
+/// GET /training/jobs/:id/checkpoints — list checkpoints for a training job.
+pub async fn list_checkpoints(
+    State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
+    Path(id): Path<TrainingJobId>,
+) -> Result<Json<Vec<synapse_types::training::CheckpointInfo>>, (StatusCode, String)> {
+    state
+        .job_manager
+        .get_job(id, &tenant_id)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+
+    Ok(Json(load_checkpoints(&state, id).await?))
 }
 
 /// GET /training/jobs/:id/metrics — get training metrics summary for a job.
@@ -258,18 +272,7 @@ pub async fn get_metrics(
         .await
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
-    let checkpoints_dir = state.config.training.checkpoints_dir.clone();
-    let checkpoints = tokio::task::spawn_blocking(move || {
-        synapse_train::checkpoint::store::CheckpointStore::new(checkpoints_dir).list(id)
-    })
-    .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Task failed: {e}"),
-        )
-    })?
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let checkpoints = load_checkpoints(&state, id).await?;
 
     Ok(Json(MetricsResponse {
         job_id: job.id,

@@ -65,16 +65,6 @@ impl ApiErrorResponse {
     }
 }
 
-/// Convert a SynapseError into an ApiErrorResponse with appropriate status code and error code.
-pub fn from_synapse_error(
-    err: &synapse_types::SynapseError,
-    status: StatusCode,
-) -> (StatusCode, String) {
-    // For backward compatibility, still return (StatusCode, String) tuples
-    // The structured format is available via ApiErrorResponse for new endpoints
-    (status, err.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

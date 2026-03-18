@@ -19,8 +19,13 @@ pub async fn list_models(
         .list(&tenant_id)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let all: Vec<serde_json::Value> = models
+    let total = models.len();
+    let limit = page.safe_limit() as usize;
+    let offset = (page.offset as usize).min(total);
+    let data: Vec<serde_json::Value> = models
         .iter()
+        .skip(offset)
+        .take(limit)
         .map(|m| {
             serde_json::json!({
                 "id": m.id.to_string(),
@@ -37,10 +42,11 @@ pub async fn list_models(
         })
         .collect();
 
-    Ok(Json(PaginatedResponse::from_vec(
-        all,
-        page.safe_limit(),
-        page.offset,
+    Ok(Json(PaginatedResponse::pre_sliced(
+        data,
+        total,
+        limit as u32,
+        offset as u32,
     )))
 }
 

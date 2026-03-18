@@ -53,15 +53,7 @@ impl DistributedCoordinator {
         tenant_id: &str,
     ) -> Result<DistributedJobState> {
         let jobs = self.jobs.read().await;
-        let job = jobs.get(&job_id).ok_or_else(|| {
-            SynapseError::DistributedError(format!("Distributed job {job_id} not found"))
-        })?;
-        if job.tenant_id != tenant_id {
-            return Err(SynapseError::DistributedError(format!(
-                "Distributed job {job_id} not found"
-            )));
-        }
-        Ok(job.clone())
+        Ok(lookup_ref(&jobs, job_id, tenant_id)?.clone())
     }
 
     /// List distributed jobs for a specific tenant.
@@ -83,15 +75,7 @@ impl DistributedCoordinator {
         tenant_id: &str,
     ) -> Result<()> {
         let mut jobs = self.jobs.write().await;
-        let state = jobs.get_mut(&job_id).ok_or_else(|| {
-            SynapseError::DistributedError(format!("Distributed job {job_id} not found"))
-        })?;
-
-        if state.tenant_id != tenant_id {
-            return Err(SynapseError::DistributedError(format!(
-                "Distributed job {job_id} not found"
-            )));
-        }
+        let state = lookup_mut(&mut jobs, job_id, tenant_id)?;
 
         if worker.rank as usize >= state.config.world_size as usize {
             return Err(SynapseError::DistributedError(format!(
@@ -115,15 +99,7 @@ impl DistributedCoordinator {
     /// Start the distributed job (all workers must be assigned).
     pub async fn start_job(&self, job_id: DistributedJobId, tenant_id: &str) -> Result<()> {
         let mut jobs = self.jobs.write().await;
-        let state = jobs.get_mut(&job_id).ok_or_else(|| {
-            SynapseError::DistributedError(format!("Distributed job {job_id} not found"))
-        })?;
-
-        if state.tenant_id != tenant_id {
-            return Err(SynapseError::DistributedError(format!(
-                "Distributed job {job_id} not found"
-            )));
-        }
+        let state = lookup_mut(&mut jobs, job_id, tenant_id)?;
 
         if state.workers.len() != state.config.world_size as usize {
             return Err(SynapseError::DistributedError(format!(
@@ -148,15 +124,7 @@ impl DistributedCoordinator {
         tenant_id: &str,
     ) -> Result<()> {
         let mut jobs = self.jobs.write().await;
-        let state = jobs.get_mut(&job_id).ok_or_else(|| {
-            SynapseError::DistributedError(format!("Distributed job {job_id} not found"))
-        })?;
-
-        if state.tenant_id != tenant_id {
-            return Err(SynapseError::DistributedError(format!(
-                "Distributed job {job_id} not found"
-            )));
-        }
+        let state = lookup_mut(&mut jobs, job_id, tenant_id)?;
 
         // Guard against duplicate completions pushing count past world_size
         if state.completed_workers >= state.config.world_size {
@@ -181,14 +149,7 @@ impl DistributedCoordinator {
         tenant_id: &str,
     ) -> Result<()> {
         let mut jobs = self.jobs.write().await;
-        let state = jobs.get_mut(&job_id).ok_or_else(|| {
-            SynapseError::DistributedError(format!("Distributed job {job_id} not found"))
-        })?;
-        if state.tenant_id != tenant_id {
-            return Err(SynapseError::DistributedError(format!(
-                "Distributed job {job_id} not found"
-            )));
-        }
+        let state = lookup_mut(&mut jobs, job_id, tenant_id)?;
         state.aggregate_loss = Some(loss);
         Ok(())
     }
@@ -201,15 +162,7 @@ impl DistributedCoordinator {
         tenant_id: &str,
     ) -> Result<Vec<std::path::PathBuf>> {
         let jobs = self.jobs.read().await;
-        let state = jobs.get(&job_id).ok_or_else(|| {
-            SynapseError::DistributedError(format!("Distributed job {job_id} not found"))
-        })?;
-
-        if state.tenant_id != tenant_id {
-            return Err(SynapseError::DistributedError(format!(
-                "Distributed job {job_id} not found"
-            )));
-        }
+        let state = lookup_ref(&jobs, job_id, tenant_id)?;
 
         let paths: Vec<std::path::PathBuf> = state
             .workers
@@ -232,15 +185,7 @@ impl DistributedCoordinator {
         tenant_id: &str,
     ) -> Result<Vec<WorkerAssignment>> {
         let jobs = self.jobs.read().await;
-        let state = jobs.get(&job_id).ok_or_else(|| {
-            SynapseError::DistributedError(format!("Distributed job {job_id} not found"))
-        })?;
-
-        if state.tenant_id != tenant_id {
-            return Err(SynapseError::DistributedError(format!(
-                "Distributed job {job_id} not found"
-            )));
-        }
+        let state = lookup_ref(&jobs, job_id, tenant_id)?;
 
         if !state.workers.is_empty() {
             return Err(SynapseError::DistributedError(
@@ -268,17 +213,44 @@ impl DistributedCoordinator {
     /// Fail a distributed job.
     pub async fn fail_job(&self, job_id: DistributedJobId, tenant_id: &str) -> Result<()> {
         let mut jobs = self.jobs.write().await;
-        let state = jobs.get_mut(&job_id).ok_or_else(|| {
-            SynapseError::DistributedError(format!("Distributed job {job_id} not found"))
-        })?;
-        if state.tenant_id != tenant_id {
-            return Err(SynapseError::DistributedError(format!(
-                "Distributed job {job_id} not found"
-            )));
-        }
+        let state = lookup_mut(&mut jobs, job_id, tenant_id)?;
         state.status = TrainingStatus::Failed;
         Ok(())
     }
+}
+
+/// Look up a job by ID and verify tenant ownership (shared reference).
+fn lookup_ref<'a>(
+    jobs: &'a HashMap<DistributedJobId, DistributedJobState>,
+    job_id: DistributedJobId,
+    tenant_id: &str,
+) -> Result<&'a DistributedJobState> {
+    let state = jobs.get(&job_id).ok_or_else(|| {
+        SynapseError::DistributedError(format!("Distributed job {job_id} not found"))
+    })?;
+    if state.tenant_id != tenant_id {
+        return Err(SynapseError::DistributedError(format!(
+            "Distributed job {job_id} not found"
+        )));
+    }
+    Ok(state)
+}
+
+/// Look up a job by ID and verify tenant ownership (mutable reference).
+fn lookup_mut<'a>(
+    jobs: &'a mut HashMap<DistributedJobId, DistributedJobState>,
+    job_id: DistributedJobId,
+    tenant_id: &str,
+) -> Result<&'a mut DistributedJobState> {
+    let state = jobs.get_mut(&job_id).ok_or_else(|| {
+        SynapseError::DistributedError(format!("Distributed job {job_id} not found"))
+    })?;
+    if state.tenant_id != tenant_id {
+        return Err(SynapseError::DistributedError(format!(
+            "Distributed job {job_id} not found"
+        )));
+    }
+    Ok(state)
 }
 
 impl Default for DistributedCoordinator {

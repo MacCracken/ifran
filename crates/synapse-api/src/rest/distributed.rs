@@ -93,13 +93,13 @@ pub async fn create_job(
 
     let job_id = state
         .distributed_coordinator
-        .create_job(config, &instance_id, tenant_id.0.as_str())
+        .create_job(config, &instance_id, tenant_id.as_ref())
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
     let job = state
         .distributed_coordinator
-        .get_job(job_id, tenant_id.0.as_str())
+        .get_job(job_id, tenant_id.as_ref())
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -114,13 +114,22 @@ pub async fn list_jobs(
 ) -> Json<PaginatedResponse<DistributedJobResponse>> {
     let jobs = state
         .distributed_coordinator
-        .list_jobs(tenant_id.0.as_str())
+        .list_jobs(tenant_id.as_ref())
         .await;
-    let all: Vec<DistributedJobResponse> = jobs.iter().map(job_to_response).collect();
-    Json(PaginatedResponse::from_vec(
-        all,
-        page.safe_limit(),
-        page.offset,
+    let total = jobs.len();
+    let limit = page.safe_limit() as usize;
+    let offset = (page.offset as usize).min(total);
+    let data = jobs
+        .iter()
+        .skip(offset)
+        .take(limit)
+        .map(job_to_response)
+        .collect();
+    Json(PaginatedResponse::pre_sliced(
+        data,
+        total,
+        limit as u32,
+        offset as u32,
     ))
 }
 
@@ -132,7 +141,7 @@ pub async fn get_job(
 ) -> Result<Json<DistributedJobResponse>, (StatusCode, String)> {
     let job = state
         .distributed_coordinator
-        .get_job(id, tenant_id.0.as_str())
+        .get_job(id, tenant_id.as_ref())
         .await
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
     Ok(Json(job_to_response(&job)))
@@ -154,7 +163,7 @@ pub async fn assign_worker(
 
     state
         .distributed_coordinator
-        .assign_worker(id, worker.clone(), tenant_id.0.as_str())
+        .assign_worker(id, worker.clone(), tenant_id.as_ref())
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
@@ -183,7 +192,7 @@ pub async fn assign_worker(
 
     let job = state
         .distributed_coordinator
-        .get_job(id, tenant_id.0.as_str())
+        .get_job(id, tenant_id.as_ref())
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -198,13 +207,13 @@ pub async fn start_job(
 ) -> Result<Json<DistributedJobResponse>, (StatusCode, String)> {
     state
         .distributed_coordinator
-        .start_job(id, tenant_id.0.as_str())
+        .start_job(id, tenant_id.as_ref())
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
     let job = state
         .distributed_coordinator
-        .get_job(id, tenant_id.0.as_str())
+        .get_job(id, tenant_id.as_ref())
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -219,13 +228,13 @@ pub async fn worker_completed(
 ) -> Result<Json<DistributedJobResponse>, (StatusCode, String)> {
     state
         .distributed_coordinator
-        .worker_completed(id, rank, tenant_id.0.as_str())
+        .worker_completed(id, rank, tenant_id.as_ref())
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
     let job = state
         .distributed_coordinator
-        .get_job(id, tenant_id.0.as_str())
+        .get_job(id, tenant_id.as_ref())
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -276,13 +285,13 @@ pub async fn fail_job(
 ) -> Result<Json<DistributedJobResponse>, (StatusCode, String)> {
     state
         .distributed_coordinator
-        .fail_job(id, tenant_id.0.as_str())
+        .fail_job(id, tenant_id.as_ref())
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
     let job = state
         .distributed_coordinator
-        .get_job(id, tenant_id.0.as_str())
+        .get_job(id, tenant_id.as_ref())
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -307,7 +316,7 @@ pub async fn aggregate(
 
     let job = _state
         .distributed_coordinator
-        .get_job(id, tenant_id.0.as_str())
+        .get_job(id, tenant_id.as_ref())
         .await
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
@@ -372,7 +381,7 @@ pub async fn auto_place(
 
     let assignments = state
         .distributed_coordinator
-        .auto_place(id, &node_resources, policy.as_ref(), tenant_id.0.as_str())
+        .auto_place(id, &node_resources, policy.as_ref(), tenant_id.as_ref())
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
@@ -391,7 +400,7 @@ pub async fn auto_place(
 
     let job = state
         .distributed_coordinator
-        .get_job(id, tenant_id.0.as_str())
+        .get_job(id, tenant_id.as_ref())
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
