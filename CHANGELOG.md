@@ -5,6 +5,40 @@ All notable changes to Synapse will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 
+## [2026.3.19]
+
+### Added
+
+#### Hardware Acceleration Backends
+- `synapse-backends/tpu`: TPU inference backend — proxies to JAX/PJRT or vLLM-TPU serving process (default port 8001), implements full `InferenceBackend` trait with load/unload/infer/stream/health
+- `synapse-backends/gaudi`: Intel Gaudi (Habana HPU) backend — proxies to optimum-habana or vLLM-HPU serving (default port 8004)
+- `synapse-backends/inferentia`: AWS Inferentia/Trainium backend — proxies to AWS Neuron serving process
+- `synapse-backends/oneapi`: Intel Arc / Data Center GPU Max backend — proxies to Intel oneAPI/SYCL serving
+- `synapse-backends/qualcomm`: Qualcomm Cloud AI 100 backend — proxies to QAI100 serving
+- `synapse-backends/metal`: Apple Metal backend — proxies to Metal-compatible serving process
+- `synapse-backends/vulkan`: Vulkan compute backend — proxies to Vulkan-capable serving process
+- `synapse-backends/xdna`: AMD Ryzen AI (XDNA) NPU backend — proxies to AMD XDNA serving
+- `synapse-backends/Cargo.toml`: Feature flags for all 8 new backends (`tpu`, `gaudi`, `inferentia`, `oneapi`, `qualcomm`, `metal`, `vulkan`, `xdna`); `tpu`, `gaudi`, `inferentia`, `oneapi`, `qualcomm`, `xdna` added to defaults
+
+#### Hardware Detection Expansion
+- `synapse-core/hardware/detect`: Extended detection to 10 accelerator families — added TPU (via `/dev/accel*`), Metal (via `system_profiler`), Vulkan (via `vulkaninfo`), Gaudi (via `hl-smi`), Inferentia (via `neuron-ls`), OneApi (via `xpu-smi`), Qualcomm AI 100 (via `/dev/qaic*`), AMD XDNA (via sysfs `amdxdna` driver)
+- `synapse-types/backend`: `AcceleratorType` extended with `Tpu`, `Gaudi`, `Inferentia`, `OneApi`, `QualcommAi`, `AmdXdna` variants
+- `synapse-core/lifecycle/manager`: `prepare_load()` now maps all 10 `AcceleratorKind` variants to `AcceleratorType` for backend routing
+
+#### `ai-hwaccel` Integration
+- `synapse-core`: Optional `ai-hwaccel` dependency behind `ai-hwaccel` feature flag
+- `synapse-core/hardware/detect`: When `ai-hwaccel` feature is enabled, `detect()` delegates to `ai_hwaccel::AcceleratorRegistry::detect()` for richer hardware discovery (13 backend families including Apple ANE, Intel NPU, and detailed metadata like driver versions, generation info, and ranked device selection)
+- `synapse-core/hardware/detect`: `detect_registry()` function exposes full `ai_hwaccel::AcceleratorRegistry` for callers wanting the richer API (quantization suggestions, sharding plans, accelerator profiles)
+- `synapse-core/hardware/detect`: Re-exports `ai_hwaccel` crate when feature is enabled
+- Built-in per-backend detection functions compiled out via `cfg(not(feature = "ai-hwaccel"))` when the external crate handles detection — zero dead code warnings in either configuration
+- Conversion layer maps `ai_hwaccel::AcceleratorType` → synapse `AcceleratorKind` and `AcceleratorProfile` → `GpuDevice`/`SystemHardware` so all downstream code (allocator, telemetry, budget checks, backend routing) works unchanged
+
+### Changed
+- Workspace version bumped to 2026.3.19
+- LICENSE file updated to GPL-3.0
+
+---
+
 ## [2026.3.18-2]
 
 ### Added
