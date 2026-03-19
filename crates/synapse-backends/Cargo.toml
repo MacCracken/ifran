@@ -5,15 +5,23 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["llamacpp", "candle-backend", "gguf", "ollama", "vllm", "onnx", "tensorrt"]
+default = ["llamacpp", "candle-backend", "gguf", "ollama", "vllm", "onnx", "tensorrt", "tpu", "gaudi", "inferentia", "oneapi", "qualcomm", "xdna"]
 llamacpp = []
 candle-backend = []
 gguf = []
 onnx = []
 tensorrt = []
+tpu = []
 vllm = []
 ollama = []
 wasm = []
+gaudi = []
+inferentia = []
+metal = []
+vulkan = []
+oneapi = []
+qualcomm = []
+xdna = []
 
 [dependencies]
 synapse-types = { path = "../synapse-types" }

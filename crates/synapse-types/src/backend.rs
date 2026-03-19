@@ -18,6 +18,12 @@ pub enum AcceleratorType {
     Rocm,
     Metal,
     Vulkan,
+    Tpu,
+    Gaudi,
+    Inferentia,
+    OneApi,
+    QualcommAi,
+    AmdXdna,
     Cpu,
 }
 
@@ -85,6 +91,12 @@ mod tests {
             AcceleratorType::Rocm,
             AcceleratorType::Metal,
             AcceleratorType::Vulkan,
+            AcceleratorType::Tpu,
+            AcceleratorType::Gaudi,
+            AcceleratorType::Inferentia,
+            AcceleratorType::OneApi,
+            AcceleratorType::QualcommAi,
+            AcceleratorType::AmdXdna,
             AcceleratorType::Cpu,
         ];
         for t in &types {
@@ -203,6 +215,12 @@ mod proptests {
             Just(AcceleratorType::Rocm),
             Just(AcceleratorType::Metal),
             Just(AcceleratorType::Vulkan),
+            Just(AcceleratorType::Tpu),
+            Just(AcceleratorType::Gaudi),
+            Just(AcceleratorType::Inferentia),
+            Just(AcceleratorType::OneApi),
+            Just(AcceleratorType::QualcommAi),
+            Just(AcceleratorType::AmdXdna),
             Just(AcceleratorType::Cpu),
         ]
     }

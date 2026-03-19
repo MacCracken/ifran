@@ -28,11 +28,35 @@ pub mod onnx;
 #[cfg(feature = "tensorrt")]
 pub mod tensorrt;
 
+#[cfg(feature = "tpu")]
+pub mod tpu;
+
 #[cfg(feature = "candle-backend")]
 pub mod candle;
 
 #[cfg(feature = "wasm")]
 pub mod wasm;
+
+#[cfg(feature = "metal")]
+pub mod metal;
+
+#[cfg(feature = "vulkan")]
+pub mod vulkan;
+
+#[cfg(feature = "gaudi")]
+pub mod gaudi;
+
+#[cfg(feature = "inferentia")]
+pub mod inferentia;
+
+#[cfg(feature = "oneapi")]
+pub mod oneapi;
+
+#[cfg(feature = "qualcomm")]
+pub mod qualcomm;
+
+#[cfg(feature = "xdna")]
+pub mod xdna;
 
 // Re-exports for convenience.
 pub use router::BackendRouter;

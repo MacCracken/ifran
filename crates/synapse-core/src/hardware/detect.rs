@@ -23,6 +23,14 @@ pub struct GpuDevice {
 pub enum AcceleratorKind {
     Cuda,
     Rocm,
+    Metal,
+    Vulkan,
+    Tpu,
+    Gaudi,
+    Inferentia,
+    OneApi,
+    QualcommAi,
+    AmdXdna,
 }
 
 /// CPU information.
@@ -60,22 +68,21 @@ impl SystemHardware {
 
     /// Best available accelerator kind, or None for CPU-only.
     pub fn best_accelerator(&self) -> Option<AcceleratorKind> {
-        // Prefer CUDA over ROCm
-        if self
-            .gpus
-            .iter()
-            .any(|g| g.accelerator == AcceleratorKind::Cuda)
-        {
-            Some(AcceleratorKind::Cuda)
-        } else if self
-            .gpus
-            .iter()
-            .any(|g| g.accelerator == AcceleratorKind::Rocm)
-        {
-            Some(AcceleratorKind::Rocm)
-        } else {
-            None
-        }
+        let priority = [
+            AcceleratorKind::Cuda,
+            AcceleratorKind::Tpu,
+            AcceleratorKind::Gaudi,
+            AcceleratorKind::Rocm,
+            AcceleratorKind::Inferentia,
+            AcceleratorKind::OneApi,
+            AcceleratorKind::Metal,
+            AcceleratorKind::Vulkan,
+            AcceleratorKind::QualcommAi,
+            AcceleratorKind::AmdXdna,
+        ];
+        priority
+            .into_iter()
+            .find(|kind| self.gpus.iter().any(|g| g.accelerator == *kind))
     }
 }
 
@@ -86,6 +93,14 @@ pub fn detect() -> Result<SystemHardware> {
 
     gpus.extend(detect_nvidia()?);
     gpus.extend(detect_rocm()?);
+    gpus.extend(detect_tpu()?);
+    gpus.extend(detect_metal()?);
+    gpus.extend(detect_vulkan()?);
+    gpus.extend(detect_gaudi()?);
+    gpus.extend(detect_inferentia()?);
+    gpus.extend(detect_oneapi()?);
+    gpus.extend(detect_qualcomm()?);
+    gpus.extend(detect_xdna()?);
 
     Ok(SystemHardware { cpu, gpus })
 }
@@ -258,6 +273,368 @@ fn detect_rocm() -> Result<Vec<GpuDevice>> {
             accelerator: AcceleratorKind::Rocm,
             memory_total_mb: mem_total,
             memory_free_mb: mem_total.saturating_sub(mem_used),
+            compute_capability: None,
+        });
+        index += 1;
+    }
+
+    Ok(gpus)
+}
+
+/// Detect Google TPU devices via /dev/accel* (libtpu device nodes).
+fn detect_tpu() -> Result<Vec<GpuDevice>> {
+    let dev = Path::new("/dev");
+    if !dev.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut gpus = Vec::new();
+    let mut index = 0usize;
+
+    for entry in std::fs::read_dir(dev).into_iter().flatten().flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+
+        if !name_str.starts_with("accel") {
+            continue;
+        }
+
+        // Verify it's a TPU by checking for the Google vendor in sysfs
+        let accel_path = Path::new("/sys/class/accel").join(&*name_str);
+        let device_dir = accel_path.join("device");
+
+        let vendor = read_sysfs_string(&device_dir.join("vendor")).unwrap_or_default();
+        // Google vendor ID is 0x1ae0
+        if vendor != "0x1ae0" {
+            continue;
+        }
+
+        let device_name = read_sysfs_string(&device_dir.join("product_name"))
+            .unwrap_or_else(|| format!("Google TPU {index}"));
+
+        // TPU HBM detection via sysfs (if available)
+        let mem_total = read_sysfs_u64(&device_dir.join("mem_info_total"))
+            .map(|b| b / (1024 * 1024))
+            .unwrap_or(16384); // Default 16GB HBM per chip
+        let mem_used = read_sysfs_u64(&device_dir.join("mem_info_used"))
+            .map(|b| b / (1024 * 1024))
+            .unwrap_or(0);
+
+        gpus.push(GpuDevice {
+            index,
+            name: device_name,
+            accelerator: AcceleratorKind::Tpu,
+            memory_total_mb: mem_total,
+            memory_free_mb: mem_total.saturating_sub(mem_used),
+            compute_capability: None,
+        });
+        index += 1;
+    }
+
+    Ok(gpus)
+}
+
+/// Detect Apple Metal GPUs via system_profiler (macOS only).
+fn detect_metal() -> Result<Vec<GpuDevice>> {
+    let output = std::process::Command::new("system_profiler")
+        .args(["SPDisplaysDataType", "-json"])
+        .output();
+
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        _ => return Ok(Vec::new()),
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = match serde_json::from_str(&stdout) {
+        Ok(v) => v,
+        Err(_) => return Ok(Vec::new()),
+    };
+
+    let mut gpus = Vec::new();
+    if let Some(displays) = json["SPDisplaysDataType"].as_array() {
+        for (i, display) in displays.iter().enumerate() {
+            let name = display["sppci_model"]
+                .as_str()
+                .unwrap_or("Apple GPU")
+                .to_string();
+
+            // VRAM is reported as a string like "16 GB"
+            let vram_str = display["spdisplays_vram"]
+                .as_str()
+                .or_else(|| display["spdisplays_mtlgpufamilysupport"].as_str())
+                .unwrap_or("0 MB");
+            let mem_total = parse_vram_string(vram_str);
+
+            gpus.push(GpuDevice {
+                index: i,
+                name,
+                accelerator: AcceleratorKind::Metal,
+                memory_total_mb: mem_total,
+                memory_free_mb: mem_total, // macOS unified memory — report full
+                compute_capability: None,
+            });
+        }
+    }
+
+    Ok(gpus)
+}
+
+fn parse_vram_string(s: &str) -> u64 {
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    if parts.len() >= 2 {
+        let value: u64 = parts[0].parse().unwrap_or(0);
+        match parts[1].to_lowercase().as_str() {
+            "gb" => value * 1024,
+            "mb" => value,
+            "tb" => value * 1024 * 1024,
+            _ => value,
+        }
+    } else {
+        0
+    }
+}
+
+/// Detect Vulkan-capable GPUs via vulkaninfo.
+fn detect_vulkan() -> Result<Vec<GpuDevice>> {
+    let output = std::process::Command::new("vulkaninfo")
+        .args(["--summary"])
+        .output();
+
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        _ => return Ok(Vec::new()),
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut gpus = Vec::new();
+    let mut index = 0usize;
+
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("deviceName") {
+            let name = trimmed
+                .split('=')
+                .nth(1)
+                .map(|s| s.trim().to_string())
+                .unwrap_or_else(|| format!("Vulkan GPU {index}"));
+
+            gpus.push(GpuDevice {
+                index,
+                name,
+                accelerator: AcceleratorKind::Vulkan,
+                memory_total_mb: 0, // Vulkan doesn't easily report total VRAM from summary
+                memory_free_mb: 0,
+                compute_capability: None,
+            });
+            index += 1;
+        }
+    }
+
+    Ok(gpus)
+}
+
+/// Detect Intel Gaudi (Habana Labs) accelerators via hl-smi.
+fn detect_gaudi() -> Result<Vec<GpuDevice>> {
+    let output = std::process::Command::new("hl-smi")
+        .args([
+            "--query-aip=index,name,memory.total,memory.free",
+            "--format=csv,noheader,nounits",
+        ])
+        .output();
+
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        _ => return Ok(Vec::new()),
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut gpus = Vec::new();
+
+    for line in stdout.lines() {
+        let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+        if parts.len() < 4 {
+            continue;
+        }
+
+        let index: usize = parts[0].parse().unwrap_or(0);
+        let name = parts[1].to_string();
+        let mem_total: u64 = parts[2].parse().unwrap_or(0);
+        let mem_free: u64 = parts[3].parse().unwrap_or(0);
+
+        gpus.push(GpuDevice {
+            index,
+            name,
+            accelerator: AcceleratorKind::Gaudi,
+            memory_total_mb: mem_total,
+            memory_free_mb: mem_free,
+            compute_capability: None,
+        });
+    }
+
+    Ok(gpus)
+}
+
+/// Detect AWS Inferentia/Trainium devices via neuron-ls.
+fn detect_inferentia() -> Result<Vec<GpuDevice>> {
+    let output = std::process::Command::new("neuron-ls")
+        .args(["--json-output"])
+        .output();
+
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        _ => return Ok(Vec::new()),
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = match serde_json::from_str(&stdout) {
+        Ok(v) => v,
+        Err(_) => return Ok(Vec::new()),
+    };
+
+    let mut gpus = Vec::new();
+
+    if let Some(devices) = json.as_array() {
+        for (i, device) in devices.iter().enumerate() {
+            let model = device["model"].as_str().unwrap_or("Neuron Device");
+            let nc_count = device["nc_count"].as_u64().unwrap_or(1);
+            let memory_per_nc = device["memory_per_nc_mb"].as_u64().unwrap_or(8192);
+            let mem_total = nc_count * memory_per_nc;
+
+            gpus.push(GpuDevice {
+                index: i,
+                name: model.to_string(),
+                accelerator: AcceleratorKind::Inferentia,
+                memory_total_mb: mem_total,
+                memory_free_mb: mem_total, // neuron-ls doesn't report used memory
+                compute_capability: None,
+            });
+        }
+    }
+
+    Ok(gpus)
+}
+
+/// Detect Intel Arc / Data Center GPU Max via xpu-smi (oneAPI).
+fn detect_oneapi() -> Result<Vec<GpuDevice>> {
+    let output = std::process::Command::new("xpu-smi")
+        .args(["discovery", "--dump", "1,2,18,19"])
+        .output();
+
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        _ => return Ok(Vec::new()),
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut gpus = Vec::new();
+
+    for line in stdout.lines() {
+        // Skip header line
+        if line.starts_with("DeviceId") || line.trim().is_empty() {
+            continue;
+        }
+
+        let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+        if parts.len() < 4 {
+            continue;
+        }
+
+        let index: usize = parts[0].parse().unwrap_or(0);
+        let name = parts[1].to_string();
+        let mem_total: u64 = parts[2].parse().unwrap_or(0);
+        let mem_free: u64 = parts[3].parse().unwrap_or(0);
+
+        gpus.push(GpuDevice {
+            index,
+            name,
+            accelerator: AcceleratorKind::OneApi,
+            memory_total_mb: mem_total,
+            memory_free_mb: mem_free,
+            compute_capability: None,
+        });
+    }
+
+    Ok(gpus)
+}
+
+/// Detect Qualcomm Cloud AI 100 accelerators via /dev/qaic*.
+fn detect_qualcomm() -> Result<Vec<GpuDevice>> {
+    let dev = Path::new("/dev");
+    if !dev.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut gpus = Vec::new();
+    let mut index = 0usize;
+
+    for entry in std::fs::read_dir(dev).into_iter().flatten().flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+
+        if !name_str.starts_with("qaic") {
+            continue;
+        }
+
+        // Try to get device info from sysfs
+        let sysfs_path = Path::new("/sys/class/qaic").join(&*name_str).join("device");
+        let device_name = read_sysfs_string(&sysfs_path.join("product_name"))
+            .unwrap_or_else(|| format!("Qualcomm Cloud AI 100 #{index}"));
+
+        let mem_total = read_sysfs_u64(&sysfs_path.join("mem_total"))
+            .map(|b| b / (1024 * 1024))
+            .unwrap_or(32768); // Default 32GB DDR
+
+        gpus.push(GpuDevice {
+            index,
+            name: device_name,
+            accelerator: AcceleratorKind::QualcommAi,
+            memory_total_mb: mem_total,
+            memory_free_mb: mem_total,
+            compute_capability: None,
+        });
+        index += 1;
+    }
+
+    Ok(gpus)
+}
+
+/// Detect AMD XDNA (Ryzen AI) NPU via sysfs.
+fn detect_xdna() -> Result<Vec<GpuDevice>> {
+    let accel = Path::new("/sys/class/accel");
+    if !accel.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut gpus = Vec::new();
+    let mut index = 0usize;
+
+    for entry in std::fs::read_dir(accel).into_iter().flatten().flatten() {
+        let device_dir = entry.path().join("device");
+        let driver_link = device_dir.join("driver");
+
+        let driver_name = std::fs::read_link(&driver_link)
+            .ok()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
+
+        if driver_name.as_deref() != Some("amdxdna") {
+            continue;
+        }
+
+        let device_name = read_sysfs_string(&device_dir.join("product_name"))
+            .unwrap_or_else(|| format!("AMD Ryzen AI NPU {index}"));
+
+        // XDNA NPUs typically have limited on-chip SRAM, report shared system memory
+        let mem_total = read_sysfs_u64(&device_dir.join("mem_info_total"))
+            .map(|b| b / (1024 * 1024))
+            .unwrap_or(0);
+
+        gpus.push(GpuDevice {
+            index,
+            name: device_name,
+            accelerator: AcceleratorKind::AmdXdna,
+            memory_total_mb: mem_total,
+            memory_free_mb: mem_total,
             compute_capability: None,
         });
         index += 1;

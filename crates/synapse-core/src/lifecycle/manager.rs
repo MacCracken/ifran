@@ -68,6 +68,14 @@ impl ModelManager {
             let acc = match kind {
                 detect::AcceleratorKind::Cuda => AcceleratorType::Cuda,
                 detect::AcceleratorKind::Rocm => AcceleratorType::Rocm,
+                detect::AcceleratorKind::Metal => AcceleratorType::Metal,
+                detect::AcceleratorKind::Vulkan => AcceleratorType::Vulkan,
+                detect::AcceleratorKind::Tpu => AcceleratorType::Tpu,
+                detect::AcceleratorKind::Gaudi => AcceleratorType::Gaudi,
+                detect::AcceleratorKind::Inferentia => AcceleratorType::Inferentia,
+                detect::AcceleratorKind::OneApi => AcceleratorType::OneApi,
+                detect::AcceleratorKind::QualcommAi => AcceleratorType::QualcommAi,
+                detect::AcceleratorKind::AmdXdna => AcceleratorType::AmdXdna,
             };
             let ids: Vec<u32> = hardware.gpus.iter().map(|g| g.index as u32).collect();
             (acc, ids)
