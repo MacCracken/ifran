@@ -4,8 +4,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+ai-hwaccel = ["dep:ai-hwaccel"]
+
 [dependencies]
 synapse-types = { path = "../synapse-types" }
+ai-hwaccel = { workspace = true, optional = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 serde = { workspace = true }

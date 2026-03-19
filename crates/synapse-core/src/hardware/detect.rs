@@ -3,9 +3,22 @@
 //! Detects available compute accelerators by probing for CUDA (NVML),
 //! ROCm (sysfs), and CPU capabilities. Returns a unified [`SystemHardware`]
 //! snapshot used for backend selection and VRAM budget checks.
+//!
+//! When the `ai-hwaccel` feature is enabled, detection is delegated to the
+//! `ai-hwaccel` crate which provides more comprehensive hardware discovery
+//! (13 backend families including Apple ANE, Intel NPU, and richer metadata).
+//! The results are converted back into synapse's [`SystemHardware`] types so
+//! the rest of the codebase is unaffected.
 
+#[cfg(not(feature = "ai-hwaccel"))]
 use std::path::Path;
 use synapse_types::error::Result;
+
+/// Re-export the full `ai-hwaccel` registry when the feature is enabled.
+/// Callers that want the richer API (quantization suggestions, sharding plans,
+/// accelerator profiles) can use this directly.
+#[cfg(feature = "ai-hwaccel")]
+pub use ai_hwaccel;
 
 /// A detected compute device.
 #[derive(Debug, Clone)]
@@ -87,7 +100,122 @@ impl SystemHardware {
 }
 
 /// Detect all available hardware on this system.
+///
+/// When the `ai-hwaccel` feature is enabled, delegates to `ai_hwaccel::AcceleratorRegistry`
+/// for richer, more comprehensive detection. The results are converted back into synapse's
+/// own types so all downstream code continues to work unchanged.
 pub fn detect() -> Result<SystemHardware> {
+    #[cfg(feature = "ai-hwaccel")]
+    {
+        detect_via_hwaccel()
+    }
+    #[cfg(not(feature = "ai-hwaccel"))]
+    {
+        detect_builtin()
+    }
+}
+
+/// Get the full `ai-hwaccel` [`AcceleratorRegistry`] for callers that want
+/// the richer API (quantization suggestions, sharding plans, profiles, etc.).
+///
+/// Only available when the `ai-hwaccel` feature is enabled.
+#[cfg(feature = "ai-hwaccel")]
+pub fn detect_registry() -> ai_hwaccel::AcceleratorRegistry {
+    ai_hwaccel::AcceleratorRegistry::detect()
+}
+
+/// Detection via `ai-hwaccel` crate — converts its rich types back to synapse's types.
+#[cfg(feature = "ai-hwaccel")]
+fn detect_via_hwaccel() -> Result<SystemHardware> {
+    let registry = ai_hwaccel::AcceleratorRegistry::detect();
+
+    // Log any detection warnings
+    for w in registry.warnings() {
+        tracing::warn!("ai-hwaccel detection warning: {w}");
+    }
+
+    // Extract CPU info from the CPU profile
+    let cpu_profile = registry
+        .available()
+        .iter()
+        .find(|p| matches!(p.accelerator, ai_hwaccel::AcceleratorType::Cpu))
+        .copied();
+
+    let cpu = if let Some(profile) = cpu_profile {
+        // ai-hwaccel gives us memory; fill in CPU details from /proc as before
+        let model_name = read_cpu_model().unwrap_or_else(|| "Unknown CPU".into());
+        let logical_cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+        let physical_cores = read_physical_cores().unwrap_or(logical_cores);
+        let total_memory_mb = profile.memory_bytes / (1024 * 1024);
+        let available_memory_mb = read_memory_info()
+            .map(|(_, avail)| avail)
+            .unwrap_or(total_memory_mb);
+        CpuInfo {
+            model_name,
+            physical_cores,
+            logical_cores,
+            total_memory_mb,
+            available_memory_mb,
+        }
+    } else {
+        detect_cpu()?
+    };
+
+    // Convert non-CPU profiles to GpuDevice
+    let gpus: Vec<GpuDevice> = registry
+        .available()
+        .iter()
+        .filter(|p| !matches!(p.accelerator, ai_hwaccel::AcceleratorType::Cpu))
+        .enumerate()
+        .map(|(i, p)| {
+            let accelerator = hwaccel_to_kind(&p.accelerator);
+            let memory_total_mb = p.memory_bytes / (1024 * 1024);
+            let compute_capability = p
+                .compute_capability
+                .as_ref()
+                .and_then(|s| parse_compute_capability(s));
+            GpuDevice {
+                index: i,
+                name: p.accelerator.to_string(),
+                accelerator,
+                memory_total_mb,
+                memory_free_mb: memory_total_mb, // ai-hwaccel reports total; free not tracked
+                compute_capability,
+            }
+        })
+        .collect();
+
+    Ok(SystemHardware { cpu, gpus })
+}
+
+/// Map ai-hwaccel's AcceleratorType to synapse's AcceleratorKind.
+#[cfg(feature = "ai-hwaccel")]
+fn hwaccel_to_kind(accel: &ai_hwaccel::AcceleratorType) -> AcceleratorKind {
+    use ai_hwaccel::AcceleratorType as AT;
+    match accel {
+        AT::CudaGpu { .. } => AcceleratorKind::Cuda,
+        AT::RocmGpu { .. } => AcceleratorKind::Rocm,
+        AT::MetalGpu => AcceleratorKind::Metal,
+        AT::VulkanGpu { .. } => AcceleratorKind::Vulkan,
+        AT::Tpu { .. } => AcceleratorKind::Tpu,
+        AT::Gaudi { .. } => AcceleratorKind::Gaudi,
+        AT::AwsNeuron { .. } => AcceleratorKind::Inferentia,
+        AT::IntelOneApi { .. } => AcceleratorKind::OneApi,
+        AT::QualcommAi100 { .. } => AcceleratorKind::QualcommAi,
+        AT::AmdXdnaNpu { .. } => AcceleratorKind::AmdXdna,
+        // ai-hwaccel knows about NPUs that synapse doesn't have a kind for yet;
+        // map them to the closest match or fall through to Vulkan as a generic compute device.
+        AT::IntelNpu | AT::AppleNpu => AcceleratorKind::Vulkan,
+        AT::Cpu => AcceleratorKind::Cuda, // unreachable — CPU is filtered above
+        _ => AcceleratorKind::Vulkan,     // future-proof for new ai-hwaccel variants
+    }
+}
+
+/// Built-in detection (used when ai-hwaccel feature is not enabled).
+#[cfg(not(feature = "ai-hwaccel"))]
+fn detect_builtin() -> Result<SystemHardware> {
     let cpu = detect_cpu()?;
     let mut gpus = Vec::new();
 
@@ -173,6 +301,19 @@ fn parse_meminfo_value(line: &str) -> Option<u64> {
     line.split_whitespace().nth(1)?.parse().ok()
 }
 
+fn parse_compute_capability(s: &str) -> Option<(u32, u32)> {
+    let parts: Vec<&str> = s.split('.').collect();
+    if parts.len() == 2 {
+        Some((parts[0].parse().ok()?, parts[1].parse().ok()?))
+    } else {
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Built-in per-backend detection (compiled out when ai-hwaccel handles it)
+// ---------------------------------------------------------------------------
+#[cfg(not(feature = "ai-hwaccel"))]
 /// Detect NVIDIA GPUs via nvidia-smi (shells out for portability without
 /// linking NVML at compile time).
 fn detect_nvidia() -> Result<Vec<GpuDevice>> {
@@ -216,16 +357,8 @@ fn detect_nvidia() -> Result<Vec<GpuDevice>> {
     Ok(gpus)
 }
 
-fn parse_compute_capability(s: &str) -> Option<(u32, u32)> {
-    let parts: Vec<&str> = s.split('.').collect();
-    if parts.len() == 2 {
-        Some((parts[0].parse().ok()?, parts[1].parse().ok()?))
-    } else {
-        None
-    }
-}
-
 /// Detect AMD ROCm GPUs via sysfs.
+#[cfg(not(feature = "ai-hwaccel"))]
 fn detect_rocm() -> Result<Vec<GpuDevice>> {
     let drm = Path::new("/sys/class/drm");
     if !drm.exists() {
@@ -282,6 +415,7 @@ fn detect_rocm() -> Result<Vec<GpuDevice>> {
 }
 
 /// Detect Google TPU devices via /dev/accel* (libtpu device nodes).
+#[cfg(not(feature = "ai-hwaccel"))]
 fn detect_tpu() -> Result<Vec<GpuDevice>> {
     let dev = Path::new("/dev");
     if !dev.exists() {
@@ -335,6 +469,7 @@ fn detect_tpu() -> Result<Vec<GpuDevice>> {
 }
 
 /// Detect Apple Metal GPUs via system_profiler (macOS only).
+#[cfg(not(feature = "ai-hwaccel"))]
 fn detect_metal() -> Result<Vec<GpuDevice>> {
     let output = std::process::Command::new("system_profiler")
         .args(["SPDisplaysDataType", "-json"])
@@ -380,6 +515,7 @@ fn detect_metal() -> Result<Vec<GpuDevice>> {
     Ok(gpus)
 }
 
+#[cfg(not(feature = "ai-hwaccel"))]
 fn parse_vram_string(s: &str) -> u64 {
     let parts: Vec<&str> = s.split_whitespace().collect();
     if parts.len() >= 2 {
@@ -396,6 +532,7 @@ fn parse_vram_string(s: &str) -> u64 {
 }
 
 /// Detect Vulkan-capable GPUs via vulkaninfo.
+#[cfg(not(feature = "ai-hwaccel"))]
 fn detect_vulkan() -> Result<Vec<GpuDevice>> {
     let output = std::process::Command::new("vulkaninfo")
         .args(["--summary"])
@@ -435,6 +572,7 @@ fn detect_vulkan() -> Result<Vec<GpuDevice>> {
 }
 
 /// Detect Intel Gaudi (Habana Labs) accelerators via hl-smi.
+#[cfg(not(feature = "ai-hwaccel"))]
 fn detect_gaudi() -> Result<Vec<GpuDevice>> {
     let output = std::process::Command::new("hl-smi")
         .args([
@@ -476,6 +614,7 @@ fn detect_gaudi() -> Result<Vec<GpuDevice>> {
 }
 
 /// Detect AWS Inferentia/Trainium devices via neuron-ls.
+#[cfg(not(feature = "ai-hwaccel"))]
 fn detect_inferentia() -> Result<Vec<GpuDevice>> {
     let output = std::process::Command::new("neuron-ls")
         .args(["--json-output"])
@@ -516,6 +655,7 @@ fn detect_inferentia() -> Result<Vec<GpuDevice>> {
 }
 
 /// Detect Intel Arc / Data Center GPU Max via xpu-smi (oneAPI).
+#[cfg(not(feature = "ai-hwaccel"))]
 fn detect_oneapi() -> Result<Vec<GpuDevice>> {
     let output = std::process::Command::new("xpu-smi")
         .args(["discovery", "--dump", "1,2,18,19"])
@@ -559,6 +699,7 @@ fn detect_oneapi() -> Result<Vec<GpuDevice>> {
 }
 
 /// Detect Qualcomm Cloud AI 100 accelerators via /dev/qaic*.
+#[cfg(not(feature = "ai-hwaccel"))]
 fn detect_qualcomm() -> Result<Vec<GpuDevice>> {
     let dev = Path::new("/dev");
     if !dev.exists() {
@@ -600,6 +741,7 @@ fn detect_qualcomm() -> Result<Vec<GpuDevice>> {
 }
 
 /// Detect AMD XDNA (Ryzen AI) NPU via sysfs.
+#[cfg(not(feature = "ai-hwaccel"))]
 fn detect_xdna() -> Result<Vec<GpuDevice>> {
     let accel = Path::new("/sys/class/accel");
     if !accel.exists() {
@@ -643,12 +785,14 @@ fn detect_xdna() -> Result<Vec<GpuDevice>> {
     Ok(gpus)
 }
 
+#[cfg(not(feature = "ai-hwaccel"))]
 fn read_sysfs_string(path: &Path) -> Option<String> {
     std::fs::read_to_string(path)
         .ok()
         .map(|s| s.trim().to_string())
 }
 
+#[cfg(not(feature = "ai-hwaccel"))]
 fn read_sysfs_u64(path: &Path) -> Option<u64> {
     read_sysfs_string(path)?.parse().ok()
 }
