@@ -138,4 +138,4 @@ CalVer: `YYYY.M.D` for releases, `YYYY.M.D-N` for patches.
 
 ## License
 
-MIT
+AGPL-3.0

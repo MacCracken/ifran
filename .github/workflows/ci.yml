@@ -273,11 +273,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Check LICENSE contains MIT License
+      - name: Check LICENSE contains AGPL-3.0
         run: |
-          if grep -q "MIT License" LICENSE; then
-            echo "LICENSE file contains MIT License"
+          if grep -q "GNU AFFERO GENERAL PUBLIC LICENSE" LICENSE; then
+            echo "LICENSE file contains AGPL-3.0"
           else
-            echo "::error::LICENSE file does not contain 'MIT License'"
+            echo "::error::LICENSE file does not contain AGPL-3.0"
             exit 1
           fi
