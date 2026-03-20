@@ -165,18 +165,34 @@ jobs:
           PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -E '^[0-9]' | head -n 2 | tail -n 1 || echo "")
           CURRENT_TAG="${GITHUB_REF_NAME}"
 
-          cat > changelog.md << 'HEADER'
-          ## Highlights
+          # Count stats
+          if [ -n "$PREVIOUS_TAG" ]; then
+            COMMIT_COUNT=$(git rev-list "${PREVIOUS_TAG}..${CURRENT_TAG}" --count --no-merges 2>/dev/null || echo "?")
+            FILES_CHANGED=$(git diff "${PREVIOUS_TAG}..${CURRENT_TAG}" --stat | tail -1 | grep -oP '\d+ file' | grep -oP '\d+' || echo "?")
+          else
+            COMMIT_COUNT=$(git rev-list --count --no-merges HEAD 2>/dev/null || echo "?")
+            FILES_CHANGED="?"
+          fi
+          TEST_COUNT=$(grep -r '#\[test\]' crates/ --include='*.rs' | wc -l || echo "?")
 
-          See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for the full list of changes.
+          cat > changelog.md << EOF
+          ## Synapse ${VERSION}
 
-          HEADER
+          | | |
+          |---|---|
+          | **Commits** | ${COMMIT_COUNT} |
+          | **Files changed** | ${FILES_CHANGED} |
+          | **Tests** | ${TEST_COUNT} |
+          | **License** | AGPL-3.0 |
+
+          EOF
 
           # Extract CHANGELOG.md section for this version
           if [ -f CHANGELOG.md ]; then
-            # Extract content between this version header and the next version header
             SECTION=$(sed -n "/^## \[${VERSION}\]/,/^## \[/p" CHANGELOG.md | sed '1d;$d')
             if [ -n "$SECTION" ]; then
+              echo "### What's Changed" >> changelog.md
+              echo "" >> changelog.md
               echo "$SECTION" >> changelog.md
               echo "" >> changelog.md
             fi
@@ -184,16 +200,19 @@ jobs:
 
           echo "---" >> changelog.md
           echo "" >> changelog.md
-          echo "## Commits" >> changelog.md
+          echo "### Commits" >> changelog.md
+          echo "" >> changelog.md
+          echo "<details><summary>Click to expand</summary>" >> changelog.md
           echo "" >> changelog.md
 
           if [ -n "$PREVIOUS_TAG" ]; then
-            git log "${PREVIOUS_TAG}..${CURRENT_TAG}" --pretty=format:"- %s (%h)" --no-merges >> changelog.md
+            git log "${PREVIOUS_TAG}..${CURRENT_TAG}" --pretty=format:"- %s (\`%h\`)" --no-merges >> changelog.md
           else
-            git log --pretty=format:"- %s (%h)" --no-merges -20 >> changelog.md
+            git log --pretty=format:"- %s (\`%h\`)" --no-merges -20 >> changelog.md
           fi
 
           echo "" >> changelog.md
+          echo "</details>" >> changelog.md
           echo "" >> changelog.md
 
           if [ -n "$PREVIOUS_TAG" ]; then
@@ -201,33 +220,47 @@ jobs:
           fi
 
           echo "" >> changelog.md
-          cat >> changelog.md << 'INSTALL'
+          cat >> changelog.md << 'ASSETS'
           ---
 
-          ## Installation
+          ### Downloads
 
-          ### Binary
+          | Platform | Architecture | File |
+          |----------|-------------|------|
+          | Linux | x86_64 (amd64) | `synapse-*-linux-amd64.tar.gz` |
+          | Linux | aarch64 (arm64) | `synapse-*-linux-arm64.tar.gz` |
+          | Container | multi-arch | `ghcr.io/maccracken/synapse` |
 
-          Download the tarball for your architecture, extract, and run:
+          Each tarball includes `synapse` (CLI) and `synapse-server` (API server), plus LICENSE, README, and docs.
 
+          SHA-256 checksums are provided as `.sha256` files alongside each tarball.
+
+          ### Quick Start
+
+          **Binary:**
           ```bash
           tar xzf synapse-*-linux-amd64.tar.gz
-          ./synapse-*/synapse serve
+          cd synapse-*/
+          ./synapse serve
+          # API available at http://localhost:8420
           ```
 
-          ### Container
-
+          **Container:**
           ```bash
           docker pull ghcr.io/maccracken/synapse:latest
           docker run -p 8420:8420 ghcr.io/maccracken/synapse:latest
           ```
 
-          ### Verify
-
+          **Verify download:**
           ```bash
           sha256sum -c synapse-*-linux-amd64.tar.gz.sha256
           ```
-          INSTALL
+
+          ### Supply Chain
+
+          SBOM (CycloneDX JSON/XML) and license reports are attached to this release for compliance auditing.
+
+          ASSETS
 
       - name: Download release artifacts (amd64)
         uses: actions/download-artifact@v4

@@ -316,10 +316,24 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Test container startup
+      - name: Smoke test container
         run: |
-          docker run --rm -d --name synapse-test synapse:ci-test
-          sleep 5
+          docker run --rm -d --name synapse-test -p 8420:8420 synapse:ci-test
+          echo "Waiting for server to start..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8420/health > /dev/null 2>&1; then
+              echo "Health check passed on attempt $i"
+              break
+            fi
+            sleep 1
+          done
+          # Verify endpoints
+          curl -sf http://localhost:8420/health | grep -q "ok"
+          echo "GET /health: ok"
+          curl -sf http://localhost:8420/ready | grep -q "ready"
+          echo "GET /ready: ok"
+          curl -sf http://localhost:8420/system/status | grep -q "version"
+          echo "GET /system/status: ok"
           docker logs synapse-test
           docker stop synapse-test
 

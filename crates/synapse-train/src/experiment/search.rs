@@ -77,14 +77,14 @@ impl SearchSpace {
             return vec![self.base.clone()];
         }
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         (0..n_trials)
             .map(|_| {
                 let mut hp = self.base.clone();
                 for range in &self.ranges {
                     let values = range.values.expand();
                     if !values.is_empty() {
-                        let idx = rng.gen_range(0..values.len());
+                        let idx = rng.random_range(0..values.len());
                         apply_param(&mut hp, &range.name, values[idx]);
                     }
                 }

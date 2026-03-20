@@ -26,7 +26,7 @@ LABEL org.opencontainers.image.title="Synapse"
 LABEL org.opencontainers.image.description="LLM controller for pulling, managing, and training language models"
 LABEL org.opencontainers.image.version="${VERSION}"
 LABEL org.opencontainers.image.source="https://github.com/MacCracken/synapse"
-LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.licenses="AGPL-3.0-only"
 LABEL org.opencontainers.image.base.name="ghcr.io/maccracken/agnosticos:latest"
 
 # AGNOS base includes ca-certificates and tini
