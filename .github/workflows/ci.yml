@@ -58,8 +58,51 @@ jobs:
             target/${{ matrix.target }}/release/synapse-api
           retention-days: 7
 
-  quality:
-    name: Code Quality
+  fmt:
+    name: Formatting
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust environment
+        uses: ./.github/actions/setup-rust-env
+        with:
+          cache-prefix: fmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - synapse-types
+          - synapse-core
+          - synapse-backends
+          - synapse-train
+          - synapse-api
+          - synapse-bridge
+          - synapse-cli
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust environment
+        uses: ./.github/actions/setup-rust-env
+        with:
+          cache-prefix: clippy-${{ matrix.package }}
+
+      - name: Run Clippy
+        run: cargo clippy -p ${{ matrix.package }} --all-targets -- -D warnings
+
+  audit:
+    name: Security Audit
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -69,18 +112,18 @@ jobs:
       - name: Setup Rust environment
         uses: ./.github/actions/setup-rust-env
         with:
-          cache-prefix: quality
+          cache-prefix: audit
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
 
-      - name: Run Clippy
-        run: cargo clippy --workspace -- -D warnings
+      - name: Run cargo audit
+        run: cargo audit
 
-  security:
-    name: Security Audit
+  deny:
+    name: Dependency Policy
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -88,7 +131,21 @@ jobs:
       - name: Setup Rust environment
         uses: ./.github/actions/setup-rust-env
         with:
-          cache-prefix: security
+          cache-prefix: deny
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+
+      - name: Run cargo deny
+        run: cargo deny check
+
+  trivy:
+    name: Trivy Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Run Trivy filesystem scan
         uses: aquasecurity/trivy-action@master
@@ -105,24 +162,25 @@ jobs:
         with:
           sarif_file: trivy-results.sarif
 
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+  outdated:
+    name: Outdated Dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Run cargo audit
-        run: cargo audit
-
-      - name: Install cargo-deny
-        run: cargo install cargo-deny --locked
-
-      - name: Run cargo deny
-        run: cargo deny check
+      - name: Setup Rust environment
+        uses: ./.github/actions/setup-rust-env
+        with:
+          cache-prefix: outdated
 
       - name: Install cargo-outdated
         run: cargo install cargo-outdated --locked
 
       - name: Run cargo outdated
         run: cargo outdated --root-deps-only --exit-code 1
-        continue-on-error: true
 
   test:
     name: Test (${{ matrix.package }})
