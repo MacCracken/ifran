@@ -330,8 +330,13 @@ jobs:
           # Verify endpoints
           curl -sf http://localhost:8420/health | grep -q "ok"
           echo "GET /health: ok"
-          curl -sf http://localhost:8420/ready | grep -q "ready"
-          echo "GET /ready: ok"
+          # /ready may return 503 in bare container (no backends configured) — just check it responds
+          READY_CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8420/ready)
+          echo "GET /ready: HTTP ${READY_CODE}"
+          if [ "$READY_CODE" != "200" ] && [ "$READY_CODE" != "503" ]; then
+            echo "Unexpected status from /ready"
+            exit 1
+          fi
           curl -sf http://localhost:8420/system/status | grep -q "version"
           echo "GET /system/status: ok"
           docker logs synapse-test
