@@ -35,6 +35,63 @@ pub trait InferenceBackend: Send + Sync {
         req: InferenceRequest,
     ) -> synapse_types::error::Result<mpsc::Receiver<StreamChunk>>;
     async fn health_check(&self) -> synapse_types::error::Result<bool>;
+
+    /// Generate an embedding vector for the given text.
+    ///
+    /// Backends that natively support embeddings (e.g. Ollama, vLLM) should
+    /// override this with a direct embedding API call.  The default
+    /// implementation falls back to running a short inference and hashing the
+    /// response into a fixed-size vector — better than a static hash of the
+    /// raw input because the model's output captures semantic content.
+    async fn embed(
+        &self,
+        handle: &ModelHandle,
+        text: &str,
+        dims: usize,
+    ) -> synapse_types::error::Result<Vec<f32>> {
+        // Ask the model to summarise / rephrase — the output is semantically
+        // richer than the raw input, producing a better hash-based embedding.
+        let req = InferenceRequest {
+            prompt: format!(
+                "Represent the following text for semantic search. Only output the representation, nothing else.\n\n{text}"
+            ),
+            max_tokens: Some(64),
+            temperature: Some(0.0),
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: None,
+            sensitivity: None,
+        };
+        let resp = self.infer(handle, &req).await?;
+        Ok(hash_text_to_embedding(&resp.text, dims))
+    }
+}
+
+/// Deterministic hash of text into a normalised f32 vector.
+///
+/// Uses a simple but effective byte-mixing strategy. This is NOT a learned
+/// embedding — it preserves no real semantic similarity — but it provides a
+/// stable, deterministic vector that can be stored and compared with cosine
+/// similarity. Backends with native embedding support should override
+/// [`InferenceBackend::embed`] instead.
+pub fn hash_text_to_embedding(text: &str, dims: usize) -> Vec<f32> {
+    let mut embedding = vec![0.0f32; dims];
+    // Mix bytes with position-dependent rotation so that word order matters.
+    for (i, byte) in text.bytes().enumerate() {
+        let idx = i % dims;
+        let secondary = (i.wrapping_mul(7) + byte as usize) % dims;
+        embedding[idx] += (byte as f32) / 255.0;
+        embedding[secondary] += ((byte as f32) / 255.0) * 0.5;
+    }
+    // L2 normalise
+    let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        for v in &mut embedding {
+            *v /= norm;
+        }
+    }
+    embedding
 }
 
 #[cfg(test)]

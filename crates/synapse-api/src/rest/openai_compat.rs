@@ -84,7 +84,11 @@ pub async fn chat_completions(
         .iter()
         .find(|m| m.model_name == body.model)
         .or_else(|| loaded.first())
-        .ok_or((StatusCode::BAD_REQUEST, "No model loaded".into()))?;
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            "No model loaded. Load a model first with POST /v1/models or 'synapse pull <model>'"
+                .into(),
+        ))?;
 
     let backend = state
         .backends

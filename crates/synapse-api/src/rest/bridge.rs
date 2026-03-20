@@ -47,10 +47,12 @@ pub async fn connect(
     State(state): State<AppState>,
     Extension(_tenant_id): Extension<TenantId>,
 ) -> Result<Json<BridgeStatusResponse>, (StatusCode, String)> {
-    let client = state
-        .bridge_client
-        .as_ref()
-        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Bridge is not enabled".into()))?;
+    let client = state.bridge_client.as_ref().ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Bridge is not enabled. Set [bridge] enabled = true in synapse.toml".into(),
+        )
+    })?;
 
     client
         .connect()
@@ -151,10 +153,12 @@ pub async fn heartbeat(
     State(state): State<AppState>,
     Extension(_tenant_id): Extension<TenantId>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let server = state
-        .bridge_server
-        .as_ref()
-        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Bridge is not enabled".into()))?;
+    let server = state.bridge_server.as_ref().ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Bridge is not enabled. Set [bridge] enabled = true in synapse.toml".into(),
+        )
+    })?;
 
     let loaded_models = state.model_manager.list_loaded(None).await.len() as u32;
     let active_jobs = state.job_manager.running_count().await as u32;

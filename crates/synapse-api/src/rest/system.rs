@@ -27,7 +27,9 @@ pub async fn ready(State(state): State<AppState>) -> (StatusCode, Json<serde_jso
     if backends.is_empty() {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({ "ready": false, "reason": "no backends registered" })),
+            Json(
+                serde_json::json!({ "ready": false, "reason": "no backends registered. Register a backend in [backends] config section" }),
+            ),
         );
     }
 

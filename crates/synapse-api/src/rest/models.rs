@@ -49,7 +49,11 @@ pub async fn get_model(
         db.get_by_name(&id, &tenant_id)
     };
 
-    let model = model.map_err(|_| ApiErrorResponse::not_found("Model", &id))?;
+    let model = model.map_err(|_| {
+        ApiErrorResponse::not_found("Model", &id).with_hint(
+            "Use GET /models to list available models, or pull one with 'synapse pull <model>'",
+        )
+    })?;
 
     Ok(Json(serde_json::json!({
         "id": model.id.to_string(),
@@ -79,7 +83,11 @@ pub async fn delete_model(
         db.get_by_name(&id, &tenant_id)
     };
 
-    let model = model.map_err(|_| ApiErrorResponse::not_found("Model", &id))?;
+    let model = model.map_err(|_| {
+        ApiErrorResponse::not_found("Model", &id).with_hint(
+            "Use GET /models to list available models, or pull one with 'synapse pull <model>'",
+        )
+    })?;
 
     // Delete from database first — if this fails, filesystem stays consistent.
     // Reversing the order (FS first, then DB) risks orphaned DB records pointing

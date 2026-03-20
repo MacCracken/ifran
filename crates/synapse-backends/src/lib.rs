@@ -60,4 +60,4 @@ pub mod xdna;
 
 // Re-exports for convenience.
 pub use router::BackendRouter;
-pub use traits::{InferenceBackend, ModelHandle};
+pub use traits::{InferenceBackend, ModelHandle, hash_text_to_embedding};

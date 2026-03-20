@@ -59,7 +59,10 @@ pub async fn create_job(
         .job_manager
         .create_job(req.config, tenant_id.clone())
         .await
-        .map_err(|e| ApiErrorResponse::bad_request("INVALID_CONFIG", e.to_string()))?;
+        .map_err(|e| {
+            ApiErrorResponse::bad_request("INVALID_CONFIG", e.to_string())
+                .with_hint("Check learning_rate > 0, batch_size > 0, epochs > 0")
+        })?;
 
     if req.auto_start {
         if let Err(e) = state.job_manager.start_job(id, &tenant_id).await {
@@ -123,7 +126,10 @@ pub async fn get_job(
         .job_manager
         .get_job(id, &tenant_id)
         .await
-        .map_err(|e| ApiErrorResponse::not_found("Training job", &e.to_string()))?;
+        .map_err(|e| {
+            ApiErrorResponse::not_found("Training job", &e.to_string())
+                .with_hint("Use GET /training/jobs to list all jobs")
+        })?;
     Ok(Json(job_to_response(&job)))
 }
 
@@ -175,7 +181,10 @@ pub async fn stream_job(
         .job_manager
         .get_job(id, &tenant_id)
         .await
-        .map_err(|e| ApiErrorResponse::not_found("Training job", &e.to_string()))?;
+        .map_err(|e| {
+            ApiErrorResponse::not_found("Training job", &e.to_string())
+                .with_hint("Use GET /training/jobs to list all jobs")
+        })?;
 
     let stream = async_stream::stream! {
         loop {
@@ -250,7 +259,10 @@ pub async fn list_checkpoints(
         .job_manager
         .get_job(id, &tenant_id)
         .await
-        .map_err(|e| ApiErrorResponse::not_found("Training job", &e.to_string()))?;
+        .map_err(|e| {
+            ApiErrorResponse::not_found("Training job", &e.to_string())
+                .with_hint("Use GET /training/jobs to list all jobs")
+        })?;
 
     Ok(Json(load_checkpoints(&state, id).await?))
 }
@@ -265,7 +277,10 @@ pub async fn get_metrics(
         .job_manager
         .get_job(id, &tenant_id)
         .await
-        .map_err(|e| ApiErrorResponse::not_found("Training job", &e.to_string()))?;
+        .map_err(|e| {
+            ApiErrorResponse::not_found("Training job", &e.to_string())
+                .with_hint("Use GET /training/jobs to list all jobs")
+        })?;
 
     let checkpoints = load_checkpoints(&state, id).await?;
 

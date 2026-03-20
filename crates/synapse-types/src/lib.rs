@@ -6,6 +6,11 @@ pub mod dataset;
 pub mod bridge {
     tonic::include_proto!("synapse.bridge");
 }
+
+/// Generated protobuf types for the core Synapse gRPC service.
+pub mod synapse_proto {
+    tonic::include_proto!("synapse");
+}
 pub mod distributed;
 pub mod drift;
 pub mod error;

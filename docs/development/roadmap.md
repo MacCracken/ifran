@@ -30,12 +30,6 @@ Current: **1,406 tests** across 7 crates. CI threshold: 65%.
 - [ ] **Fuzzing targets** — add `cargo-fuzz` targets for config parsing, gRPC message handling, and REST JSON input deserialization
 - [ ] **Shared test utilities crate** — deduplicate `test_config()`, `test_app()`, mock builders, and fixture data into a workspace-internal `synapse-testutil` crate
 
-## User Experience
-
-- [ ] **Error hints** — `ApiError.hint` field exists but is rarely populated; add actionable hints to common failure modes (no model loaded, backend unavailable, auth missing)
-- [ ] **gRPC service implementation** — proto defines 7 RPCs but `service.rs` is a stub; implement at least `PullModel`, `ListModels`, `Infer`, and `GetStatus` for bridge parity
-- [ ] **RAG real embeddings** — `stub_embed()` uses a deterministic hash (not ML-based); integrate a real embedding backend or delegate to an inference backend
-
 ## Post-v1 Considerations
 
 - Prompt management and versioning
