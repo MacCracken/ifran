@@ -7,6 +7,14 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 
 ## [2026.3.19]
 
+### Changed
+
+#### Security Hardening (Engineering Backlog)
+- `synapse-api/middleware/rate_limit`: Replaced global `NotKeyed` rate limiter with per-IP keyed limiter backed by `DashMap`; each client IP now gets its own token bucket, preventing one client from starving others
+- `synapse-train/job/manager`: Added TTL-based eviction for terminal jobs — background loop periodically removes completed/failed/cancelled jobs older than configurable `job_eviction_ttl_secs` (default 24h) from both in-memory map and SQLite store
+- `synapse-api/rest/tenants`: `DELETE /admin/tenants/:id` now cancels all in-flight training jobs for the disabled tenant via new `cancel_tenant_jobs()` method
+- `synapse-core/lineage/store`: `get_ancestry()` now accepts `max_depth` parameter (default 10,000 nodes) to prevent OOM on deep/wide DAGs; exposed as `?max_depth=N` query param on `GET /lineage/:id/ancestry`
+
 ### Added
 
 #### Hardware Acceleration Backends

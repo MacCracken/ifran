@@ -157,13 +157,28 @@ impl LineageStore {
         Ok(ids)
     }
 
-    /// Get the full ancestry chain for a node (walk up the graph).
-    pub fn get_ancestry(&self, id: LineageId, tenant_id: &TenantId) -> Result<Vec<LineageNode>> {
+    /// Default maximum ancestry traversal depth.
+    pub const DEFAULT_MAX_ANCESTRY_DEPTH: u32 = 10_000;
+
+    /// Get the ancestry chain for a node (walk up the graph).
+    ///
+    /// `max_depth` limits how many levels to traverse. `None` uses the
+    /// default limit of 10,000 nodes to prevent OOM on deep/wide DAGs.
+    pub fn get_ancestry(
+        &self,
+        id: LineageId,
+        tenant_id: &TenantId,
+        max_depth: Option<u32>,
+    ) -> Result<Vec<LineageNode>> {
+        let limit = max_depth.unwrap_or(Self::DEFAULT_MAX_ANCESTRY_DEPTH) as usize;
         let mut result = Vec::new();
         let mut to_visit = vec![id];
         let mut visited = std::collections::HashSet::new();
 
         while let Some(current) = to_visit.pop() {
+            if visited.len() >= limit {
+                break;
+            }
             if visited.contains(&current) {
                 continue;
             }
@@ -334,7 +349,7 @@ mod tests {
         );
         store.record(&eval, &t).unwrap();
 
-        let ancestry = store.get_ancestry(eval.id, &t).unwrap();
+        let ancestry = store.get_ancestry(eval.id, &t, None).unwrap();
         assert_eq!(ancestry.len(), 3); // eval -> training -> dataset
     }
 
@@ -433,7 +448,7 @@ mod tests {
         let d = make_node(PipelineStage::Evaluation, "D", "d", vec![b.id, c.id]);
         store.record(&d, &t).unwrap();
 
-        let ancestry = store.get_ancestry(d.id, &t).unwrap();
+        let ancestry = store.get_ancestry(d.id, &t, None).unwrap();
         // D, B, C, A — all 4 nodes reachable, each visited once.
         assert_eq!(ancestry.len(), 4);
     }

@@ -129,6 +129,7 @@ mod tests {
                 trainer_image: None,
                 max_concurrent_jobs: 2,
                 checkpoints_dir: tmp.path().join("checkpoints"),
+                job_eviction_ttl_secs: 86400,
             },
             bridge: BridgeConfig {
                 sy_endpoint: None,

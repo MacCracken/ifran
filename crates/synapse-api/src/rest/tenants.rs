@@ -93,7 +93,7 @@ pub async fn list_tenants(
     ))
 }
 
-/// DELETE /admin/tenants/:id — disable a tenant.
+/// DELETE /admin/tenants/:id — disable a tenant and cancel in-flight jobs.
 pub async fn disable_tenant(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -108,6 +108,13 @@ pub async fn disable_tenant(
     store
         .disable_tenant(&tenant_id)
         .map_err(|_| (StatusCode::NOT_FOUND, "Not found".into()))?;
+    // Release the lock before cancelling jobs (may take time)
+    drop(store);
+
+    // Cancel all in-flight training jobs for this tenant
+    if let Err(e) = state.job_manager.cancel_tenant_jobs(&tenant_id).await {
+        tracing::warn!(tenant_id = %tenant_id.0, error = %e, "Failed to cancel some tenant jobs");
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }

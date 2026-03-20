@@ -33,6 +33,8 @@ executor = "docker"
 trainer_image = "ghcr.io/maccracken/synapse-trainer:latest"
 max_concurrent_jobs = 2
 checkpoints_dir = "/var/lib/synapse/checkpoints"
+# TTL (seconds) for completed/failed/cancelled jobs before eviction (0 = never, default: 86400 = 24h)
+# job_eviction_ttl_secs = 86400
 
 [bridge]
 # SecureYeoman bridge (disabled by default)

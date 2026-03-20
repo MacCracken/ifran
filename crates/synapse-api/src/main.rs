@@ -36,6 +36,11 @@ async fn main() {
 
     let state = AppState::new(config).expect("Failed to initialize application state");
 
+    // Start background eviction of terminal training jobs
+    state
+        .job_manager
+        .start_eviction_loop(state.config.training.job_eviction_ttl_secs);
+
     // If bridge is enabled, connect to SY and start heartbeat
     if bridge_enabled {
         if let Some(client) = &state.bridge_client {

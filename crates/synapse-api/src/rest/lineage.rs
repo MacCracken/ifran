@@ -121,11 +121,18 @@ pub async fn get_node(
     Ok(Json(node_to_json(&node)))
 }
 
-/// GET /lineage/:id/ancestry — get full ancestry chain.
+#[derive(Deserialize)]
+pub struct AncestryQuery {
+    /// Maximum traversal depth (default: 10,000).
+    pub max_depth: Option<u32>,
+}
+
+/// GET /lineage/:id/ancestry — get ancestry chain with optional depth limit.
 pub async fn get_ancestry(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<uuid::Uuid>,
+    Query(query): Query<AncestryQuery>,
 ) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
     let store = state.lineage_store.as_ref().ok_or((
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -133,13 +140,15 @@ pub async fn get_ancestry(
     ))?;
 
     let store = store.lock().await;
-    let nodes = store.get_ancestry(id, &tenant_id).map_err(|e| {
-        tracing::error!(error = %e, "internal error");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Internal server error".into(),
-        )
-    })?;
+    let nodes = store
+        .get_ancestry(id, &tenant_id, query.max_depth)
+        .map_err(|e| {
+            tracing::error!(error = %e, "internal error");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal server error".into(),
+            )
+        })?;
 
     Ok(Json(nodes.iter().map(node_to_json).collect()))
 }

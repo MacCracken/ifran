@@ -3,8 +3,10 @@
 use crate::executor::{ExecutorKind, TrainingExecutor};
 use crate::job::status::JobState;
 use crate::job::store::JobStore;
+use chrono::Utc;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use synapse_types::SynapseError;
 use synapse_types::TenantId;
 use synapse_types::error::Result;
@@ -286,6 +288,87 @@ impl JobManager {
     /// Maximum concurrent job limit.
     pub fn max_concurrent(&self) -> usize {
         self.max_concurrent
+    }
+
+    /// Evict terminal jobs (completed/failed/cancelled) older than `ttl`.
+    /// Removes from both in-memory map and persistent store.
+    pub async fn evict_completed(&self, ttl: Duration) -> usize {
+        let cutoff =
+            Utc::now() - chrono::Duration::from_std(ttl).unwrap_or(chrono::Duration::zero());
+        let mut jobs = self.jobs.write().await;
+        let to_evict: Vec<TrainingJobId> = jobs
+            .values()
+            .filter(|j| j.is_terminal())
+            .filter(|j| j.completed_at.is_some_and(|t| t < cutoff))
+            .map(|j| j.id)
+            .collect();
+
+        let count = to_evict.len();
+        for id in &to_evict {
+            jobs.remove(id);
+            if let Some(store) = &self.store {
+                if let Ok(store) = store.lock() {
+                    let _ = store.delete_job(*id);
+                }
+            }
+        }
+
+        if count > 0 {
+            info!(count, "Evicted terminal jobs past TTL");
+        }
+        count
+    }
+
+    /// Start a background loop that periodically evicts terminal jobs.
+    /// `ttl_secs == 0` means eviction is disabled.
+    pub fn start_eviction_loop(self: &Arc<Self>, ttl_secs: u64) {
+        if ttl_secs == 0 {
+            return;
+        }
+        let manager = Arc::clone(self);
+        let ttl = Duration::from_secs(ttl_secs);
+        // Run eviction every hour or every TTL, whichever is shorter.
+        let interval = Duration::from_secs(ttl_secs.min(3600));
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval);
+            ticker.tick().await; // first tick is immediate, skip it
+            loop {
+                ticker.tick().await;
+                manager.evict_completed(ttl).await;
+            }
+        });
+    }
+
+    /// Cancel all non-terminal jobs belonging to a tenant.
+    /// Used when a tenant is disabled.
+    pub async fn cancel_tenant_jobs(&self, tenant_id: &TenantId) -> Result<usize> {
+        // Collect cancellable job IDs first (read lock).
+        let ids: Vec<TrainingJobId> = {
+            let jobs = self.jobs.read().await;
+            jobs.values()
+                .filter(|j| &j.tenant_id == tenant_id && !j.is_terminal())
+                .map(|j| j.id)
+                .collect()
+        };
+
+        let mut cancelled = 0;
+        for id in &ids {
+            // Best-effort: executor cancel may fail if the job finished in between.
+            let _ = self.executor.cancel(*id).await;
+            let mut jobs = self.jobs.write().await;
+            if let Some(state) = jobs.get_mut(id) {
+                if !state.is_terminal() {
+                    state.cancel();
+                    self.persist(state);
+                    cancelled += 1;
+                }
+            }
+        }
+
+        if cancelled > 0 {
+            info!(tenant_id = %tenant_id.0, cancelled, "Cancelled in-flight jobs for disabled tenant");
+        }
+        Ok(cancelled)
     }
 }
 

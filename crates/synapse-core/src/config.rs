@@ -43,6 +43,14 @@ pub struct TrainingConfig {
     pub trainer_image: Option<String>,
     pub max_concurrent_jobs: u32,
     pub checkpoints_dir: PathBuf,
+    /// TTL in seconds for completed/failed/cancelled jobs before eviction
+    /// from memory and the persistent store. 0 = never evict (default: 86400 = 24h).
+    #[serde(default = "default_job_eviction_ttl_secs")]
+    pub job_eviction_ttl_secs: u64,
+}
+
+fn default_job_eviction_ttl_secs() -> u64 {
+    86400 // 24 hours
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -216,6 +224,7 @@ impl Default for SynapseConfig {
                 trainer_image: Some("ghcr.io/maccracken/synapse-trainer:latest".into()),
                 max_concurrent_jobs: 2,
                 checkpoints_dir: synapse_dir.join("checkpoints"),
+                job_eviction_ttl_secs: 86400,
             },
             bridge: BridgeConfig {
                 sy_endpoint: None,

@@ -80,6 +80,8 @@ impl AppState {
                 config.training.max_concurrent_jobs as usize,
             ),
         };
+        let job_manager = Arc::new(job_manager);
+
         let eval_runner = EvalRunner::new();
         let marketplace_db_path = config.storage.database.with_file_name("marketplace.db");
         let marketplace_catalog = MarketplaceCatalog::open(&marketplace_db_path)?;
@@ -174,7 +176,7 @@ impl AppState {
             db: Arc::new(Mutex::new(db)),
             backends: Arc::new(backends),
             model_manager: Arc::new(model_manager),
-            job_manager: Arc::new(job_manager),
+            job_manager,
             eval_runner: Arc::new(eval_runner),
             marketplace_catalog: Arc::new(Mutex::new(marketplace_catalog)),
             auto_labeler: Arc::new(auto_labeler),
@@ -221,6 +223,7 @@ mod tests {
                 trainer_image: None,
                 max_concurrent_jobs: 2,
                 checkpoints_dir: tmp.path().join("checkpoints"),
+                job_eviction_ttl_secs: 86400,
             },
             bridge: BridgeConfig {
                 sy_endpoint: None,

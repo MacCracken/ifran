@@ -12,10 +12,10 @@ Current: **1,290 tests** across 7 crates. CI threshold: 65%.
 
 Hardening and operational improvements identified during security audit.
 
-- [ ] **Per-IP rate limiting** — current rate limiter is global (`NotKeyed`); replace with per-IP keyed limiter using `DashMap`-backed state to prevent one client starving others
-- [ ] **Job memory eviction** — `JobManager` keeps all jobs (including terminal) in memory forever; add TTL-based eviction for completed/failed/cancelled jobs (e.g., 24h retention)
-- [ ] **Disabled tenant in-flight cancellation** — when a tenant is disabled, cancel their running training jobs; currently in-flight jobs run to completion
-- [ ] **Lineage ancestry depth limit** — `get_ancestry()` traverses the full graph unboundedly; add configurable max depth (e.g., 10,000 nodes) to prevent OOM on deep/wide DAGs
+- [x] **Per-IP rate limiting** — replaced global `NotKeyed` limiter with per-IP `DashMap`-backed buckets; IP extracted from `ConnectInfo<SocketAddr>`
+- [x] **Job memory eviction** — background eviction loop removes terminal jobs after configurable TTL (`job_eviction_ttl_secs`, default 24h); cleans both in-memory map and SQLite store
+- [x] **Disabled tenant in-flight cancellation** — `disable_tenant` now calls `cancel_tenant_jobs()` to cancel all non-terminal jobs for the tenant
+- [x] **Lineage ancestry depth limit** — `get_ancestry()` accepts `max_depth` (default 10,000 nodes); exposed as `?max_depth=` query param on `GET /lineage/:id/ancestry`
 
 ## Post-v1 Considerations
 
