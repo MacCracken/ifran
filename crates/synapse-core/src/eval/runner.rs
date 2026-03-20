@@ -9,6 +9,9 @@ use synapse_types::SynapseError;
 use synapse_types::error::Result;
 use synapse_types::eval::*;
 
+/// Maximum number of `EvalResult`s kept per run before oldest entries are pruned.
+const MAX_RESULTS_BUFFER: usize = 10_000;
+
 /// Tracks active and completed eval runs.
 pub struct EvalRunner {
     runs: Arc<RwLock<HashMap<EvalRunId, EvalRunState>>>,
@@ -88,6 +91,15 @@ impl EvalRunner {
         let state = runs
             .get_mut(&run_id)
             .ok_or_else(|| SynapseError::EvalError(format!("Eval run {run_id} not found")))?;
+        if state.results.len() >= MAX_RESULTS_BUFFER {
+            tracing::warn!(
+                run_id = %run_id,
+                "Eval result buffer full ({MAX_RESULTS_BUFFER}), dropping oldest results"
+            );
+            // Keep the most recent half
+            let drain_count = MAX_RESULTS_BUFFER / 2;
+            state.results.drain(..drain_count);
+        }
         state.results.push(result);
         Ok(())
     }

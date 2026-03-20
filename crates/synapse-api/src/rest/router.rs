@@ -36,6 +36,7 @@ pub fn build(state: AppState) -> Router {
     Router::new()
         // System
         .route("/health", get(system::health))
+        .route("/ready", get(system::ready))
         .route("/system/status", get(system::status))
         // Models
         .route("/models", get(models::list_models))

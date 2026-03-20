@@ -82,7 +82,7 @@ pub async fn inference(
             "completion_tokens": resp.usage.completion_tokens,
             "total_tokens": resp.usage.total_tokens,
         },
-        "finish_reason": format!("{:?}", resp.finish_reason).to_lowercase(),
+        "finish_reason": serde_json::to_value(resp.finish_reason).unwrap_or(serde_json::Value::Null),
     })))
 }
 
@@ -143,7 +143,7 @@ pub async fn inference_stream(
         }
     };
 
-    Ok(Sse::new(stream))
+    Ok(Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default()))
 }
 
 #[cfg(test)]

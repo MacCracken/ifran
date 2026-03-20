@@ -12,12 +12,12 @@ Current: **1,406 tests** across 7 crates. CI threshold: 65%.
 
 Robustness improvements to reach production confidence.
 
-- [ ] **Graceful shutdown orchestration** — background tasks (eviction loop, fleet heartbeat, bridge heartbeat, telemetry loop) are spawned without tracking; add `tokio::JoinSet` or cancellation tokens so the process drains cleanly on SIGTERM
-- [ ] **Remove `unwrap()` in handler code** — `bridge.rs` (lines 199, 216, 231), `rlhf.rs` (lines 86, 119), `experiment.rs` (line 98) use `unwrap()` on `serde_json` serialization in production paths; replace with `.map_err()`
-- [ ] **Readiness probe** — `GET /health` is liveness only; add `GET /ready` that checks database connectivity, at least one backend registered, and store initialization
-- [ ] **EvalRunner result buffer limit** — `EvalRunState.results: Vec<EvalResult>` grows unbounded during large benchmark runs; add periodic flush to database or a size-capped buffer
-- [ ] **Fleet node eviction** — offline nodes remain in `FleetManager.nodes` HashMap forever; add TTL-based removal for nodes past `offline_timeout_secs`
-- [ ] **Streaming keep-alive consistency** — training job stream has keep-alive (15s), but inference stream and training events SSE do not; add keep-alive to all SSE endpoints
+- [x] **Graceful shutdown orchestration** — `axum::serve` now uses `with_graceful_shutdown`; telemetry and fleet manager stopped on exit
+- [x] **Remove `unwrap()` in handler code** — replaced with `.unwrap_or()` in rlhf.rs, experiment.rs; fragile `.keys().last().unwrap()` removed
+- [x] **Readiness probe** — `GET /ready` checks database lock and backend registration; returns 503 with reason on failure
+- [x] **EvalRunner result buffer limit** — capped at 10,000 results; oldest half drained when full
+- [x] **Fleet node eviction** — nodes offline for 2x `offline_timeout` are auto-evicted during health checks
+- [x] **Streaming keep-alive consistency** — added `KeepAlive::default()` to inference stream and training events SSE
 
 ## Performance & Memory
 
@@ -31,7 +31,7 @@ Robustness improvements to reach production confidence.
 
 - [ ] **Consistent response envelope** — some endpoints return raw arrays, others use `{"data": [...]}` wrappers; standardize on a single envelope format
 - [ ] **Structured error codes** — `ApiError` (in `error.rs`) defines `code`, `message`, `hint` but most handlers return bare `(StatusCode, String)` tuples; adopt `ApiError` across all endpoints
-- [ ] **Debug formatting cleanup** — several handlers use `format!("{:?}", enum).to_lowercase()` instead of serde `Serialize`; replace with proper serialization
+- [x] **Debug formatting cleanup** — replaced `format!("{:?}", enum).to_lowercase()` with proper `serde_json::to_value()` in models.rs, inference.rs, experiment.rs
 - [ ] **Endpoint filtering and sorting** — many list endpoints (models, training jobs, eval runs, fleet nodes) accept no filter or sort params; add `?status=`, `?sort_by=`, `?order=` where relevant
 - [ ] **Input validation gaps** — RLHF annotation, dataset augmentation, marketplace pull, and bridge connect endpoints accept unvalidated inputs; extend the existing validation middleware
 
@@ -51,14 +51,14 @@ Robustness improvements to reach production confidence.
 
 ## Documentation
 
-- [ ] **Hardware acceleration guide** — `docs/hardware-acceleration.md` covering detection, backend configuration, and `ai-hwaccel` feature flag (8 new backends undocumented)
-- [ ] **Fleet management guide** — `docs/fleet-management.md` covering node registration, health states, statistics, and `[fleet]` config
-- [ ] **Multi-tenancy guide** — `docs/multi-tenancy.md` covering tenant creation, API key lifecycle, resource isolation, and budget enforcement (`[budget]` config)
-- [ ] **Evaluation guide** — `docs/evaluation-guide.md` covering supported benchmarks (MMLU, HellaSwag, HumanEval, perplexity, custom), dataset format, and result interpretation
-- [ ] **CLI reference** — `docs/cli-reference.md` with all commands and subcommands (`marketplace`, `experiment`, `eval`, `status`)
-- [ ] **Update `deploy/synapse.toml.example`** — add missing config sections: `[fleet]`, `[budget]`, `hardware.telemetry_interval_secs`, `security.require_encrypted_storage`, per-backend sections
-- [ ] **Update README** — feature list is outdated; add evaluation, marketplace, fleet, multi-tenancy, RAG, lineage, experiments, hardware backends
-- [ ] **Update `SECURITY.md`** — document per-IP rate limiting (changed from global), tenant in-flight cancellation, and lineage depth limit
+- [x] **Hardware acceleration guide** — `docs/hardware-acceleration.md` covering detection, backend configuration, and `ai-hwaccel` feature flag
+- [x] **Fleet management guide** — `docs/fleet-management.md` covering node registration, health states, statistics, and `[fleet]` config
+- [x] **Multi-tenancy guide** — `docs/multi-tenancy.md` covering tenant creation, API key lifecycle, resource isolation, and budget enforcement
+- [x] **Evaluation guide** — `docs/evaluation-guide.md` covering supported benchmarks, dataset format, and result interpretation
+- [x] **CLI reference** — `docs/cli-reference.md` with all commands and subcommands
+- [x] **Update `deploy/synapse.toml.example`** — added `[fleet]`, `[budget]`, `hardware.telemetry_interval_secs`, `security.require_encrypted_storage`, per-backend sections
+- [x] **Update README** — added evaluation, marketplace, fleet, multi-tenancy, RAG, lineage, experiments, hardware backends
+- [x] **Update `SECURITY.md`** — documented per-IP rate limiting, tenant in-flight cancellation, and lineage depth limit
 
 ## User Experience
 

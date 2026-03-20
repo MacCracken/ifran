@@ -144,6 +144,7 @@ async fn main() {
         );
     }
 
+    let state_for_cleanup = state.clone();
     let app = synapse_api::router::build(state);
 
     tracing::info!("Starting synapse-server on {bind_addr}");
@@ -152,5 +153,22 @@ async fn main() {
         .await
         .expect("Failed to bind address");
 
-    axum::serve(listener, app).await.expect("Server error");
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .expect("Server error");
+
+    // Cleanup
+    if let Some(tl) = &state_for_cleanup.telemetry {
+        tl.stop();
+    }
+    state_for_cleanup.fleet_manager.stop();
+    tracing::info!("Shutdown complete");
+}
+
+async fn shutdown_signal() {
+    tokio::signal::ctrl_c()
+        .await
+        .expect("Failed to install Ctrl+C handler");
+    tracing::info!("Shutdown signal received, draining connections...");
 }

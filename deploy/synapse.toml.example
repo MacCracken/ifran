@@ -16,7 +16,7 @@ cache_dir = "/var/lib/synapse/cache"
 
 [backends]
 default = "llamacpp"
-enabled = ["llamacpp", "candle", "ollama", "vllm", "gguf", "onnx", "tensorrt"]
+enabled = ["llamacpp", "candle", "ollama", "vllm", "gguf", "onnx", "tensorrt", "tpu", "gaudi", "inferentia", "oneapi", "qualcomm", "metal", "vulkan", "xdna"]
 
 # Backend-specific configuration (optional)
 # [backends.ollama]
@@ -27,6 +27,12 @@ enabled = ["llamacpp", "candle", "ollama", "vllm", "gguf", "onnx", "tensorrt"]
 #
 # [backends.tensorrt]
 # endpoint = "http://localhost:8000"
+#
+# [backends.tpu]
+# endpoint = "http://localhost:8001"
+#
+# [backends.gaudi]
+# endpoint = "http://localhost:8004"
 
 [training]
 executor = "docker"
@@ -45,6 +51,8 @@ heartbeat_interval_secs = 10
 [hardware]
 # Reserve VRAM (MB) for system use when loading models
 gpu_memory_reserve_mb = 512
+# GPU telemetry polling interval in seconds (0 = disabled)
+# telemetry_interval_secs = 10
 
 [security]
 # Require SYNAPSE_API_KEY to be set (recommended for production)
@@ -53,7 +61,7 @@ auth_required = true
 max_body_size_bytes = 10485760
 # Max prompt length in characters
 max_prompt_length = 100000
-# Rate limiting: requests per second / burst
+# Per-IP rate limiting: requests per second / burst
 rate_limit_per_second = 60
 rate_limit_burst = 120
 # CORS: restrict to specific origins in production
@@ -61,3 +69,22 @@ rate_limit_burst = 120
 # Multi-tenant mode: per-tenant API keys and resource isolation
 # Requires SYNAPSE_ADMIN_KEY for tenant management via /admin/tenants
 # multi_tenant = false
+# Require model storage on an encrypted volume
+# require_encrypted_storage = false
+
+[fleet]
+# Fleet management for multi-node deployments (disabled by default)
+# enabled = false
+# Seconds without heartbeat before a node becomes Suspect
+# suspect_timeout_secs = 30
+# Seconds without heartbeat before a node becomes Offline
+# offline_timeout_secs = 90
+# Seconds between periodic health checks
+# health_check_interval_secs = 15
+
+[budget]
+# GPU budget enforcement via Hoosh accounting (disabled by default)
+# enabled = false
+# hoosh_endpoint = "http://127.0.0.1:9401"
+# Maximum GPU-hours per tenant per day (0 = unlimited)
+# max_gpu_hours_per_day = 0

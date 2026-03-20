@@ -53,7 +53,10 @@ fn trial_to_response(t: &TrialResult) -> TrialResponse {
     TrialResponse {
         trial_id: t.trial_id.to_string(),
         trial_number: t.trial_number,
-        status: format!("{:?}", t.status).to_lowercase(),
+        status: serde_json::to_string(&t.status)
+            .unwrap_or_else(|_| "unknown".into())
+            .trim_matches('"')
+            .to_string(),
         train_loss: t.train_loss,
         eval_score: t.eval_score,
         duration_secs: t.duration_secs,
@@ -82,20 +85,8 @@ pub async fn create_experiment(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // Store the handle for later stop
-    state
-        .experiment_runners
-        .lock()
-        .await
-        .insert(handle.experiment_id, handle);
-
-    let id = state
-        .experiment_runners
-        .lock()
-        .await
-        .keys()
-        .last()
-        .copied()
-        .unwrap();
+    let id = handle.experiment_id;
+    state.experiment_runners.lock().await.insert(id, handle);
 
     Ok((
         StatusCode::CREATED,

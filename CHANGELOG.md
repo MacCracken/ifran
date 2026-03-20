@@ -15,6 +15,17 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - `synapse-api/rest/tenants`: `DELETE /admin/tenants/:id` now cancels all in-flight training jobs for the disabled tenant via new `cancel_tenant_jobs()` method
 - `synapse-core/lineage/store`: `get_ancestry()` now accepts `max_depth` parameter (default 10,000 nodes) to prevent OOM on deep/wide DAGs; exposed as `?max_depth=N` query param on `GET /lineage/:id/ancestry`
 
+#### Reliability & Hardening
+- `synapse-api/main`: Graceful shutdown via `with_graceful_shutdown()`; telemetry and fleet manager cleaned up on exit
+- `synapse-api/rest/rlhf,experiment`: Removed `unwrap()` calls in production handler paths; replaced with safe fallbacks
+- `synapse-api/rest/system`: Added `GET /ready` readiness probe — checks database accessibility and backend registration
+- `synapse-core/eval/runner`: `EvalRunState.results` capped at 10,000 entries; oldest half drained when full
+- `synapse-core/fleet/manager`: Offline nodes auto-evicted after 2× `offline_timeout` during health checks
+- `synapse-api/rest/inference,system`: Added SSE keep-alive to inference stream and training events endpoints
+
+#### API Quality
+- `synapse-api/rest/models,inference,experiment`: Replaced `format!("{:?}", enum).to_lowercase()` with proper `serde_json::to_value()` serialization for consistent enum rendering
+
 ### Added
 
 #### Hardware Acceleration Backends

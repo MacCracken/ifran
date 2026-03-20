@@ -231,6 +231,52 @@ impl FleetManager {
                 node.health = NodeHealth::Suspect;
             }
         }
+
+        // Evict nodes that have been offline for too long (2x offline_timeout)
+        let eviction_threshold = offline_timeout * 2;
+        let before = nodes.len();
+        nodes.retain(|id, node| {
+            let elapsed = now
+                .signed_duration_since(node.last_heartbeat)
+                .to_std()
+                .unwrap_or(Duration::MAX);
+            if elapsed >= eviction_threshold {
+                tracing::info!(node_id = %id, elapsed_secs = elapsed.as_secs(), "evicting offline node from fleet");
+                false
+            } else {
+                true
+            }
+        });
+        let evicted = before - nodes.len();
+        if evicted > 0 {
+            tracing::info!(count = evicted, "evicted offline nodes from fleet");
+        }
+    }
+
+    /// Evict nodes that have been offline longer than `2 * offline_timeout`.
+    /// Returns the number of evicted nodes.
+    pub async fn evict_offline(&self) -> usize {
+        let now = Utc::now();
+        let eviction_threshold = self.offline_timeout * 2;
+        let mut nodes = self.nodes.write().await;
+        let before = nodes.len();
+        nodes.retain(|id, node| {
+            let elapsed = now
+                .signed_duration_since(node.last_heartbeat)
+                .to_std()
+                .unwrap_or(Duration::MAX);
+            if elapsed >= eviction_threshold {
+                tracing::info!(node_id = %id, elapsed_secs = elapsed.as_secs(), "evicting offline node from fleet");
+                false
+            } else {
+                true
+            }
+        });
+        let evicted = before - nodes.len();
+        if evicted > 0 {
+            tracing::info!(count = evicted, "evicted offline nodes from fleet");
+        }
+        evicted
     }
 
     /// List all registered nodes.

@@ -7,8 +7,17 @@ LLM controller for pulling, managing, and training language models. A self-conta
 Synapse is a Rust-based tool that provides:
 
 - **Model pulling** from HuggingFace with resume, integrity verification, and catalog tracking
-- **Inference** through 7 pluggable backends (llama.cpp, Candle, Ollama, vLLM, GGUF, ONNX, TensorRT)
-- **Training** orchestration (LoRA, QLoRA, full fine-tune, DPO, RLHF, distillation)
+- **Inference** through 15 pluggable backends (llama.cpp, Candle, Ollama, vLLM, GGUF, ONNX, TensorRT, TPU, Gaudi, Inferentia, OneAPI, Qualcomm AI 100, Metal, Vulkan, AMD XDNA)
+- **Hardware acceleration** with auto-detection for CUDA, ROCm, Metal, Vulkan, TPU, Gaudi, Inferentia, OneAPI, Qualcomm AI, and AMD XDNA
+- **Training** orchestration (LoRA, QLoRA, full fine-tune, DPO, RLHF, distillation) with distributed training support
+- **Evaluation** benchmarking (MMLU, HellaSwag, HumanEval, perplexity, custom)
+- **Experiments** — autonomous hyperparameter sweeps with grid/random/Bayesian search
+- **Fleet management** for multi-node deployments with health monitoring
+- **Multi-tenancy** with per-tenant API keys, resource isolation, and GPU budget enforcement
+- **Marketplace** for model publishing, discovery, and peer-to-peer sharing
+- **RAG pipelines** for document ingestion and retrieval-augmented generation
+- **RLHF annotation** sessions with DPO export
+- **Lineage tracking** for full pipeline provenance (dataset → training → evaluation → deployment)
 - **OpenAI-compatible API** for drop-in replacement (`/v1/chat/completions`)
 - **Desktop app** via Tauri v2 + SvelteKit
 - **Bidirectional integration** with SecureYeoman orchestrator
@@ -96,8 +105,13 @@ crates/
 
 - [Architecture](docs/architecture.md)
 - [Inference Backends](docs/backends.md)
+- [Hardware Acceleration](docs/hardware-acceleration.md)
 - [Training](docs/training.md)
+- [Evaluation Guide](docs/evaluation-guide.md)
+- [Fleet Management](docs/fleet-management.md)
+- [Multi-Tenancy](docs/multi-tenancy.md)
 - [API Reference](docs/api-reference.md)
+- [CLI Reference](docs/cli-reference.md)
 - [SY Bridge Protocol](docs/bridge-protocol.md)
 - [Getting Started](docs/guides/getting-started.md)
 - [Training Guide](docs/guides/training-guide.md)
@@ -112,7 +126,7 @@ crates/
 
 ## Testing
 
-132 tests across all modules (~45% coverage). CI runs per-package test matrix with coverage via cargo-tarpaulin.
+1,406 tests across 7 crates (~73% coverage). CI runs per-package test matrix with coverage via cargo-tarpaulin.
 
 ```bash
 cargo test --workspace

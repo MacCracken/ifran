@@ -83,7 +83,7 @@ pub async fn list_sessions(
                 "id": sess.id.to_string(),
                 "name": sess.name,
                 "model_name": sess.model_name,
-                "status": serde_json::to_value(sess.status).unwrap(),
+                "status": serde_json::to_value(sess.status).unwrap_or(serde_json::Value::Null),
                 "created_at": sess.created_at.to_rfc3339(),
             })
         })
@@ -116,7 +116,7 @@ pub async fn get_session(
         "id": session.id.to_string(),
         "name": session.name,
         "model_name": session.model_name,
-        "status": serde_json::to_value(session.status).unwrap(),
+        "status": serde_json::to_value(session.status).unwrap_or(serde_json::Value::Null),
         "created_at": session.created_at.to_rfc3339(),
         "stats": {
             "total_pairs": stats.total_pairs,
@@ -241,7 +241,7 @@ pub async fn export_session(
                     "prompt": p.prompt,
                     "chosen": chosen,
                     "rejected": rejected,
-                    "preference": serde_json::to_value(pref).unwrap(),
+                    "preference": serde_json::to_value(pref).unwrap_or(serde_json::Value::Null),
                 })
             })
         })

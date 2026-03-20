@@ -32,10 +32,12 @@ Synapse supports Bearer token authentication via the `SYNAPSE_API_KEY` environme
 
 ### Rate Limiting
 
-The API enforces global rate limiting via the `governor` crate:
+The API enforces **per-IP** rate limiting via the `governor` crate backed by `DashMap`:
 
-- Default: 60 requests/second with burst of 120
+- Each client IP address gets its own token bucket
+- Default: 60 requests/second per IP with burst of 120
 - Returns HTTP 429 Too Many Requests when exceeded
+- One client exhausting its limit does not affect other clients
 - Configure via `[security]` in `synapse.toml`:
   ```toml
   [security]
@@ -90,3 +92,18 @@ The provided `synapse.service` unit includes security hardening:
 - Docker-based training runs in isolated containers
 - GPU passthrough is limited to specific device nodes
 - Training configurations are validated before execution
+- Terminal jobs (completed/failed/cancelled) are evicted from memory after a configurable TTL (default 24h)
+
+### Multi-Tenancy
+
+When `multi_tenant = true`:
+
+- Each tenant gets a unique API key (shown once at creation, stored as Argon2 hash)
+- Disabled tenants receive HTTP 403 on all requests
+- Disabling a tenant automatically cancels all in-flight training jobs
+- All resources (models, jobs, lineage, eval runs) are scoped by tenant ID
+
+### Lineage Graph Safety
+
+- `GET /lineage/:id/ancestry` enforces a configurable max traversal depth (default 10,000 nodes) to prevent OOM on deep or wide DAGs
+- Override per-request with `?max_depth=N`

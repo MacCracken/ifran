@@ -3,11 +3,35 @@
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::State;
+use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 
 /// GET /health — simple liveness probe.
 pub async fn health() -> &'static str {
     "ok"
+}
+
+/// GET /ready — readiness probe checking database and backend availability.
+pub async fn ready(State(state): State<AppState>) -> (StatusCode, Json<serde_json::Value>) {
+    // Check database accessibility
+    let db_ok = state.db.try_lock().is_ok();
+    if !db_ok {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "ready": false, "reason": "database unavailable" })),
+        );
+    }
+
+    // Check at least one backend is registered
+    let backends = state.backends.list_backends();
+    if backends.is_empty() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "ready": false, "reason": "no backends registered" })),
+        );
+    }
+
+    (StatusCode::OK, Json(serde_json::json!({ "ready": true })))
 }
 
 /// GET /system/status — detailed system information.
@@ -81,7 +105,7 @@ pub async fn training_events(
         }
     };
 
-    Sse::new(stream)
+    Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default())
 }
 
 /// GET /models/discover — discover models from local inference servers.
