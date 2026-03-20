@@ -1,10 +1,12 @@
 //! REST handlers for experiment management.
 
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use serde::{Deserialize, Serialize};
 use synapse_types::experiment::{ExperimentId, ExperimentProgram, ExperimentStatus, TrialResult};
+
+use super::pagination::{PaginatedResponse, PaginationQuery};
 
 use synapse_types::TenantId;
 
@@ -41,7 +43,7 @@ pub struct CreateExperimentRequest {
 }
 
 /// Response for experiment list.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ExperimentListItem {
     pub id: ExperimentId,
     pub name: String,
@@ -94,11 +96,21 @@ pub async fn create_experiment(
     ))
 }
 
+/// Query parameters for listing experiments.
+#[derive(Debug, Deserialize)]
+pub struct ListExperimentsQuery {
+    #[serde(flatten)]
+    pub page: PaginationQuery,
+    /// Optional status filter, e.g. `?status=running`.
+    pub status: Option<ExperimentStatus>,
+}
+
 /// GET /experiments — list all experiments.
 pub async fn list_experiments(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
-) -> Result<Json<Vec<ExperimentListItem>>, (StatusCode, String)> {
+    Query(query): Query<ListExperimentsQuery>,
+) -> Result<Json<PaginatedResponse<ExperimentListItem>>, (StatusCode, String)> {
     let store = state.experiment_store.as_ref().ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
         "Experiment store not initialized".into(),
@@ -109,17 +121,22 @@ pub async fn list_experiments(
         .list_experiments(&tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok(Json(
-        experiments
-            .into_iter()
-            .map(|(id, name, status, best_score)| ExperimentListItem {
-                id,
-                name,
-                status,
-                best_score,
-            })
-            .collect(),
-    ))
+    let items: Vec<ExperimentListItem> = experiments
+        .into_iter()
+        .filter(|(_, _, status, _)| query.status.is_none() || Some(*status) == query.status)
+        .map(|(id, name, status, best_score)| ExperimentListItem {
+            id,
+            name,
+            status,
+            best_score,
+        })
+        .collect();
+
+    Ok(Json(PaginatedResponse::from_slice(
+        &items,
+        &query.page,
+        |item| item.clone(),
+    )))
 }
 
 /// GET /experiments/{id} — get experiment detail with trials.

@@ -16,11 +16,6 @@ Current: **1,406 tests** across 7 crates. CI threshold: 65%.
 - [ ] **SQLite connection pooling** — each store holds a single `Connection` behind a Mutex; evaluate `r2d2-sqlite` for higher throughput under concurrent load
 - [ ] **Rate limiter IP eviction** — per-IP `DashMap` grows indefinitely; add periodic sweep of stale entries (e.g. no requests in 10 minutes)
 
-## API Quality
-
-- [ ] **Consistent response envelope** — some endpoints return raw arrays, others use `{"data": [...]}` wrappers; standardize on a single envelope format
-- [ ] **Endpoint filtering and sorting** — many list endpoints (models, training jobs, eval runs, fleet nodes) accept no filter or sort params; add `?status=`, `?sort_by=`, `?order=` where relevant
-
 ## Observability
 
 - [ ] **Request / correlation ID** — inject a unique ID per request (from header or generated), propagate through tracing spans, return in response headers for distributed tracing

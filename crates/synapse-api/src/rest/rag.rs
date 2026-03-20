@@ -1,6 +1,6 @@
 //! REST handlers for RAG pipeline management.
 
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use serde::Deserialize;
@@ -8,6 +8,7 @@ use synapse_types::rag::{RagPipelineConfig, RagPipelineId, RagQuery, RagSource};
 
 use synapse_types::TenantId;
 
+use super::pagination::{PaginatedResponse, PaginationQuery};
 use crate::middleware::validation::validate_filename;
 use crate::state::AppState;
 
@@ -61,7 +62,8 @@ pub async fn create_pipeline(
 pub async fn list_pipelines(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    Query(page): Query<PaginationQuery>,
+) -> Result<Json<PaginatedResponse<serde_json::Value>>, (StatusCode, String)> {
     let store = state.rag_store.as_ref().ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
         "RAG store not initialized".into(),
@@ -84,7 +86,9 @@ pub async fn list_pipelines(
         })
         .collect();
 
-    Ok(Json(serde_json::json!({ "data": data })))
+    Ok(Json(PaginatedResponse::from_slice(&data, &page, |item| {
+        item.clone()
+    })))
 }
 
 /// GET /rag/pipelines/{id}

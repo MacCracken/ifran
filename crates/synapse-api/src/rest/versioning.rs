@@ -8,6 +8,8 @@ use serde::Deserialize;
 use synapse_types::TenantId;
 use synapse_types::versioning::ModelVersion;
 
+use super::pagination::{PaginatedResponse, PaginationQuery};
+
 #[derive(Deserialize)]
 pub struct CreateVersionRequest {
     pub model_family: String,
@@ -22,14 +24,8 @@ pub struct CreateVersionRequest {
 #[derive(Deserialize)]
 pub struct FamilyQuery {
     pub family: Option<String>,
-    #[serde(default = "default_limit")]
-    pub limit: u32,
-    #[serde(default)]
-    pub offset: u32,
-}
-
-fn default_limit() -> u32 {
-    100
+    #[serde(flatten)]
+    pub page: PaginationQuery,
 }
 
 /// POST /versions -- create a new model version.
@@ -79,17 +75,18 @@ pub async fn list_versions(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
     Query(query): Query<FamilyQuery>,
-) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
+) -> Result<Json<PaginatedResponse<serde_json::Value>>, (StatusCode, String)> {
     let store = state.version_store.as_ref().ok_or((
         StatusCode::INTERNAL_SERVER_ERROR,
         "Version store not initialized".into(),
     ))?;
 
+    let page = &query.page;
+    let safe_limit = page.safe_limit();
     let store = store.lock().await;
-    let safe_limit = query.limit.min(1000);
     let versions = match query.family {
-        Some(ref f) => store.list_by_family(f, &tenant_id, safe_limit, query.offset),
-        None => store.list(&tenant_id, safe_limit, query.offset),
+        Some(ref f) => store.list_by_family(f, &tenant_id, safe_limit, page.offset),
+        None => store.list(&tenant_id, safe_limit, page.offset),
     }
     .map_err(|e| {
         tracing::error!(error = %e, "internal error");
@@ -99,7 +96,14 @@ pub async fn list_versions(
         )
     })?;
 
-    Ok(Json(versions.iter().map(version_to_json).collect()))
+    let data: Vec<serde_json::Value> = versions.iter().map(version_to_json).collect();
+    let total = data.len();
+    Ok(Json(PaginatedResponse::pre_sliced(
+        data,
+        total,
+        safe_limit,
+        page.offset,
+    )))
 }
 
 /// GET /versions/:id -- get a specific version.

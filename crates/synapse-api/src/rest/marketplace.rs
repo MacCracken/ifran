@@ -9,10 +9,11 @@ use synapse_types::TenantId;
 use synapse_types::marketplace::{MarketplaceEntry, MarketplaceQuery};
 use synapse_types::model::ModelFormat;
 
+use super::pagination::{PaginatedResponse, PaginationQuery};
 use crate::state::AppState;
 
 /// Response for a marketplace entry.
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct MarketplaceEntryResponse {
     pub model_name: String,
     pub description: Option<String>,
@@ -31,6 +32,8 @@ pub struct SearchQuery {
     pub q: Option<String>,
     pub format: Option<ModelFormat>,
     pub max_size: Option<u64>,
+    #[serde(flatten)]
+    pub page: PaginationQuery,
 }
 
 /// Request to publish a model.
@@ -52,7 +55,8 @@ pub async fn search(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
     Query(params): Query<SearchQuery>,
-) -> Result<Json<Vec<MarketplaceEntryResponse>>, (StatusCode, String)> {
+) -> Result<Json<PaginatedResponse<MarketplaceEntryResponse>>, (StatusCode, String)> {
+    let page = params.page;
     let query = MarketplaceQuery {
         search: params.q,
         format: params.format,
@@ -65,19 +69,26 @@ pub async fn search(
         .search(&query, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok(Json(entries.iter().map(entry_to_response).collect()))
+    let items: Vec<MarketplaceEntryResponse> = entries.iter().map(entry_to_response).collect();
+    Ok(Json(PaginatedResponse::from_slice(&items, &page, |item| {
+        item.clone()
+    })))
 }
 
 /// GET /marketplace/entries — list all marketplace entries.
 pub async fn list_entries(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
-) -> Result<Json<Vec<MarketplaceEntryResponse>>, (StatusCode, String)> {
+    Query(page): Query<PaginationQuery>,
+) -> Result<Json<PaginatedResponse<MarketplaceEntryResponse>>, (StatusCode, String)> {
     let catalog = state.marketplace_catalog.lock().await;
     let entries = catalog
         .list(&tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    Ok(Json(entries.iter().map(entry_to_response).collect()))
+    let items: Vec<MarketplaceEntryResponse> = entries.iter().map(entry_to_response).collect();
+    Ok(Json(PaginatedResponse::from_slice(&items, &page, |item| {
+        item.clone()
+    })))
 }
 
 /// POST /marketplace/publish — publish a local model to the marketplace.
@@ -267,12 +278,20 @@ fn entry_to_response(entry: &MarketplaceEntry) -> MarketplaceEntryResponse {
 
 #[cfg(test)]
 mod tests {
+    use super::super::pagination::DEFAULT_LIMIT;
     use super::*;
     use crate::state::AppState;
     use axum::extract::Extension;
     use synapse_core::config::*;
     use synapse_types::marketplace::MarketplaceEntry;
     use synapse_types::model::{ModelFormat, QuantLevel};
+
+    fn default_page() -> PaginationQuery {
+        PaginationQuery {
+            limit: DEFAULT_LIMIT,
+            offset: 0,
+        }
+    }
 
     fn test_state(tmp: &tempfile::TempDir) -> AppState {
         let config = SynapseConfig {
@@ -413,10 +432,14 @@ mod tests {
     async fn list_entries_empty() {
         let tmp = tempfile::TempDir::new().unwrap();
         let state = test_state(&tmp);
-        let result = list_entries(State(state), Extension(TenantId::default_tenant()))
-            .await
-            .unwrap();
-        assert!(result.0.is_empty());
+        let result = list_entries(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Query(default_page()),
+        )
+        .await
+        .unwrap();
+        assert!(result.0.data.is_empty());
     }
 
     #[tokio::test]
@@ -432,11 +455,15 @@ mod tests {
                 .unwrap();
         }
 
-        let result = list_entries(State(state), Extension(TenantId::default_tenant()))
-            .await
-            .unwrap();
-        assert_eq!(result.0.len(), 1);
-        assert_eq!(result.0[0].model_name, "test-model");
+        let result = list_entries(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Query(default_page()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.0.data.len(), 1);
+        assert_eq!(result.0.data[0].model_name, "test-model");
     }
 
     #[tokio::test]
@@ -455,6 +482,7 @@ mod tests {
             q: None,
             format: None,
             max_size: None,
+            page: default_page(),
         };
         let result = search(
             State(state),
@@ -463,7 +491,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(result.0.len(), 1);
+        assert_eq!(result.0.data.len(), 1);
     }
 
     #[tokio::test]
@@ -482,6 +510,7 @@ mod tests {
             q: Some("test".into()),
             format: None,
             max_size: None,
+            page: default_page(),
         };
         let result = search(
             State(state),
@@ -490,7 +519,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(result.0.len(), 1);
+        assert_eq!(result.0.data.len(), 1);
     }
 
     #[tokio::test]
@@ -509,6 +538,7 @@ mod tests {
             q: Some("nonexistent-xyz".into()),
             format: None,
             max_size: None,
+            page: default_page(),
         };
         let result = search(
             State(state),
@@ -517,7 +547,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(result.0.is_empty());
+        assert!(result.0.data.is_empty());
     }
 
     #[tokio::test]
@@ -542,10 +572,14 @@ mod tests {
         assert_eq!(result, StatusCode::NO_CONTENT);
 
         // Verify it's gone
-        let entries = list_entries(State(state), Extension(TenantId::default_tenant()))
-            .await
-            .unwrap();
-        assert!(entries.0.is_empty());
+        let entries = list_entries(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Query(default_page()),
+        )
+        .await
+        .unwrap();
+        assert!(entries.0.data.is_empty());
     }
 
     #[tokio::test]

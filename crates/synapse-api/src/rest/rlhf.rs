@@ -1,6 +1,6 @@
 //! REST handlers for RLHF annotation management.
 
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use serde::Deserialize;
@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use synapse_types::TenantId;
 
+use super::pagination::{PaginatedResponse, PaginationQuery};
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -85,7 +86,8 @@ pub async fn create_session(
 pub async fn list_sessions(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    Query(page): Query<PaginationQuery>,
+) -> Result<Json<PaginatedResponse<serde_json::Value>>, (StatusCode, String)> {
     let store = state.annotation_store.as_ref().ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
         "Annotation store not initialized".into(),
@@ -109,7 +111,9 @@ pub async fn list_sessions(
         })
         .collect();
 
-    Ok(Json(serde_json::json!({ "data": data })))
+    Ok(Json(PaginatedResponse::from_slice(&data, &page, |item| {
+        item.clone()
+    })))
 }
 
 /// GET /rlhf/sessions/{id}

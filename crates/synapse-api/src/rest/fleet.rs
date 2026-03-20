@@ -2,10 +2,12 @@
 
 use crate::state::AppState;
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use serde::Deserialize;
-use synapse_core::fleet::manager::RegisterNodeRequest;
+use synapse_core::fleet::manager::{FleetNode, NodeHealth, RegisterNodeRequest};
+
+use super::pagination::{PaginatedResponse, PaginationQuery};
 
 /// POST /fleet/nodes — register a new node.
 pub async fn register_node(
@@ -55,10 +57,30 @@ pub async fn heartbeat(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Query parameters for listing fleet nodes.
+#[derive(Debug, Deserialize)]
+pub struct ListNodesQuery {
+    #[serde(flatten)]
+    pub page: PaginationQuery,
+    /// Optional health filter, e.g. `?health=online`.
+    pub health: Option<NodeHealth>,
+}
+
 /// GET /fleet/nodes — list all nodes.
-pub async fn list_nodes(State(state): State<AppState>) -> Json<serde_json::Value> {
+pub async fn list_nodes(
+    State(state): State<AppState>,
+    Query(query): Query<ListNodesQuery>,
+) -> Json<PaginatedResponse<FleetNode>> {
     let nodes = state.fleet_manager.list_nodes().await;
-    Json(serde_json::json!({ "nodes": nodes }))
+    let filtered: Vec<FleetNode> = nodes
+        .into_iter()
+        .filter(|n| query.health.is_none() || Some(n.health) == query.health)
+        .collect();
+    Json(PaginatedResponse::from_slice(
+        &filtered,
+        &query.page,
+        |node| node.clone(),
+    ))
 }
 
 /// GET /fleet/stats — fleet statistics.

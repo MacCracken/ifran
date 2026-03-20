@@ -163,14 +163,31 @@ pub async fn create_run(
     Ok((StatusCode::CREATED, Json(run_to_response(&run))))
 }
 
+/// Query parameters for listing eval runs.
+#[derive(Debug, Deserialize)]
+pub struct ListRunsQuery {
+    #[serde(flatten)]
+    pub page: PaginationQuery,
+    /// Optional status filter, e.g. `?status=running`.
+    pub status: Option<EvalStatus>,
+}
+
 /// GET /eval/runs — list eval runs with pagination.
 pub async fn list_runs(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
-    Query(page): Query<PaginationQuery>,
+    Query(query): Query<ListRunsQuery>,
 ) -> Json<PaginatedResponse<EvalRunResponse>> {
     let runs = state.eval_runner.list_runs(tenant_id.as_ref()).await;
-    Json(PaginatedResponse::from_slice(&runs, &page, run_to_response))
+    let filtered: Vec<_> = runs
+        .into_iter()
+        .filter(|r| query.status.is_none() || Some(r.status) == query.status)
+        .collect();
+    Json(PaginatedResponse::from_slice(
+        &filtered,
+        &query.page,
+        run_to_response,
+    ))
 }
 
 /// GET /eval/runs/:id — get a specific eval run.

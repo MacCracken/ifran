@@ -428,7 +428,7 @@ async fn marketplace_search_empty() {
     assert_eq!(resp.status(), StatusCode::OK);
     let body = resp.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(json.as_array().unwrap().is_empty());
+    assert!(json["data"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -447,7 +447,7 @@ async fn marketplace_list_entries_empty() {
     assert_eq!(resp.status(), StatusCode::OK);
     let body = resp.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(json.as_array().unwrap().is_empty());
+    assert!(json["data"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -821,7 +821,7 @@ async fn marketplace_search_with_query() {
     assert_eq!(resp.status(), StatusCode::OK);
     let body = resp.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(!json.as_array().unwrap().is_empty());
+    assert!(!json["data"].as_array().unwrap().is_empty());
 
     // Search with non-matching query
     let resp = app
@@ -836,7 +836,7 @@ async fn marketplace_search_with_query() {
     assert_eq!(resp.status(), StatusCode::OK);
     let body = resp.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(json.as_array().unwrap().is_empty());
+    assert!(json["data"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -870,7 +870,7 @@ async fn marketplace_list_after_publish() {
     assert_eq!(resp.status(), StatusCode::OK);
     let body = resp.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json.as_array().unwrap().len(), 1);
+    assert_eq!(json["data"].as_array().unwrap().len(), 1);
 }
 
 // -- Bridge --
@@ -2061,7 +2061,8 @@ async fn lineage_list_empty() {
     assert_eq!(resp.status(), StatusCode::OK);
     let body = resp.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(json.as_array().unwrap().is_empty());
+    assert!(json["data"].as_array().unwrap().is_empty());
+    assert!(json["pagination"].is_object());
 }
 
 #[tokio::test]
@@ -2218,7 +2219,7 @@ async fn version_list_by_family() {
     assert_eq!(resp.status(), StatusCode::OK);
     let rbody = resp.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&rbody).unwrap();
-    assert_eq!(json.as_array().unwrap().len(), 2);
+    assert_eq!(json["data"].as_array().unwrap().len(), 2);
 }
 
 #[tokio::test]

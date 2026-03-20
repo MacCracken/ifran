@@ -90,14 +90,27 @@ pub async fn create_job(
     Ok((StatusCode::CREATED, Json(job_to_response(&job))))
 }
 
+/// Query parameters for listing training jobs.
+#[derive(Debug, Deserialize)]
+pub struct ListJobsQuery {
+    #[serde(flatten)]
+    pub page: PaginationQuery,
+    /// Optional status filter, e.g. `?status=running`.
+    pub status: Option<TrainingStatus>,
+}
+
 /// GET /training/jobs — list training jobs with pagination.
 pub async fn list_jobs(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
-    Query(page): Query<PaginationQuery>,
+    Query(query): Query<ListJobsQuery>,
 ) -> Json<PaginatedResponse<JobResponse>> {
-    let jobs = state.job_manager.list_jobs(None, &tenant_id).await;
-    Json(PaginatedResponse::from_slice(&jobs, &page, job_to_response))
+    let jobs = state.job_manager.list_jobs(query.status, &tenant_id).await;
+    Json(PaginatedResponse::from_slice(
+        &jobs,
+        &query.page,
+        job_to_response,
+    ))
 }
 
 /// GET /training/jobs/:id — get a specific job's status.
@@ -458,9 +471,12 @@ mod tests {
         let Json(resp) = list_jobs(
             State(state),
             Extension(TenantId::default_tenant()),
-            Query(PaginationQuery {
-                limit: 50,
-                offset: 0,
+            Query(ListJobsQuery {
+                page: PaginationQuery {
+                    limit: 50,
+                    offset: 0,
+                },
+                status: None,
             }),
         )
         .await;
@@ -499,9 +515,12 @@ mod tests {
         let Json(resp) = list_jobs(
             State(state),
             Extension(TenantId::default_tenant()),
-            Query(PaginationQuery {
-                limit: 50,
-                offset: 0,
+            Query(ListJobsQuery {
+                page: PaginationQuery {
+                    limit: 50,
+                    offset: 0,
+                },
+                status: None,
             }),
         )
         .await;

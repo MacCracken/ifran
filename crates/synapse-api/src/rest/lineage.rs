@@ -8,6 +8,8 @@ use serde::Deserialize;
 use synapse_types::TenantId;
 use synapse_types::lineage::{LineageNode, PipelineStage};
 
+use super::pagination::{PaginatedResponse, PaginationInfo};
+
 #[derive(Deserialize)]
 pub struct RecordRequest {
     pub stage: PipelineStage,
@@ -81,7 +83,7 @@ pub async fn list_nodes(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
     Query(query): Query<ListQuery>,
-) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
+) -> Result<Json<PaginatedResponse<serde_json::Value>>, (StatusCode, String)> {
     let store = state.lineage_store.as_ref().ok_or((
         StatusCode::INTERNAL_SERVER_ERROR,
         "Lineage store not initialized".into(),
@@ -99,7 +101,14 @@ pub async fn list_nodes(
             )
         })?;
 
-    Ok(Json(nodes.iter().map(node_to_json).collect()))
+    Ok(Json(PaginatedResponse {
+        data: nodes.iter().map(node_to_json).collect(),
+        pagination: PaginationInfo {
+            total: nodes.len(),
+            limit: safe_limit,
+            offset: query.offset,
+        },
+    }))
 }
 
 /// GET /lineage/:id — get a lineage node with its parents.
