@@ -25,6 +25,44 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 
 #### API Quality
 - `synapse-api/rest/models,inference,experiment`: Replaced `format!("{:?}", enum).to_lowercase()` with proper `serde_json::to_value()` serialization for consistent enum rendering
+- `synapse-api/rest/error`: `ApiErrorResponse` adopted across inference, training, and models handlers — structured error codes (`NO_MODEL`, `INVALID_CONFIG`, `NOT_FOUND`) replace bare `(StatusCode, String)` tuples
+- `synapse-api/rest/rlhf,datasets,marketplace`: Added input validation — session name/model_name, pair content, augment_factor bounds, marketplace URL scheme
+- `synapse-api/rest/*`: All 13 list endpoints now use `PaginatedResponse` with `{"data": [...], "pagination": {"total", "limit", "offset"}}` envelope
+- `synapse-api/rest/training,experiment,eval,fleet`: Added `?status=` / `?health=` query parameter filtering to list endpoints
+- `synapse-api/rest/*`: Added actionable `.with_hint()` error messages across models, training, RAG, bridge, and OpenAI-compat handlers
+
+#### User Experience
+- `synapse-cli/output`: New terminal output module with colored headers, key-value formatting, success/warn/error messages, and auto-width `Table` printer (via `owo-colors`)
+- `synapse-cli/commands/list,status,eval`: Updated to use new output module for consistent colored CLI presentation
+
+#### gRPC Service
+- `synapse-api/grpc/service`: Implemented `SynapseGrpcService` with `GetStatus`, `ListModels`, `Infer`, and `InferStream` RPCs; `PullModel`, `LoadModel`, `UnloadModel` return `Unimplemented`
+- `synapse-types/lib`: Added `synapse_proto` module re-exporting generated gRPC types
+
+#### RAG Embeddings
+- `synapse-backends/traits`: Added `embed()` method to `InferenceBackend` trait with default implementation that infers a summary and hashes the output into a normalized vector
+- `synapse-backends/lib`: Exported `hash_text_to_embedding()` utility
+- `synapse-api/rest/rag`: Replaced `stub_embed()` with real embedding pipeline — resolves the pipeline's embedding model, calls `InferenceBackend::embed()`, falls back to hash-based embedding when no model is loaded; embedding dimensions upgraded from 64 to 384
+
+#### Documentation
+- `docs/hardware-acceleration.md`: New guide covering 10 accelerator families, detection, `ai-hwaccel` feature, and config
+- `docs/fleet-management.md`: New guide covering node registration, health states, REST API, and config
+- `docs/multi-tenancy.md`: New guide covering tenant lifecycle, API keys, resource isolation, and GPU budget enforcement
+- `docs/evaluation-guide.md`: New guide covering benchmarks, CLI/REST usage, custom datasets, and result interpretation
+- `docs/cli-reference.md`: New comprehensive CLI reference for all 10 commands and subcommands
+- `deploy/synapse.toml.example`: Added `[fleet]`, `[budget]`, `telemetry_interval_secs`, `require_encrypted_storage`, per-backend sections
+- `README.md`: Expanded feature list from 7 to 16 items, added new doc links, updated test count to 1,421
+- `SECURITY.md`: Documented per-IP rate limiting, multi-tenancy security, lineage depth limit
+
+### Changed
+- Workspace version bumped to 2026.3.19
+- LICENSE updated to AGPL-3.0-only (was GPL-3.0)
+- `Cargo.toml`: `ai-hwaccel` dependency changed from local path to crates.io `0.19.3`
+- `synapse-train`: `rand` upgraded from 0.8 to 0.10
+- `docker/Dockerfile`: License label updated to AGPL-3.0-only
+- `.github/workflows/ci.yml`: Split monolithic `quality` and `security` jobs into 7 parallel jobs (fmt, clippy per-package, audit, deny, trivy, outdated); added container smoke test hitting `/health`, `/ready`, `/system/status`
+- `.github/workflows/release.yml`: Improved release page with stats table, collapsible commits, downloads matrix, and supply chain section
+- `deny.toml`: Added `AGPL-3.0-only` to allowed licenses
 
 ### Added
 
@@ -51,10 +89,6 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - `synapse-core/hardware/detect`: Re-exports `ai_hwaccel` crate when feature is enabled
 - Built-in per-backend detection functions compiled out via `cfg(not(feature = "ai-hwaccel"))` when the external crate handles detection — zero dead code warnings in either configuration
 - Conversion layer maps `ai_hwaccel::AcceleratorType` → synapse `AcceleratorKind` and `AcceleratorProfile` → `GpuDevice`/`SystemHardware` so all downstream code (allocator, telemetry, budget checks, backend routing) works unchanged
-
-### Changed
-- Workspace version bumped to 2026.3.19
-- LICENSE file updated to GPL-3.0
 
 ---
 
