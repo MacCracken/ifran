@@ -86,7 +86,7 @@ indicatif = "0.17"
 proptest = "1"
 
 # Hardware acceleration detection
-ai-hwaccel = { path = "../ai-hwaccel" }
+ai-hwaccel = "0.19.3"
 
 [profile.release]
 opt-level = 3
