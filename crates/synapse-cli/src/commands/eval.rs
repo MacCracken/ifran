@@ -1,5 +1,6 @@
 //! CLI command for model evaluation.
 
+use crate::output;
 use synapse_core::eval::runner::EvalRunner;
 use synapse_types::eval::*;
 
@@ -70,12 +71,12 @@ pub async fn execute(
         }
     };
 
-    println!("Running {kind:?} benchmark on '{model}'...");
-    println!("Dataset: {dataset_path}");
+    output::header(&format!("Running {kind:?} benchmark on '{model}'"));
+    output::kv("Dataset", &dataset_path);
     if let Some(limit) = sample_limit {
-        println!("Sample limit: {limit}");
+        output::kv("Sample limit", &limit);
     }
-    println!();
+    eprintln!();
 
     match runner
         .run_benchmark(run_id, kind, dataset_path, sample_limit, model, &infer_fn)
@@ -83,18 +84,26 @@ pub async fn execute(
     {
         Ok(result) => {
             runner.complete_run(run_id).await?;
-            println!("Benchmark: {kind:?}");
+            output::header("Results");
+            output::kv("Benchmark", &format!("{kind:?}"));
             if kind == BenchmarkKind::Perplexity {
-                println!("Perplexity: {:.2} (lower is better)", result.score);
+                output::kv(
+                    "Perplexity",
+                    &format!("{:.2} (lower is better)", result.score),
+                );
             } else {
-                println!("Score: {:.4} ({:.1}%)", result.score, result.score * 100.0);
+                output::kv(
+                    "Score",
+                    &format!("{:.4} ({:.1}%)", result.score, result.score * 100.0),
+                );
             }
-            println!("Samples evaluated: {}", result.samples_evaluated);
-            println!("Duration: {:.2}s", result.duration_secs);
+            output::kv("Samples", &result.samples_evaluated);
+            output::kv("Duration", &format!("{:.2}s", result.duration_secs));
+            output::success("Benchmark complete");
         }
         Err(e) => {
             runner.fail_run(run_id, e.to_string()).await?;
-            eprintln!("Benchmark failed: {e}");
+            output::error(&format!("Benchmark failed: {e}"));
         }
     }
 

@@ -62,6 +62,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
+owo-colors = "4"
 
 # Async utilities
 async-trait = "0.1"

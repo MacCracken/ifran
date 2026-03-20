@@ -14,6 +14,7 @@ use synapse_types::training::{TrainingJobConfig, TrainingJobId, TrainingStatus};
 
 use super::pagination::{PaginatedResponse, PaginationQuery};
 
+use crate::rest::error::ApiErrorResponse;
 use crate::state::AppState;
 
 /// Response body for a training job.
@@ -51,14 +52,14 @@ pub async fn create_job(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
     Json(req): Json<CreateJobRequest>,
-) -> Result<(StatusCode, Json<JobResponse>), (StatusCode, String)> {
+) -> Result<(StatusCode, Json<JobResponse>), ApiErrorResponse> {
     let base_model = req.config.base_model.clone();
 
     let id = state
         .job_manager
         .create_job(req.config, tenant_id.clone())
         .await
-        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+        .map_err(|e| ApiErrorResponse::bad_request("INVALID_CONFIG", e.to_string()))?;
 
     if req.auto_start {
         if let Err(e) = state.job_manager.start_job(id, &tenant_id).await {
@@ -84,7 +85,7 @@ pub async fn create_job(
         .job_manager
         .get_job(id, &tenant_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| ApiErrorResponse::internal(e.to_string()))?;
 
     Ok((StatusCode::CREATED, Json(job_to_response(&job))))
 }
@@ -104,12 +105,12 @@ pub async fn get_job(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<TrainingJobId>,
-) -> Result<Json<JobResponse>, (StatusCode, String)> {
+) -> Result<Json<JobResponse>, ApiErrorResponse> {
     let job = state
         .job_manager
         .get_job(id, &tenant_id)
         .await
-        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+        .map_err(|e| ApiErrorResponse::not_found("Training job", &e.to_string()))?;
     Ok(Json(job_to_response(&job)))
 }
 
@@ -118,12 +119,12 @@ pub async fn cancel_job(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<TrainingJobId>,
-) -> Result<Json<JobResponse>, (StatusCode, String)> {
+) -> Result<Json<JobResponse>, ApiErrorResponse> {
     state
         .job_manager
         .cancel_job(id, &tenant_id)
         .await
-        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+        .map_err(|e| ApiErrorResponse::bad_request("CANCEL_FAILED", e.to_string()))?;
 
     // Emit local cancellation event
     state.training_event_bus.emit(TrainingEvent::JobCancelled {
@@ -142,7 +143,7 @@ pub async fn cancel_job(
         .job_manager
         .get_job(id, &tenant_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| ApiErrorResponse::internal(e.to_string()))?;
     Ok(Json(job_to_response(&job)))
 }
 
@@ -155,13 +156,13 @@ pub async fn stream_job(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<TrainingJobId>,
-) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)> {
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiErrorResponse> {
     // Verify the job exists before starting the stream.
     state
         .job_manager
         .get_job(id, &tenant_id)
         .await
-        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+        .map_err(|e| ApiErrorResponse::not_found("Training job", &e.to_string()))?;
 
     let stream = async_stream::stream! {
         loop {
@@ -216,19 +217,14 @@ pub struct MetricsResponse {
 async fn load_checkpoints(
     state: &AppState,
     id: TrainingJobId,
-) -> Result<Vec<synapse_types::training::CheckpointInfo>, (StatusCode, String)> {
+) -> Result<Vec<synapse_types::training::CheckpointInfo>, ApiErrorResponse> {
     let checkpoints_dir = state.config.training.checkpoints_dir.clone();
     tokio::task::spawn_blocking(move || {
         synapse_train::checkpoint::store::CheckpointStore::new(checkpoints_dir).list(id)
     })
     .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Task failed: {e}"),
-        )
-    })?
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+    .map_err(|e| ApiErrorResponse::internal(format!("Task failed: {e}")))?
+    .map_err(|e| ApiErrorResponse::internal(e.to_string()))
 }
 
 /// GET /training/jobs/:id/checkpoints — list checkpoints for a training job.
@@ -236,12 +232,12 @@ pub async fn list_checkpoints(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<TrainingJobId>,
-) -> Result<Json<Vec<synapse_types::training::CheckpointInfo>>, (StatusCode, String)> {
+) -> Result<Json<Vec<synapse_types::training::CheckpointInfo>>, ApiErrorResponse> {
     state
         .job_manager
         .get_job(id, &tenant_id)
         .await
-        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+        .map_err(|e| ApiErrorResponse::not_found("Training job", &e.to_string()))?;
 
     Ok(Json(load_checkpoints(&state, id).await?))
 }
@@ -251,12 +247,12 @@ pub async fn get_metrics(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<TrainingJobId>,
-) -> Result<Json<MetricsResponse>, (StatusCode, String)> {
+) -> Result<Json<MetricsResponse>, ApiErrorResponse> {
     let job = state
         .job_manager
         .get_job(id, &tenant_id)
         .await
-        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+        .map_err(|e| ApiErrorResponse::not_found("Training job", &e.to_string()))?;
 
     let checkpoints = load_checkpoints(&state, id).await?;
 
@@ -551,7 +547,7 @@ mod tests {
             Path(uuid::Uuid::new_v4()),
         )
         .await;
-        assert_eq!(result.unwrap_err().0, StatusCode::NOT_FOUND);
+        assert_eq!(result.unwrap_err().status, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -613,7 +609,7 @@ mod tests {
             Path(uuid::Uuid::new_v4()),
         )
         .await;
-        assert_eq!(result.unwrap_err().0, StatusCode::NOT_FOUND);
+        assert_eq!(result.unwrap_err().status, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -710,7 +706,7 @@ mod tests {
             Path(uuid::Uuid::new_v4()),
         )
         .await;
-        assert_eq!(result.unwrap_err().0, StatusCode::NOT_FOUND);
+        assert_eq!(result.unwrap_err().status, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -752,7 +748,7 @@ mod tests {
             Path(uuid::Uuid::new_v4()),
         )
         .await;
-        assert_eq!(result.unwrap_err().0, StatusCode::NOT_FOUND);
+        assert_eq!(result.unwrap_err().status, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

@@ -26,6 +26,7 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 axum = { workspace = true }
 futures = { workspace = true }
+owo-colors = { workspace = true }
 
 [lints]
 workspace = true

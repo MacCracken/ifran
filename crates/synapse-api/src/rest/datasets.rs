@@ -235,6 +235,13 @@ pub async fn augment_dataset(
     State(_state): State<AppState>,
     Json(req): Json<AugmentRequest>,
 ) -> Result<Json<AugmentResponse>, (StatusCode, String)> {
+    if req.augment_factor < 1 || req.augment_factor > 100 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "augment_factor must be between 1 and 100".into(),
+        ));
+    }
+
     let output_path = req.output_path.unwrap_or_else(|| {
         format!(
             "{}.augmented.jsonl",

@@ -183,6 +183,13 @@ pub async fn pull(
     Extension(tenant_id): Extension<TenantId>,
     Json(req): Json<PullRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, String)> {
+    if !(req.source_url.starts_with("http://") || req.source_url.starts_with("https://")) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "source_url must start with http:// or https://".into(),
+        ));
+    }
+
     let client = synapse_core::pull::downloader::build_client()
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 

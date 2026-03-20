@@ -1,10 +1,10 @@
 //! REST handlers for inference requests (generate with optional streaming).
 
 use crate::middleware::validation::{validate_model_name, validate_prompt_length};
+use crate::rest::error::ApiErrorResponse;
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::{Extension, State};
-use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 use serde::Deserialize;
 use synapse_types::TenantId;
@@ -34,29 +34,27 @@ pub async fn inference(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
     Json(body): Json<InferenceBody>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    validate_model_name(&body.model)?;
-    validate_prompt_length(&body.prompt, state.config.security.max_prompt_length)?;
+) -> Result<Json<serde_json::Value>, ApiErrorResponse> {
+    validate_model_name(&body.model).map_err(ApiErrorResponse::from)?;
+    validate_prompt_length(&body.prompt, state.config.security.max_prompt_length)
+        .map_err(ApiErrorResponse::from)?;
 
     let loaded = state.model_manager.list_loaded(Some(&tenant_id)).await;
     let loaded_model = loaded
         .iter()
         .find(|m| m.model_name == body.model)
         .or_else(|| loaded.first())
-        .ok_or((
-            StatusCode::BAD_REQUEST,
-            "No model loaded. Load a model first.".into(),
-        ))?;
+        .ok_or_else(|| {
+            ApiErrorResponse::bad_request("NO_MODEL", "No model loaded for inference")
+                .with_hint("Load a model first with POST /models/{name}")
+        })?;
 
     let backend = state
         .backends
         .get(&synapse_types::backend::BackendId(
             loaded_model.backend_id.clone(),
         ))
-        .ok_or((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Backend not available".into(),
-        ))?;
+        .ok_or_else(|| ApiErrorResponse::internal("Backend not available"))?;
 
     let handle = synapse_backends::ModelHandle(loaded_model.handle.clone());
     let req = InferenceRequest {
@@ -73,7 +71,7 @@ pub async fn inference(
     let resp = backend
         .infer(&handle, &req)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| ApiErrorResponse::internal(e.to_string()))?;
 
     Ok(Json(serde_json::json!({
         "text": resp.text,
@@ -93,27 +91,28 @@ pub async fn inference_stream(
     Json(body): Json<InferenceBody>,
 ) -> Result<
     Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>>,
-    (StatusCode, String),
+    ApiErrorResponse,
 > {
-    validate_model_name(&body.model)?;
-    validate_prompt_length(&body.prompt, state.config.security.max_prompt_length)?;
+    validate_model_name(&body.model).map_err(ApiErrorResponse::from)?;
+    validate_prompt_length(&body.prompt, state.config.security.max_prompt_length)
+        .map_err(ApiErrorResponse::from)?;
 
     let loaded = state.model_manager.list_loaded(Some(&tenant_id)).await;
     let loaded_model = loaded
         .iter()
         .find(|m| m.model_name == body.model)
         .or_else(|| loaded.first())
-        .ok_or((StatusCode::BAD_REQUEST, "No model loaded".into()))?;
+        .ok_or_else(|| {
+            ApiErrorResponse::bad_request("NO_MODEL", "No model loaded for inference")
+                .with_hint("Load a model first with POST /models/{name}")
+        })?;
 
     let backend = state
         .backends
         .get(&synapse_types::backend::BackendId(
             loaded_model.backend_id.clone(),
         ))
-        .ok_or((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Backend not available".into(),
-        ))?;
+        .ok_or_else(|| ApiErrorResponse::internal("Backend not available"))?;
 
     let handle = synapse_backends::ModelHandle(loaded_model.handle.clone());
     let req = InferenceRequest {
@@ -130,7 +129,7 @@ pub async fn inference_stream(
     let mut rx = backend
         .infer_stream(&handle, req)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| ApiErrorResponse::internal(e.to_string()))?;
 
     let stream = async_stream::stream! {
         while let Some(chunk) = rx.recv().await {
@@ -151,6 +150,7 @@ mod tests {
     use super::*;
     use crate::state::AppState;
     use axum::extract::Extension;
+    use axum::http::StatusCode;
     use synapse_core::config::*;
     use synapse_types::TenantId;
 
@@ -254,8 +254,9 @@ mod tests {
         )
         .await;
         let err = result.unwrap_err();
-        assert_eq!(err.0, StatusCode::BAD_REQUEST);
-        assert!(err.1.contains("No model loaded"));
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert!(err.body.message.contains("No model loaded"));
+        assert!(err.body.hint.is_some());
     }
 
     #[tokio::test]
@@ -281,6 +282,6 @@ mod tests {
         )
         .await;
         let err = result.unwrap_err();
-        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
     }
 }

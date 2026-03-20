@@ -1,5 +1,6 @@
 //! REST handlers for model management (list, get, remove).
 
+use crate::rest::error::ApiErrorResponse;
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::{Extension, Path, Query, State};
@@ -13,11 +14,11 @@ pub async fn list_models(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
     Query(page): Query<PaginationQuery>,
-) -> Result<Json<PaginatedResponse<serde_json::Value>>, StatusCode> {
+) -> Result<Json<PaginatedResponse<serde_json::Value>>, ApiErrorResponse> {
     let db = state.db.lock().await;
     let models = db
         .list(&tenant_id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| ApiErrorResponse::internal(e.to_string()))?;
 
     Ok(Json(PaginatedResponse::from_slice(&models, &page, |m| {
         serde_json::json!({
@@ -40,7 +41,7 @@ pub async fn get_model(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<String>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> Result<Json<serde_json::Value>, ApiErrorResponse> {
     let db = state.db.lock().await;
     let model = if let Ok(uuid) = uuid::Uuid::parse_str(&id) {
         db.get(uuid, &tenant_id)
@@ -48,7 +49,7 @@ pub async fn get_model(
         db.get_by_name(&id, &tenant_id)
     };
 
-    let model = model.map_err(|_| StatusCode::NOT_FOUND)?;
+    let model = model.map_err(|_| ApiErrorResponse::not_found("Model", &id))?;
 
     Ok(Json(serde_json::json!({
         "id": model.id.to_string(),
@@ -70,7 +71,7 @@ pub async fn delete_model(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<String>,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<StatusCode, ApiErrorResponse> {
     let db = state.db.lock().await;
     let model = if let Ok(uuid) = uuid::Uuid::parse_str(&id) {
         db.get(uuid, &tenant_id)
@@ -78,13 +79,13 @@ pub async fn delete_model(
         db.get_by_name(&id, &tenant_id)
     };
 
-    let model = model.map_err(|_| StatusCode::NOT_FOUND)?;
+    let model = model.map_err(|_| ApiErrorResponse::not_found("Model", &id))?;
 
     // Delete from database first — if this fails, filesystem stays consistent.
     // Reversing the order (FS first, then DB) risks orphaned DB records pointing
     // to deleted files.
     db.delete(model.id, &tenant_id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| ApiErrorResponse::internal(e.to_string()))?;
 
     // Clean up files from disk (best-effort after successful DB delete)
     let local_path = std::path::Path::new(&model.local_path);
@@ -256,7 +257,7 @@ mod tests {
             Path("nonexistent".into()),
         )
         .await;
-        assert_eq!(result.unwrap_err(), StatusCode::NOT_FOUND);
+        assert_eq!(result.unwrap_err().status, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -281,7 +282,7 @@ mod tests {
             Path(model.id.to_string()),
         )
         .await;
-        assert_eq!(get_result.unwrap_err(), StatusCode::NOT_FOUND);
+        assert_eq!(get_result.unwrap_err().status, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -295,7 +296,7 @@ mod tests {
             Path("nonexistent".into()),
         )
         .await;
-        assert_eq!(result.unwrap_err(), StatusCode::NOT_FOUND);
+        assert_eq!(result.unwrap_err().status, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

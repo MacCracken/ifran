@@ -14,6 +14,7 @@ pub struct ApiError {
 }
 
 /// A complete error response with HTTP status and structured body.
+#[derive(Debug)]
 pub struct ApiErrorResponse {
     pub status: StatusCode,
     pub body: ApiError,
@@ -62,6 +63,27 @@ impl ApiErrorResponse {
     pub fn with_hint(mut self, hint: impl Into<String>) -> Self {
         self.body.hint = Some(hint.into());
         self
+    }
+}
+
+impl From<(StatusCode, String)> for ApiErrorResponse {
+    /// Convert legacy `(StatusCode, String)` error tuples (e.g. from validation
+    /// helpers) into a structured [`ApiErrorResponse`].
+    fn from((status, message): (StatusCode, String)) -> Self {
+        let code = match status {
+            StatusCode::BAD_REQUEST => "VALIDATION_ERROR",
+            StatusCode::NOT_FOUND => "NOT_FOUND",
+            StatusCode::PAYLOAD_TOO_LARGE => "PAYLOAD_TOO_LARGE",
+            _ => "INTERNAL_ERROR",
+        };
+        Self {
+            status,
+            body: ApiError {
+                code,
+                message,
+                hint: None,
+            },
+        }
     }
 }
 

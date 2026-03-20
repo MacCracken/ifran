@@ -40,6 +40,26 @@ pub async fn create_session(
     Extension(tenant_id): Extension<TenantId>,
     Json(req): Json<CreateSessionRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, String)> {
+    let name = req.name.trim();
+    if name.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Session name must not be empty".into(),
+        ));
+    }
+    if name.len() > 256 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Session name must be 256 characters or fewer".into(),
+        ));
+    }
+    if req.model_name.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Model name must not be empty".into(),
+        ));
+    }
+
     let store = state.annotation_store.as_ref().ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
         "Annotation store not initialized".into(),
@@ -133,6 +153,39 @@ pub async fn add_pairs(
     Path(id): Path<Uuid>,
     Json(req): Json<AddPairsRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, String)> {
+    if req.pairs.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Pairs list must not be empty".into(),
+        ));
+    }
+    if req.pairs.len() > 1000 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Pairs list must not exceed 1000 entries".into(),
+        ));
+    }
+    for (i, pair) in req.pairs.iter().enumerate() {
+        if pair.prompt.trim().is_empty() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("Pair {i}: prompt must not be empty"),
+            ));
+        }
+        if pair.response_a.trim().is_empty() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("Pair {i}: response_a must not be empty"),
+            ));
+        }
+        if pair.response_b.trim().is_empty() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("Pair {i}: response_b must not be empty"),
+            ));
+        }
+    }
+
     let store = state.annotation_store.as_ref().ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
         "Annotation store not initialized".into(),
