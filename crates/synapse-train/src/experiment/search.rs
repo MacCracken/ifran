@@ -1,6 +1,7 @@
 //! Search space engine for experiment hyperparameter exploration.
 
-use rand::Rng;
+use rand::RngExt;
+use rand_core::UnwrapErr;
 use synapse_types::experiment::{ParamRange, SearchStrategy};
 use synapse_types::training::HyperParams;
 
@@ -77,7 +78,7 @@ impl SearchSpace {
             return vec![self.base.clone()];
         }
 
-        let mut rng = rand::rng();
+        let mut rng = UnwrapErr(rand::rng());
         (0..n_trials)
             .map(|_| {
                 let mut hp = self.base.clone();

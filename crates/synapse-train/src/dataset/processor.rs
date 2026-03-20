@@ -8,9 +8,10 @@
 use std::io::{BufRead, Write};
 use std::path::Path;
 
-use rand::Rng;
+use rand::RngExt;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
+use rand_core::UnwrapErr;
 use serde::{Deserialize, Serialize};
 use synapse_types::SynapseError;
 use synapse_types::error::Result;
@@ -92,10 +93,10 @@ pub fn augment_dataset(
         .map_err(|e| SynapseError::TrainingError(format!("Failed to create output: {e}")))?;
     let mut writer = std::io::BufWriter::new(out_file);
 
-    let mut rng = match config.seed {
+    let mut rng = UnwrapErr(match config.seed {
         Some(seed) => SmallRng::seed_from_u64(seed),
-        None => SmallRng::from_os_rng(),
-    };
+        None => SmallRng::from_rng(&mut UnwrapErr(rand::rng())),
+    });
 
     let mut original_count = 0usize;
     let mut augmented_count = 0usize;
@@ -156,7 +157,7 @@ fn apply_strategy(
     strategy: AugmentationStrategy,
     text: &str,
     word_prob: f64,
-    rng: &mut SmallRng,
+    rng: &mut UnwrapErr<SmallRng>,
 ) -> String {
     match strategy {
         AugmentationStrategy::SynonymReplacement => synonym_replacement(text, word_prob, rng),
@@ -169,7 +170,7 @@ fn apply_strategy(
 
 // --- Synonym map (small, built-in for common English words) ---
 
-fn get_synonym(word: &str, rng: &mut SmallRng) -> Option<&'static str> {
+fn get_synonym(word: &str, rng: &mut UnwrapErr<SmallRng>) -> Option<&'static str> {
     let lower = word.to_lowercase();
     let synonyms: &[&str] = match lower.as_str() {
         "good" => &["great", "fine", "excellent", "solid"],
@@ -198,7 +199,7 @@ fn get_synonym(word: &str, rng: &mut SmallRng) -> Option<&'static str> {
 }
 
 /// Replace random words with synonyms.
-fn synonym_replacement(text: &str, word_prob: f64, rng: &mut SmallRng) -> String {
+fn synonym_replacement(text: &str, word_prob: f64, rng: &mut UnwrapErr<SmallRng>) -> String {
     let words: Vec<&str> = text.split_whitespace().collect();
     if words.is_empty() {
         return text.to_string();
@@ -218,7 +219,7 @@ fn synonym_replacement(text: &str, word_prob: f64, rng: &mut SmallRng) -> String
 }
 
 /// Insert synonyms of random words at random positions.
-fn random_insertion(text: &str, word_prob: f64, rng: &mut SmallRng) -> String {
+fn random_insertion(text: &str, word_prob: f64, rng: &mut UnwrapErr<SmallRng>) -> String {
     let words: Vec<&str> = text.split_whitespace().collect();
     if words.is_empty() {
         return text.to_string();
@@ -237,7 +238,7 @@ fn random_insertion(text: &str, word_prob: f64, rng: &mut SmallRng) -> String {
 }
 
 /// Delete random words with given probability.
-fn random_deletion(text: &str, word_prob: f64, rng: &mut SmallRng) -> String {
+fn random_deletion(text: &str, word_prob: f64, rng: &mut UnwrapErr<SmallRng>) -> String {
     let words: Vec<&str> = text.split_whitespace().collect();
     if words.len() <= 1 {
         return text.to_string();
@@ -255,7 +256,7 @@ fn random_deletion(text: &str, word_prob: f64, rng: &mut SmallRng) -> String {
 }
 
 /// Swap random adjacent word pairs.
-fn random_swap(text: &str, word_prob: f64, rng: &mut SmallRng) -> String {
+fn random_swap(text: &str, word_prob: f64, rng: &mut UnwrapErr<SmallRng>) -> String {
     let mut words: Vec<String> = text.split_whitespace().map(String::from).collect();
     if words.len() <= 1 {
         return text.to_string();
@@ -269,7 +270,7 @@ fn random_swap(text: &str, word_prob: f64, rng: &mut SmallRng) -> String {
 }
 
 /// Introduce character-level noise (typos).
-fn character_noise(text: &str, word_prob: f64, rng: &mut SmallRng) -> String {
+fn character_noise(text: &str, word_prob: f64, rng: &mut UnwrapErr<SmallRng>) -> String {
     let words: Vec<&str> = text.split_whitespace().collect();
     if words.is_empty() {
         return text.to_string();
@@ -312,8 +313,8 @@ fn character_noise(text: &str, word_prob: f64, rng: &mut SmallRng) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn seeded_rng() -> SmallRng {
-        SmallRng::seed_from_u64(42)
+    fn seeded_rng() -> UnwrapErr<SmallRng> {
+        UnwrapErr(SmallRng::seed_from_u64(42))
     }
 
     #[test]
