@@ -8,13 +8,34 @@ Current: **1,406 tests** across 7 crates. CI threshold: 65%.
 
 ---
 
+## Ecosystem Migration
+
+### Hoosh — inference gateway (replaces `ifran-backends` crate)
+- [ ] **Replace `BackendRouter` with hoosh** — delegate all inference routing (13+ backends) to `hoosh` as a library dependency; remove `ifran-backends` crate
+- [ ] **Drop `ai-hwaccel` direct dep** — hardware detection comes through hoosh; remove ifran's 800-line fallback detection code
+- [ ] **Simplify OpenAI-compat API** — `/v1/chat/completions` and `/v1/models` proxy to hoosh instead of reimplementing
+- [ ] **Drop `axum` if possible** — evaluate embedding hoosh's server builder (pending hoosh `HooshServer::builder()` API) to serve both inference and management endpoints from one process
+
+### Majra — concurrency primitives (replaces governor, dashmap, manual broadcast)
+- [ ] **Replace `governor` rate limiting with `majra::ratelimit`** — includes automatic stale-key eviction (pending majra roadmap item)
+- [ ] **Replace fleet heartbeat with `majra::heartbeat`** — drop custom `Arc<RwLock<HashMap>>` fleet manager and telemetry loop
+- [ ] **Unify event buses under `majra::pubsub`** — replace 3 separate `broadcast::channel` instances (training, GPU, progress) with topic-based pub/sub
+- [ ] **Replace FIFO job scheduler with `majra::queue`** — get priority queues + DAG scheduling + GPU-aware dequeue (pending majra roadmap items)
+- [ ] **Use `majra::barrier` for distributed training** — replace manual worker coordination with N-way barrier sync
+- [ ] **Drop `dashmap` dep** — all concurrent map uses migrate to majra primitives or standard `Arc<RwLock<HashMap>>` where appropriate
+
+### Dependency cleanup post-migration
+- [ ] Remove: `governor`, `dashmap`, `ai-hwaccel`, `async-trait` (if no longer needed)
+- [ ] Evaluate removing: `axum` (if hoosh embeds the server)
+- [ ] Add: `hoosh`, `majra`
+
 ## Performance & Memory
 
 - [ ] **Fleet list pagination** — `GET /fleet/nodes` returns all nodes unbounded; add `limit`/`offset` using the existing pagination module
 - [ ] **Marketplace list pagination** — `GET /marketplace/entries` and `GET /marketplace/search` return unbounded results; add pagination
 - [ ] **RLHF / RAG / Experiment list pagination** — `GET /rlhf/sessions`, `GET /rag/pipelines`, `GET /experiments` lack pagination; wire in `PaginatedResponse`
 - [ ] **SQLite connection pooling** — each store holds a single `Connection` behind a Mutex; evaluate `r2d2-sqlite` for higher throughput under concurrent load
-- [ ] **Rate limiter IP eviction** — per-IP `DashMap` grows indefinitely; add periodic sweep of stale entries (e.g. no requests in 10 minutes)
+- [ ] **Rate limiter IP eviction** — solved by majra migration (stale-key eviction built in)
 
 ## Observability
 

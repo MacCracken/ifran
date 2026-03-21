@@ -29,8 +29,7 @@ chrono = { workspace = true }
 futures = { workspace = true }
 async-stream = "0.3"
 tokio-stream = { workspace = true }
-governor = { workspace = true }
-dashmap = { workspace = true }
+majra = { workspace = true }
 tokio-util = { workspace = true }
 opentelemetry = { workspace = true, optional = true }
 opentelemetry_sdk = { workspace = true, optional = true }

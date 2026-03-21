@@ -1,48 +1,35 @@
-//! Per-IP rate limiting middleware using the `governor` crate.
+//! Per-IP rate limiting middleware using majra's token bucket rate limiter.
 //!
-//! Each client IP gets its own token-bucket rate limiter, backed by a
-//! `DashMap`. Returns HTTP 429 Too Many Requests when the limit is exceeded.
+//! Each client IP gets its own token bucket. Returns HTTP 429 Too Many
+//! Requests when the limit is exceeded.
 
 use axum::extract::{ConnectInfo, Request};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::Response;
-use dashmap::DashMap;
-use governor::clock::DefaultClock;
-use governor::state::{InMemoryState, NotKeyed};
-use governor::{Quota, RateLimiter};
+use majra::ratelimit::RateLimiter;
 use std::net::{IpAddr, SocketAddr};
-use std::num::NonZeroU32;
-use std::sync::Arc;
 
-type Bucket = Arc<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>;
-
-/// Per-IP rate limiter: each IP address gets its own token bucket.
+/// Per-IP rate limiter backed by majra.
 #[derive(Clone)]
 pub struct SharedLimiter {
-    quota: Quota,
-    buckets: Arc<DashMap<IpAddr, Bucket>>,
-}
-
-impl SharedLimiter {
-    fn check_ip(&self, ip: IpAddr) -> Result<(), ()> {
-        let limiter = self
-            .buckets
-            .entry(ip)
-            .or_insert_with(|| Arc::new(RateLimiter::direct(self.quota)))
-            .clone();
-        limiter.check().map_err(|_| ())
-    }
+    inner: std::sync::Arc<RateLimiter>,
 }
 
 /// Build a per-IP rate limiter from config values.
 pub fn build_limiter(per_second: u64, burst: u64) -> SharedLimiter {
-    let per_sec = NonZeroU32::new(per_second.max(1) as u32).unwrap();
-    let burst_size = NonZeroU32::new(burst.max(1) as u32).unwrap();
-    let quota = Quota::per_second(per_sec).allow_burst(burst_size);
     SharedLimiter {
-        quota,
-        buckets: Arc::new(DashMap::new()),
+        inner: std::sync::Arc::new(RateLimiter::new(per_second.max(1) as f64, burst.max(1) as usize)),
+    }
+}
+
+impl SharedLimiter {
+    fn check_ip(&self, ip: IpAddr) -> Result<(), ()> {
+        if self.inner.check(&ip.to_string()) {
+            Ok(())
+        } else {
+            Err(())
+        }
     }
 }
 

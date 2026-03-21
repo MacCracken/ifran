@@ -1,10 +1,10 @@
-//! Fleet node management for multi-node Synapse deployments.
+//! Fleet node management for multi-node Ifran deployments.
 //!
-//! Tracks node registration, heartbeats, and health state transitions.
-//! Nodes transition: Online -> Suspect (no heartbeat for suspect_timeout)
-//!                         -> Offline (no heartbeat for offline_timeout)
+//! Tracks node registration, heartbeats, and health state transitions
+//! using majra's HeartbeatTracker for the Online/Suspect/Offline FSM.
 
 use chrono::{DateTime, Utc};
+use majra::heartbeat::{HeartbeatConfig, HeartbeatTracker, Status};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -22,6 +22,16 @@ pub enum NodeHealth {
     Online,
     Suspect,
     Offline,
+}
+
+impl From<Status> for NodeHealth {
+    fn from(s: Status) -> Self {
+        match s {
+            Status::Online => NodeHealth::Online,
+            Status::Suspect => NodeHealth::Suspect,
+            Status::Offline => NodeHealth::Offline,
+        }
+    }
 }
 
 /// GPU information reported by a fleet node.
@@ -65,10 +75,22 @@ pub struct RegisterNodeRequest {
     pub total_gpu_memory_mb: u64,
 }
 
-/// Manages a fleet of Synapse nodes.
+/// Ifran-specific metadata stored alongside majra's heartbeat state.
+#[derive(Debug, Clone)]
+struct NodeMeta {
+    endpoint: String,
+    gpu_info: NodeGpuInfo,
+    last_heartbeat: DateTime<Utc>,
+    registered_at: DateTime<Utc>,
+}
+
+/// Manages a fleet of Ifran nodes.
+///
+/// Delegates the Online/Suspect/Offline FSM to majra's HeartbeatTracker.
+/// Keeps GPU-specific metadata, validation, eviction, and stats in Ifran.
 pub struct FleetManager {
-    nodes: Arc<RwLock<HashMap<NodeId, FleetNode>>>,
-    suspect_timeout: Duration,
+    tracker: Arc<RwLock<HeartbeatTracker>>,
+    meta: Arc<RwLock<HashMap<NodeId, NodeMeta>>>,
     offline_timeout: Duration,
     cancel_tx: watch::Sender<bool>,
 }
@@ -78,8 +100,11 @@ impl FleetManager {
     pub fn new(suspect_timeout: Duration, offline_timeout: Duration) -> Self {
         let (cancel_tx, _) = watch::channel(false);
         Self {
-            nodes: Arc::new(RwLock::new(HashMap::new())),
-            suspect_timeout,
+            tracker: Arc::new(RwLock::new(HeartbeatTracker::new(HeartbeatConfig {
+                suspect_after: suspect_timeout,
+                offline_after: offline_timeout,
+            }))),
+            meta: Arc::new(RwLock::new(HashMap::new())),
             offline_timeout,
             cancel_tx,
         }
@@ -92,14 +117,14 @@ impl FleetManager {
 
     /// Start the periodic health check loop.
     pub fn start_health_check_loop(&self, interval: Duration) {
-        let nodes = self.nodes.clone();
-        let suspect = self.suspect_timeout;
-        let offline = self.offline_timeout;
+        let tracker = self.tracker.clone();
+        let meta = self.meta.clone();
+        let offline_timeout = self.offline_timeout;
         let mut cancel_rx = self.cancel_tx.subscribe();
 
         tokio::spawn(async move {
             loop {
-                Self::check_health_inner(&nodes, suspect, offline).await;
+                Self::do_health_check(&tracker, &meta, offline_timeout).await;
                 tokio::select! {
                     _ = tokio::time::sleep(interval) => {}
                     _ = cancel_rx.changed() => break,
@@ -151,10 +176,16 @@ impl FleetManager {
         }
 
         let now = Utc::now();
-        let node = FleetNode {
-            id: req.id.clone(),
-            endpoint: req.endpoint,
-            health: NodeHealth::Online,
+
+        // Register with majra heartbeat tracker
+        self.tracker
+            .write()
+            .await
+            .register(&req.id, serde_json::json!({}));
+
+        // Store Ifran-specific metadata
+        let node_meta = NodeMeta {
+            endpoint: req.endpoint.clone(),
             gpu_info: NodeGpuInfo {
                 gpu_count: req.gpu_count,
                 total_gpu_memory_mb: req.total_gpu_memory_mb,
@@ -165,7 +196,17 @@ impl FleetManager {
             last_heartbeat: now,
             registered_at: now,
         };
-        self.nodes.write().await.insert(req.id, node.clone());
+
+        let node = FleetNode {
+            id: req.id.clone(),
+            endpoint: req.endpoint,
+            health: NodeHealth::Online,
+            gpu_info: node_meta.gpu_info.clone(),
+            last_heartbeat: now,
+            registered_at: now,
+        };
+
+        self.meta.write().await.insert(req.id, node_meta);
         Ok(node)
     }
 
@@ -193,86 +234,101 @@ impl FleetManager {
             }
         }
 
-        let mut nodes = self.nodes.write().await;
-        let node = nodes
-            .get_mut(node_id)
-            .ok_or_else(|| SynapseError::HardwareError(format!("Node {node_id} not found")))?;
+        // Update majra heartbeat (resets to Online)
+        let found = self.tracker.write().await.heartbeat(node_id);
+        if !found {
+            return Err(SynapseError::HardwareError(format!(
+                "Node {node_id} not found"
+            )));
+        }
 
-        node.health = NodeHealth::Online;
-        node.last_heartbeat = Utc::now();
-        node.gpu_info.gpu_utilization_pct = gpu_utilization_pct;
-        node.gpu_info.gpu_memory_used_mb = gpu_memory_used_mb;
-        node.gpu_info.gpu_temperature_c = gpu_temperature_c;
+        // Update GPU metadata
+        let mut meta = self.meta.write().await;
+        if let Some(m) = meta.get_mut(node_id) {
+            m.last_heartbeat = Utc::now();
+            m.gpu_info.gpu_utilization_pct = gpu_utilization_pct;
+            m.gpu_info.gpu_memory_used_mb = gpu_memory_used_mb;
+            m.gpu_info.gpu_temperature_c = gpu_temperature_c;
+        }
 
         Ok(())
     }
 
-    /// Run health checks on all nodes.
+    /// Run health checks on all nodes, transitioning statuses and evicting
+    /// nodes that have been offline for 2x offline_timeout.
     pub async fn check_health(&self) {
-        Self::check_health_inner(&self.nodes, self.suspect_timeout, self.offline_timeout).await;
+        Self::do_health_check(&self.tracker, &self.meta, self.offline_timeout).await;
     }
 
-    async fn check_health_inner(
-        nodes: &Arc<RwLock<HashMap<NodeId, FleetNode>>>,
-        suspect_timeout: Duration,
+    /// Internal health check logic, usable from both the public method and
+    /// the spawned background loop.
+    async fn do_health_check(
+        tracker: &RwLock<HeartbeatTracker>,
+        meta: &RwLock<HashMap<NodeId, NodeMeta>>,
         offline_timeout: Duration,
     ) {
-        let now = Utc::now();
-        let mut nodes = nodes.write().await;
-        for node in nodes.values_mut() {
-            let elapsed = now
-                .signed_duration_since(node.last_heartbeat)
-                .to_std()
-                .unwrap_or(Duration::MAX);
+        // Let majra update statuses based on elapsed time
+        tracker.write().await.update_statuses();
 
-            if elapsed >= offline_timeout {
-                node.health = NodeHealth::Offline;
-            } else if elapsed >= suspect_timeout {
-                node.health = NodeHealth::Suspect;
-            }
-        }
-
-        // Evict nodes that have been offline for too long (2x offline_timeout)
+        // Evict nodes that have been offline too long
         let eviction_threshold = offline_timeout * 2;
-        let before = nodes.len();
-        nodes.retain(|id, node| {
+        let now = Utc::now();
+        let mut meta = meta.write().await;
+        let mut tracker = tracker.write().await;
+
+        let mut evicted = Vec::new();
+        meta.retain(|id, m| {
             let elapsed = now
-                .signed_duration_since(node.last_heartbeat)
+                .signed_duration_since(m.last_heartbeat)
                 .to_std()
                 .unwrap_or(Duration::MAX);
             if elapsed >= eviction_threshold {
                 tracing::info!(node_id = %id, elapsed_secs = elapsed.as_secs(), "evicting offline node from fleet");
+                evicted.push(id.clone());
                 false
             } else {
                 true
             }
         });
-        let evicted = before - nodes.len();
-        if evicted > 0 {
-            tracing::info!(count = evicted, "evicted offline nodes from fleet");
+
+        for id in &evicted {
+            tracker.deregister(id);
+        }
+
+        if !evicted.is_empty() {
+            tracing::info!(count = evicted.len(), "evicted offline nodes from fleet");
         }
     }
 
     /// Evict nodes that have been offline longer than `2 * offline_timeout`.
     /// Returns the number of evicted nodes.
     pub async fn evict_offline(&self) -> usize {
-        let now = Utc::now();
         let eviction_threshold = self.offline_timeout * 2;
-        let mut nodes = self.nodes.write().await;
-        let before = nodes.len();
-        nodes.retain(|id, node| {
+        let now = Utc::now();
+        let mut meta = self.meta.write().await;
+        let mut tracker = self.tracker.write().await;
+        let before = meta.len();
+
+        let mut evicted_ids = Vec::new();
+        meta.retain(|id, m| {
             let elapsed = now
-                .signed_duration_since(node.last_heartbeat)
+                .signed_duration_since(m.last_heartbeat)
                 .to_std()
                 .unwrap_or(Duration::MAX);
             if elapsed >= eviction_threshold {
                 tracing::info!(node_id = %id, elapsed_secs = elapsed.as_secs(), "evicting offline node from fleet");
+                evicted_ids.push(id.clone());
                 false
             } else {
                 true
             }
         });
-        let evicted = before - nodes.len();
+
+        for id in &evicted_ids {
+            tracker.deregister(id);
+        }
+
+        let evicted = before - meta.len();
         if evicted > 0 {
             tracing::info!(count = evicted, "evicted offline nodes from fleet");
         }
@@ -281,24 +337,62 @@ impl FleetManager {
 
     /// List all registered nodes.
     pub async fn list_nodes(&self) -> Vec<FleetNode> {
-        self.nodes.read().await.values().cloned().collect()
+        let tracker = self.tracker.read().await;
+        let meta = self.meta.read().await;
+
+        meta.iter()
+            .map(|(id, m)| {
+                let health = tracker
+                    .get(id)
+                    .map(|s| NodeHealth::from(s.status))
+                    .unwrap_or(NodeHealth::Offline);
+
+                FleetNode {
+                    id: id.clone(),
+                    endpoint: m.endpoint.clone(),
+                    health,
+                    gpu_info: m.gpu_info.clone(),
+                    last_heartbeat: m.last_heartbeat,
+                    registered_at: m.registered_at,
+                }
+            })
+            .collect()
     }
 
     /// Get a specific node.
     pub async fn get_node(&self, node_id: &str) -> Option<FleetNode> {
-        self.nodes.read().await.get(node_id).cloned()
+        let tracker = self.tracker.read().await;
+        let meta = self.meta.read().await;
+
+        let m = meta.get(node_id)?;
+        let health = tracker
+            .get(node_id)
+            .map(|s| NodeHealth::from(s.status))
+            .unwrap_or(NodeHealth::Offline);
+
+        Some(FleetNode {
+            id: node_id.to_string(),
+            endpoint: m.endpoint.clone(),
+            health,
+            gpu_info: m.gpu_info.clone(),
+            last_heartbeat: m.last_heartbeat,
+            registered_at: m.registered_at,
+        })
     }
 
     /// Remove a node from the fleet.
     pub async fn remove(&self, node_id: &str) -> bool {
-        self.nodes.write().await.remove(node_id).is_some()
+        self.tracker.write().await.deregister(node_id);
+        self.meta.write().await.remove(node_id).is_some()
     }
 
     /// Get aggregate fleet statistics.
     pub async fn stats(&self) -> FleetStats {
-        let nodes = self.nodes.read().await;
+        let tracker = self.tracker.read().await;
+        let meta = self.meta.read().await;
+
         let mut stats = FleetStats {
-            total_nodes: nodes.len(),
+            total_nodes: meta.len(),
             online: 0,
             suspect: 0,
             offline: 0,
@@ -306,14 +400,19 @@ impl FleetManager {
             total_gpu_memory_mb: 0,
         };
 
-        for node in nodes.values() {
-            match node.health {
+        for (id, m) in meta.iter() {
+            let health = tracker
+                .get(id)
+                .map(|s| NodeHealth::from(s.status))
+                .unwrap_or(NodeHealth::Offline);
+
+            match health {
                 NodeHealth::Online => stats.online += 1,
                 NodeHealth::Suspect => stats.suspect += 1,
                 NodeHealth::Offline => stats.offline += 1,
             }
-            stats.total_gpus += node.gpu_info.gpu_count;
-            stats.total_gpu_memory_mb += node.gpu_info.total_gpu_memory_mb;
+            stats.total_gpus += m.gpu_info.gpu_count;
+            stats.total_gpu_memory_mb += m.gpu_info.total_gpu_memory_mb;
         }
 
         stats
