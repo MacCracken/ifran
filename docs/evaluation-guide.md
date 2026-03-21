@@ -1,6 +1,6 @@
 # Evaluation Guide
 
-Synapse includes a built-in evaluation framework for benchmarking models against standard and custom tasks. Evaluations run against a loaded model, measure accuracy or perplexity, and store results per-tenant in SQLite.
+Ifran includes a built-in evaluation framework for benchmarking models against standard and custom tasks. Evaluations run against a loaded model, measure accuracy or perplexity, and store results per-tenant in SQLite.
 
 ## Supported Benchmarks
 
@@ -16,12 +16,12 @@ All benchmarks read samples from a JSONL dataset file. Each line must be a JSON 
 
 ## CLI Usage
 
-The CLI sends inference requests to the local Synapse API server at `http://127.0.0.1:8420/inference`, so the server must be running with a model loaded before you start an eval.
+The CLI sends inference requests to the local Ifran API server at `http://127.0.0.1:8420/inference`, so the server must be running with a model loaded before you start an eval.
 
 ### Basic command
 
 ```bash
-synapse eval --model <model-name> --benchmark <benchmark> --dataset <path-to-jsonl>
+ifran eval --model <model-name> --benchmark <benchmark> --dataset <path-to-jsonl>
 ```
 
 ### Examples
@@ -29,19 +29,19 @@ synapse eval --model <model-name> --benchmark <benchmark> --dataset <path-to-jso
 Run MMLU on 100 samples:
 
 ```bash
-synapse eval --model llama-3.1-8b --benchmark mmlu --dataset ./data/mmlu.jsonl --sample-limit 100
+ifran eval --model llama-3.1-8b --benchmark mmlu --dataset ./data/mmlu.jsonl --sample-limit 100
 ```
 
 Run perplexity evaluation:
 
 ```bash
-synapse eval --model mistral-7b --benchmark ppl --dataset ./data/wikitext.jsonl
+ifran eval --model mistral-7b --benchmark ppl --dataset ./data/wikitext.jsonl
 ```
 
 Run a custom benchmark:
 
 ```bash
-synapse eval --model llama-3.1-8b --benchmark custom --dataset ./data/my-eval.jsonl
+ifran eval --model llama-3.1-8b --benchmark custom --dataset ./data/my-eval.jsonl
 ```
 
 ### CLI output
@@ -189,7 +189,7 @@ Scoring uses **contains match** for most benchmarks: the model's output passes i
 
 ### Pass/fail judgment
 
-Synapse reports raw scores without a built-in pass/fail threshold. Compare scores across models or against known baselines to determine acceptability for your use case.
+Ifran reports raw scores without a built-in pass/fail threshold. Compare scores across models or against known baselines to determine acceptability for your use case.
 
 ## Multi-Tenant Evaluation
 

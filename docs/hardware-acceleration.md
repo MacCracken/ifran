@@ -1,6 +1,6 @@
 # Hardware Acceleration
 
-Synapse auto-detects compute accelerators at startup and routes inference to the best available backend. This guide covers supported hardware, detection mechanics, configuration, and verification.
+Ifran auto-detects compute accelerators at startup and routes inference to the best available backend. This guide covers supported hardware, detection mechanics, configuration, and verification.
 
 ## Supported Accelerators
 
@@ -23,23 +23,23 @@ When multiple accelerators are present, `best_accelerator()` picks the highest-p
 Cuda > Tpu > Gaudi > Rocm > Inferentia > OneApi > Metal > Vulkan > QualcommAi > AmdXdna
 ```
 
-If no accelerator is found, Synapse runs in CPU-only mode.
+If no accelerator is found, Ifran runs in CPU-only mode.
 
 ## How Detection Works
 
-At startup, `synapse_core::hardware::detect::detect()` probes the system and returns a `SystemHardware` snapshot containing CPU info and a list of `GpuDevice` entries. Each device includes name, memory (total/free), accelerator kind, and optional compute capability.
+At startup, `ifran_core::hardware::detect::detect()` probes the system and returns a `SystemHardware` snapshot containing CPU info and a list of `GpuDevice` entries. Each device includes name, memory (total/free), accelerator kind, and optional compute capability.
 
 There are two detection paths:
 
 1. **Built-in detection** (default) -- each accelerator family has its own function (`detect_nvidia()`, `detect_rocm()`, etc.) that shells out to vendor tools or reads sysfs. If a tool is missing or fails, that backend is silently skipped.
 
-2. **`ai-hwaccel` delegation** (opt-in) -- when the `ai-hwaccel` feature is enabled, detection delegates to `ai_hwaccel::AcceleratorRegistry::detect()` and converts results back to Synapse types. The built-in detection functions are compiled out.
+2. **`ai-hwaccel` delegation** (opt-in) -- when the `ai-hwaccel` feature is enabled, detection delegates to `ai_hwaccel::AcceleratorRegistry::detect()` and converts results back to Ifran types. The built-in detection functions are compiled out.
 
 ## The `ai-hwaccel` Feature Flag
 
-The `ai-hwaccel` feature on `synapse-core` replaces built-in detection with the external `ai-hwaccel` crate. It provides:
+The `ai-hwaccel` feature on `ifran-core` replaces built-in detection with the external `ai-hwaccel` crate. It provides:
 
-- **Broader discovery** -- 13 backend families including Apple ANE and Intel NPU (mapped to `Vulkan` in Synapse since dedicated kinds don't exist yet).
+- **Broader discovery** -- 13 backend families including Apple ANE and Intel NPU (mapped to `Vulkan` in Ifran since dedicated kinds don't exist yet).
 - **Richer metadata** -- driver versions, generation info, ranked device selection.
 - **Advanced APIs** -- quantization suggestions, sharding plans, and accelerator profiles via `detect_registry()`.
 - **Re-export** -- `ai_hwaccel` is re-exported from the hardware module for callers that want the full API.
@@ -47,19 +47,19 @@ The `ai-hwaccel` feature on `synapse-core` replaces built-in detection with the 
 Enable it in your workspace build:
 
 ```toml
-synapse-core = { path = "crates/synapse-core", features = ["ai-hwaccel"] }
+ifran-core = { path = "crates/ifran-core", features = ["ai-hwaccel"] }
 ```
 
 When disabled, zero dead code is emitted -- the two paths are gated with `cfg(feature = "ai-hwaccel")` / `cfg(not(feature = "ai-hwaccel"))`.
 
 ## Configuration
 
-### `[hardware]` section in `synapse.toml`
+### `[hardware]` section in `ifran.toml`
 
 ```toml
 [hardware]
 # VRAM (MB) reserved for OS/driver use when calculating model fit.
-# Synapse subtracts this from reported free memory before loading models.
+# Ifran subtracts this from reported free memory before loading models.
 gpu_memory_reserve_mb = 512
 
 # How often (seconds) to poll hardware telemetry. 0 = disabled.
@@ -73,7 +73,7 @@ telemetry_interval_secs = 10
 
 ## Backend Feature Flags
 
-`synapse-backends` uses Cargo feature flags to compile in only the backends you need. All accelerator-specific backends are included in the default feature set.
+`ifran-backends` uses Cargo feature flags to compile in only the backends you need. All accelerator-specific backends are included in the default feature set.
 
 ```toml
 [features]
@@ -89,7 +89,7 @@ Additional opt-in features (not in default): `wasm`, `metal`, `vulkan`.
 To build a minimal binary with only CUDA-oriented backends:
 
 ```sh
-cargo build -p synapse-backends --no-default-features --features llamacpp,candle-backend,tensorrt
+cargo build -p ifran-backends --no-default-features --features llamacpp,candle-backend,tensorrt
 ```
 
 ## Verifying Detection
@@ -97,7 +97,7 @@ cargo build -p synapse-backends --no-default-features --features llamacpp,candle
 ### CLI
 
 ```sh
-synapse status
+ifran status
 ```
 
 The status command prints a `SystemHardware` summary:

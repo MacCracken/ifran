@@ -1,10 +1,10 @@
 # Fleet Management
 
-Fleet management lets you run multiple Synapse nodes as a coordinated cluster. Each node registers itself, sends periodic heartbeats, and is monitored for liveness. An aggregated view of GPU resources across the fleet is available through the REST API.
+Fleet management lets you run multiple Ifran nodes as a coordinated cluster. Each node registers itself, sends periodic heartbeats, and is monitored for liveness. An aggregated view of GPU resources across the fleet is available through the REST API.
 
 ## Configuration
 
-Add a `[fleet]` section to your Synapse config file:
+Add a `[fleet]` section to your Ifran config file:
 
 ```toml
 [fleet]
@@ -39,9 +39,9 @@ A heartbeat from any state resets the node back to **Online**.
 
 ## Self-Registration on Startup
 
-When `fleet.enabled` is `true`, each Synapse instance registers itself at startup. The instance ID is determined by:
+When `fleet.enabled` is `true`, each Ifran instance registers itself at startup. The instance ID is determined by:
 
-1. The `SYNAPSE_INSTANCE_ID` environment variable, if set.
+1. The `IFRAN_INSTANCE_ID` environment variable, if set.
 2. Otherwise, the server bind address with non-alphanumeric characters replaced by hyphens.
 
 During self-registration the node reports its detected GPU count and total GPU memory. After registering, the instance starts the background health check loop at the configured interval.

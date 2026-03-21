@@ -2,15 +2,15 @@
 
 ## Overview
 
-Synapse and SecureYeoman (SY) have a cyclic relationship:
-- SY orchestrates Synapse instances (scheduling, scaling, resource allocation)
-- Synapse calls back to SY (progress reporting, GPU requests, model registration)
+Ifran and SecureYeoman (SY) have a cyclic relationship:
+- SY orchestrates Ifran instances (scheduling, scaling, resource allocation)
+- Ifran calls back to SY (progress reporting, GPU requests, model registration)
 
 ## Setup
 
 ### 1. Configure the bridge
 
-In `synapse.toml`:
+In `ifran.toml`:
 
 ```toml
 [bridge]
@@ -25,17 +25,17 @@ Or via environment variable:
 export SY_ENDPOINT="http://your-sy-host:9420"
 ```
 
-### 2. Start Synapse
+### 2. Start Ifran
 
 ```bash
-synapse serve
+ifran serve
 ```
 
-Synapse will connect to SY, announce its capabilities (GPU count, supported training methods), and begin sending heartbeats with status updates.
+Ifran will connect to SY, announce its capabilities (GPU count, supported training methods), and begin sending heartbeats with status updates.
 
 ## Communication Flow
 
-### SY → Synapse (SynapseBridge service)
+### SY → Ifran (IfranBridge service)
 
 | RPC | Description |
 |-----|-------------|
@@ -45,7 +45,7 @@ Synapse will connect to SY, announce its capabilities (GPU count, supported trai
 | `RunInference` | Single inference request |
 | `StreamInference` | Streaming inference |
 
-### Synapse → SY (YeomanBridge service)
+### Ifran → SY (YeomanBridge service)
 
 | RPC | Description |
 |-----|-------------|
@@ -63,7 +63,7 @@ The SY endpoint is resolved in order:
 
 ## Degraded Mode
 
-If SY is unavailable, Synapse operates independently:
+If SY is unavailable, Ifran operates independently:
 - Inference and local training continue normally
 - Orchestration features (scaling, GPU allocation) are disabled
 - Automatic reconnection with exponential backoff (base 5s, max 10 attempts)
@@ -71,17 +71,17 @@ If SY is unavailable, Synapse operates independently:
 
 ## Agnosticos Deployment
 
-When installed via `pkg install synapse` on Agnosticos, Synapse automatically registers as a capability provider:
+When installed via `pkg install ifran` on Agnosticos, Ifran automatically registers as a capability provider:
 
 ```bash
-agnosticos capability register synapse \
+agnosticos capability register ifran \
     --type llm-inference \
     --endpoint http://127.0.0.1:8420 \
     --grpc-endpoint http://127.0.0.1:8421 \
     --capabilities 'model-pull,inference,training,openai-compat'
 ```
 
-SY discovers Synapse instances through the Agnosticos agent-runtime capability registry.
+SY discovers Ifran instances through the Agnosticos agent-runtime capability registry.
 
 ## Proto Definitions
 

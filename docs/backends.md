@@ -1,6 +1,6 @@
 # Inference Backends
 
-Synapse uses a trait-based pluggable backend system. Each backend implements the `InferenceBackend` trait and is registered at runtime in the `BackendRouter`.
+Ifran uses a trait-based pluggable backend system. Each backend implements the `InferenceBackend` trait and is registered at runtime in the `BackendRouter`.
 
 ## Available Backends
 
@@ -18,7 +18,7 @@ All backends are enabled by default. Disable unneeded ones via feature flags in 
 
 ## Backend Selection
 
-The router (`synapse-backends/src/router.rs`) automatically selects the best backend based on:
+The router (`ifran-backends/src/router.rs`) automatically selects the best backend based on:
 1. **User preference** — explicit backend ID override via config or API parameter
 2. **Configured default** — `default_backend` in config
 3. **Model format** — GGUF → llama.cpp, SafeTensors → candle/vllm, ONNX → ort, TensorRT → tensorrt
@@ -48,7 +48,7 @@ HTTP client to a running Ollama server (default: `http://127.0.0.1:11434`).
 HTTP client to a running vLLM server (default: `http://127.0.0.1:8000`).
 
 - Uses vLLM's OpenAI-compatible `/v1/chat/completions` endpoint
-- Models are loaded at vLLM server startup; Synapse registers and verifies availability
+- Models are loaded at vLLM server startup; Ifran registers and verifies availability
 - Streaming via SSE
 - Best for high-throughput GPU inference with PagedAttention and continuous batching
 
@@ -89,8 +89,8 @@ ONNX Runtime inference via the `ort` crate.
 
 ## Adding a New Backend
 
-1. Create a module in `crates/synapse-backends/src/<name>/mod.rs`
+1. Create a module in `crates/ifran-backends/src/<name>/mod.rs`
 2. Implement the `InferenceBackend` trait
-3. Add a feature flag in `crates/synapse-backends/Cargo.toml`
+3. Add a feature flag in `crates/ifran-backends/Cargo.toml`
 4. Register in `lib.rs` behind the feature gate
 5. Update the router's format matching if the backend handles a new format

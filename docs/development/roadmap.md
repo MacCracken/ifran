@@ -1,4 +1,4 @@
-# Synapse Development Roadmap
+# Ifran Development Roadmap
 
 > Versioning: CalVer `YYYY.M.D` / `YYYY.M.D-N` for patches
 
@@ -26,9 +26,9 @@ Current: **1,406 tests** across 7 crates. CI threshold: 65%.
 
 - [ ] **Auth / permission integration tests** — no tests cover 401/403 paths, multi-tenant isolation, or admin-key enforcement
 - [ ] **Concurrent operation tests** — add tests for race conditions in job scheduling, model loading, and fleet registration under parallel requests
-- [ ] **Raise CI coverage threshold** — increase from 65% to 75%; consider per-crate minimums for critical crates (synapse-core, synapse-train)
+- [ ] **Raise CI coverage threshold** — increase from 65% to 75%; consider per-crate minimums for critical crates (ifran-core, ifran-train)
 - [ ] **Fuzzing targets** — add `cargo-fuzz` targets for config parsing, gRPC message handling, and REST JSON input deserialization
-- [ ] **Shared test utilities crate** — deduplicate `test_config()`, `test_app()`, mock builders, and fixture data into a workspace-internal `synapse-testutil` crate
+- [ ] **Shared test utilities crate** — deduplicate `test_config()`, `test_app()`, mock builders, and fixture data into a workspace-internal `ifran-testutil` crate
 
 ## Post-v1 Considerations
 

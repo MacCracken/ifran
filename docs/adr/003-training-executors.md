@@ -10,11 +10,11 @@ LLM training requires Python libraries (PyTorch, Transformers, PEFT, Unsloth, TR
 ## Decision
 
 Orchestrate training as external processes:
-1. **Docker executor** (default): launches containers with the `synapse-trainer` image
+1. **Docker executor** (default): launches containers with the `ifran-trainer` image
 2. **Subprocess executor**: spawns Python scripts directly
 3. **Native executor** (future): in-process Rust training via candle/burn for small models
 
-Training scripts are bundled in `crates/synapse-train/src/scripts/`. The Rust code manages job lifecycle, streams logs, and monitors checkpoints.
+Training scripts are bundled in `crates/ifran-train/src/scripts/`. The Rust code manages job lifecycle, streams logs, and monitors checkpoints.
 
 ## Consequences
 

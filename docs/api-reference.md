@@ -1,16 +1,16 @@
 # API Reference
 
-Synapse exposes a REST API (default `:8420`) and a gRPC API (default `:8421`).
+Ifran exposes a REST API (default `:8420`) and a gRPC API (default `:8421`).
 
 ## Authentication
 
 ### Single-Tenant (Default)
 
-Set `SYNAPSE_API_KEY` to require Bearer token authentication:
+Set `IFRAN_API_KEY` to require Bearer token authentication:
 
 ```bash
-export SYNAPSE_API_KEY=your-secret-token
-synapse serve
+export IFRAN_API_KEY=your-secret-token
+ifran serve
 ```
 
 All endpoints except `/health` require the header:
@@ -19,7 +19,7 @@ All endpoints except `/health` require the header:
 Authorization: Bearer your-secret-token
 ```
 
-When `SYNAPSE_API_KEY` is unset, the API is open (no auth required).
+When `IFRAN_API_KEY` is unset, the API is open (no auth required).
 
 ### Multi-Tenant
 
@@ -27,15 +27,15 @@ Enable in config with `multi_tenant = true` under `[security]`. Each tenant gets
 
 ```bash
 # Set admin key for tenant management
-export SYNAPSE_ADMIN_KEY=your-admin-secret
-synapse serve
+export IFRAN_ADMIN_KEY=your-admin-secret
+ifran serve
 ```
 
 Create tenants via the admin API:
 
 ```bash
 curl -X POST http://localhost:8420/admin/tenants \
-  -H "Authorization: Bearer $SYNAPSE_ADMIN_KEY" \
+  -H "Authorization: Bearer $IFRAN_ADMIN_KEY" \
   -H "Content-Type: application/json" \
   -d '{"name": "Acme Corp"}'
 ```
@@ -250,7 +250,7 @@ When `bridge.enabled = true` in config, the server automatically:
 
 ### Tenant Admin (Multi-Tenant Only)
 
-Only available when `multi_tenant = true`. Protected by `SYNAPSE_ADMIN_KEY` (separate from tenant API keys).
+Only available when `multi_tenant = true`. Protected by `IFRAN_ADMIN_KEY` (separate from tenant API keys).
 
 - `POST /admin/tenants` — create a new tenant, returns API key (shown once)
 - `GET /admin/tenants` — list all tenants
@@ -279,6 +279,6 @@ Only available when `multi_tenant = true`. Protected by `SYNAPSE_ADMIN_KEY` (sep
 ## gRPC Services
 
 See proto files in `proto/` for full message definitions:
-- `synapse.proto` — core model and inference service
+- `ifran.proto` — core model and inference service
 - `training.proto` — training job management
-- `bridge.proto` — SY↔Synapse bridge protocol
+- `bridge.proto` — SY↔Ifran bridge protocol

@@ -5,11 +5,11 @@
 
 ## Context
 
-Synapse needs to manage LLM inference and training with high performance, low overhead, and native hardware access. The primary target platform (Agnosticos) is a Rust-focused operating system.
+Ifran needs to manage LLM inference and training with high performance, low overhead, and native hardware access. The primary target platform (Agnosticos) is a Rust-focused operating system.
 
 ## Decision
 
-Use Rust as the primary language for all Synapse crates. The Cargo workspace pattern follows Agnosticos conventions.
+Use Rust as the primary language for all Ifran crates. The Cargo workspace pattern follows Agnosticos conventions.
 
 ## Consequences
 

@@ -5,7 +5,7 @@
 
 ## Context
 
-Consistent versioning across the project ecosystem (Agnosticos, SecureYeoman, Synapse) reduces confusion and aligns release tracking.
+Consistent versioning across the project ecosystem (Agnosticos, SecureYeoman, Ifran) reduces confusion and aligns release tracking.
 
 ## Decision
 

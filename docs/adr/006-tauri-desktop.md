@@ -5,11 +5,11 @@
 
 ## Context
 
-Synapse needs a desktop application for model management, chat interface, training dashboards, and system monitoring. The backend is Rust.
+Ifran needs a desktop application for model management, chat interface, training dashboards, and system monitoring. The backend is Rust.
 
 ## Decision
 
-Use Tauri v2 with a Svelte frontend. The Tauri backend calls synapse-core directly via Rust function calls (not HTTP), since they compile together in the same binary.
+Use Tauri v2 with a Svelte frontend. The Tauri backend calls ifran-core directly via Rust function calls (not HTTP), since they compile together in the same binary.
 
 ## Consequences
 

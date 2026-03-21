@@ -30,7 +30,7 @@ cargo clippy --workspace -- -D warnings
 cargo test --workspace
 
 # Single crate
-cargo test -p synapse-core
+cargo test -p ifran-core
 
 # Coverage (requires cargo-tarpaulin)
 cargo tarpaulin --workspace --out html
@@ -46,9 +46,9 @@ See [roadmap.md](./roadmap.md) for remaining work.
 
 ## Configuration
 
-Config is auto-discovered: `SYNAPSE_CONFIG` env → `~/.synapse/synapse.toml` → `/etc/synapse/synapse.toml` → defaults.
+Config is auto-discovered: `IFRAN_CONFIG` env → `~/.ifran/ifran.toml` → `/etc/ifran/ifran.toml` → defaults.
 
-See `deploy/synapse.toml.example` for all options.
+See `deploy/ifran.toml.example` for all options.
 
 ## Versioning
 

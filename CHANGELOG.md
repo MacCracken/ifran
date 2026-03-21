@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Synapse will be documented in this file.
+All notable changes to Ifran will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
@@ -10,39 +10,39 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 ### Changed
 
 #### Security Hardening (Engineering Backlog)
-- `synapse-api/middleware/rate_limit`: Replaced global `NotKeyed` rate limiter with per-IP keyed limiter backed by `DashMap`; each client IP now gets its own token bucket, preventing one client from starving others
-- `synapse-train/job/manager`: Added TTL-based eviction for terminal jobs — background loop periodically removes completed/failed/cancelled jobs older than configurable `job_eviction_ttl_secs` (default 24h) from both in-memory map and SQLite store
-- `synapse-api/rest/tenants`: `DELETE /admin/tenants/:id` now cancels all in-flight training jobs for the disabled tenant via new `cancel_tenant_jobs()` method
-- `synapse-core/lineage/store`: `get_ancestry()` now accepts `max_depth` parameter (default 10,000 nodes) to prevent OOM on deep/wide DAGs; exposed as `?max_depth=N` query param on `GET /lineage/:id/ancestry`
+- `ifran-api/middleware/rate_limit`: Replaced global `NotKeyed` rate limiter with per-IP keyed limiter backed by `DashMap`; each client IP now gets its own token bucket, preventing one client from starving others
+- `ifran-train/job/manager`: Added TTL-based eviction for terminal jobs — background loop periodically removes completed/failed/cancelled jobs older than configurable `job_eviction_ttl_secs` (default 24h) from both in-memory map and SQLite store
+- `ifran-api/rest/tenants`: `DELETE /admin/tenants/:id` now cancels all in-flight training jobs for the disabled tenant via new `cancel_tenant_jobs()` method
+- `ifran-core/lineage/store`: `get_ancestry()` now accepts `max_depth` parameter (default 10,000 nodes) to prevent OOM on deep/wide DAGs; exposed as `?max_depth=N` query param on `GET /lineage/:id/ancestry`
 
 #### Reliability & Hardening
-- `synapse-api/main`: Graceful shutdown via `with_graceful_shutdown()`; telemetry and fleet manager cleaned up on exit
-- `synapse-api/rest/rlhf,experiment`: Removed `unwrap()` calls in production handler paths; replaced with safe fallbacks
-- `synapse-api/rest/system`: Added `GET /ready` readiness probe — checks database accessibility and backend registration
-- `synapse-core/eval/runner`: `EvalRunState.results` capped at 10,000 entries; oldest half drained when full
-- `synapse-core/fleet/manager`: Offline nodes auto-evicted after 2× `offline_timeout` during health checks
-- `synapse-api/rest/inference,system`: Added SSE keep-alive to inference stream and training events endpoints
+- `ifran-api/main`: Graceful shutdown via `with_graceful_shutdown()`; telemetry and fleet manager cleaned up on exit
+- `ifran-api/rest/rlhf,experiment`: Removed `unwrap()` calls in production handler paths; replaced with safe fallbacks
+- `ifran-api/rest/system`: Added `GET /ready` readiness probe — checks database accessibility and backend registration
+- `ifran-core/eval/runner`: `EvalRunState.results` capped at 10,000 entries; oldest half drained when full
+- `ifran-core/fleet/manager`: Offline nodes auto-evicted after 2× `offline_timeout` during health checks
+- `ifran-api/rest/inference,system`: Added SSE keep-alive to inference stream and training events endpoints
 
 #### API Quality
-- `synapse-api/rest/models,inference,experiment`: Replaced `format!("{:?}", enum).to_lowercase()` with proper `serde_json::to_value()` serialization for consistent enum rendering
-- `synapse-api/rest/error`: `ApiErrorResponse` adopted across inference, training, and models handlers — structured error codes (`NO_MODEL`, `INVALID_CONFIG`, `NOT_FOUND`) replace bare `(StatusCode, String)` tuples
-- `synapse-api/rest/rlhf,datasets,marketplace`: Added input validation — session name/model_name, pair content, augment_factor bounds, marketplace URL scheme
-- `synapse-api/rest/*`: All 13 list endpoints now use `PaginatedResponse` with `{"data": [...], "pagination": {"total", "limit", "offset"}}` envelope
-- `synapse-api/rest/training,experiment,eval,fleet`: Added `?status=` / `?health=` query parameter filtering to list endpoints
-- `synapse-api/rest/*`: Added actionable `.with_hint()` error messages across models, training, RAG, bridge, and OpenAI-compat handlers
+- `ifran-api/rest/models,inference,experiment`: Replaced `format!("{:?}", enum).to_lowercase()` with proper `serde_json::to_value()` serialization for consistent enum rendering
+- `ifran-api/rest/error`: `ApiErrorResponse` adopted across inference, training, and models handlers — structured error codes (`NO_MODEL`, `INVALID_CONFIG`, `NOT_FOUND`) replace bare `(StatusCode, String)` tuples
+- `ifran-api/rest/rlhf,datasets,marketplace`: Added input validation — session name/model_name, pair content, augment_factor bounds, marketplace URL scheme
+- `ifran-api/rest/*`: All 13 list endpoints now use `PaginatedResponse` with `{"data": [...], "pagination": {"total", "limit", "offset"}}` envelope
+- `ifran-api/rest/training,experiment,eval,fleet`: Added `?status=` / `?health=` query parameter filtering to list endpoints
+- `ifran-api/rest/*`: Added actionable `.with_hint()` error messages across models, training, RAG, bridge, and OpenAI-compat handlers
 
 #### User Experience
-- `synapse-cli/output`: New terminal output module with colored headers, key-value formatting, success/warn/error messages, and auto-width `Table` printer (via `owo-colors`)
-- `synapse-cli/commands/list,status,eval`: Updated to use new output module for consistent colored CLI presentation
+- `ifran-cli/output`: New terminal output module with colored headers, key-value formatting, success/warn/error messages, and auto-width `Table` printer (via `owo-colors`)
+- `ifran-cli/commands/list,status,eval`: Updated to use new output module for consistent colored CLI presentation
 
 #### gRPC Service
-- `synapse-api/grpc/service`: Implemented `SynapseGrpcService` with `GetStatus`, `ListModels`, `Infer`, and `InferStream` RPCs; `PullModel`, `LoadModel`, `UnloadModel` return `Unimplemented`
-- `synapse-types/lib`: Added `synapse_proto` module re-exporting generated gRPC types
+- `ifran-api/grpc/service`: Implemented `IfranGrpcService` with `GetStatus`, `ListModels`, `Infer`, and `InferStream` RPCs; `PullModel`, `LoadModel`, `UnloadModel` return `Unimplemented`
+- `ifran-types/lib`: Added `ifran_proto` module re-exporting generated gRPC types
 
 #### RAG Embeddings
-- `synapse-backends/traits`: Added `embed()` method to `InferenceBackend` trait with default implementation that infers a summary and hashes the output into a normalized vector
-- `synapse-backends/lib`: Exported `hash_text_to_embedding()` utility
-- `synapse-api/rest/rag`: Replaced `stub_embed()` with real embedding pipeline — resolves the pipeline's embedding model, calls `InferenceBackend::embed()`, falls back to hash-based embedding when no model is loaded; embedding dimensions upgraded from 64 to 384
+- `ifran-backends/traits`: Added `embed()` method to `InferenceBackend` trait with default implementation that infers a summary and hashes the output into a normalized vector
+- `ifran-backends/lib`: Exported `hash_text_to_embedding()` utility
+- `ifran-api/rest/rag`: Replaced `stub_embed()` with real embedding pipeline — resolves the pipeline's embedding model, calls `InferenceBackend::embed()`, falls back to hash-based embedding when no model is loaded; embedding dimensions upgraded from 64 to 384
 
 #### Documentation
 - `docs/hardware-acceleration.md`: New guide covering 10 accelerator families, detection, `ai-hwaccel` feature, and config
@@ -50,7 +50,7 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - `docs/multi-tenancy.md`: New guide covering tenant lifecycle, API keys, resource isolation, and GPU budget enforcement
 - `docs/evaluation-guide.md`: New guide covering benchmarks, CLI/REST usage, custom datasets, and result interpretation
 - `docs/cli-reference.md`: New comprehensive CLI reference for all 10 commands and subcommands
-- `deploy/synapse.toml.example`: Added `[fleet]`, `[budget]`, `telemetry_interval_secs`, `require_encrypted_storage`, per-backend sections
+- `deploy/ifran.toml.example`: Added `[fleet]`, `[budget]`, `telemetry_interval_secs`, `require_encrypted_storage`, per-backend sections
 - `README.md`: Expanded feature list from 7 to 16 items, added new doc links, updated test count to 1,421
 - `SECURITY.md`: Documented per-IP rate limiting, multi-tenancy security, lineage depth limit
 
@@ -58,7 +58,7 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - Workspace version bumped to 2026.3.19
 - LICENSE updated to AGPL-3.0-only (was GPL-3.0)
 - `Cargo.toml`: `ai-hwaccel` dependency changed from local path to crates.io `0.19.3`
-- `synapse-train`: `rand` upgraded from 0.8 to 0.10
+- `ifran-train`: `rand` upgraded from 0.8 to 0.10
 - `docker/Dockerfile`: License label updated to AGPL-3.0-only
 - `.github/workflows/ci.yml`: Split monolithic `quality` and `security` jobs into 7 parallel jobs (fmt, clippy per-package, audit, deny, trivy, outdated); added container smoke test hitting `/health`, `/ready`, `/system/status`
 - `.github/workflows/release.yml`: Improved release page with stats table, collapsible commits, downloads matrix, and supply chain section
@@ -67,28 +67,28 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 ### Added
 
 #### Hardware Acceleration Backends
-- `synapse-backends/tpu`: TPU inference backend — proxies to JAX/PJRT or vLLM-TPU serving process (default port 8001), implements full `InferenceBackend` trait with load/unload/infer/stream/health
-- `synapse-backends/gaudi`: Intel Gaudi (Habana HPU) backend — proxies to optimum-habana or vLLM-HPU serving (default port 8004)
-- `synapse-backends/inferentia`: AWS Inferentia/Trainium backend — proxies to AWS Neuron serving process
-- `synapse-backends/oneapi`: Intel Arc / Data Center GPU Max backend — proxies to Intel oneAPI/SYCL serving
-- `synapse-backends/qualcomm`: Qualcomm Cloud AI 100 backend — proxies to QAI100 serving
-- `synapse-backends/metal`: Apple Metal backend — proxies to Metal-compatible serving process
-- `synapse-backends/vulkan`: Vulkan compute backend — proxies to Vulkan-capable serving process
-- `synapse-backends/xdna`: AMD Ryzen AI (XDNA) NPU backend — proxies to AMD XDNA serving
-- `synapse-backends/Cargo.toml`: Feature flags for all 8 new backends (`tpu`, `gaudi`, `inferentia`, `oneapi`, `qualcomm`, `metal`, `vulkan`, `xdna`); `tpu`, `gaudi`, `inferentia`, `oneapi`, `qualcomm`, `xdna` added to defaults
+- `ifran-backends/tpu`: TPU inference backend — proxies to JAX/PJRT or vLLM-TPU serving process (default port 8001), implements full `InferenceBackend` trait with load/unload/infer/stream/health
+- `ifran-backends/gaudi`: Intel Gaudi (Habana HPU) backend — proxies to optimum-habana or vLLM-HPU serving (default port 8004)
+- `ifran-backends/inferentia`: AWS Inferentia/Trainium backend — proxies to AWS Neuron serving process
+- `ifran-backends/oneapi`: Intel Arc / Data Center GPU Max backend — proxies to Intel oneAPI/SYCL serving
+- `ifran-backends/qualcomm`: Qualcomm Cloud AI 100 backend — proxies to QAI100 serving
+- `ifran-backends/metal`: Apple Metal backend — proxies to Metal-compatible serving process
+- `ifran-backends/vulkan`: Vulkan compute backend — proxies to Vulkan-capable serving process
+- `ifran-backends/xdna`: AMD Ryzen AI (XDNA) NPU backend — proxies to AMD XDNA serving
+- `ifran-backends/Cargo.toml`: Feature flags for all 8 new backends (`tpu`, `gaudi`, `inferentia`, `oneapi`, `qualcomm`, `metal`, `vulkan`, `xdna`); `tpu`, `gaudi`, `inferentia`, `oneapi`, `qualcomm`, `xdna` added to defaults
 
 #### Hardware Detection Expansion
-- `synapse-core/hardware/detect`: Extended detection to 10 accelerator families — added TPU (via `/dev/accel*`), Metal (via `system_profiler`), Vulkan (via `vulkaninfo`), Gaudi (via `hl-smi`), Inferentia (via `neuron-ls`), OneApi (via `xpu-smi`), Qualcomm AI 100 (via `/dev/qaic*`), AMD XDNA (via sysfs `amdxdna` driver)
-- `synapse-types/backend`: `AcceleratorType` extended with `Tpu`, `Gaudi`, `Inferentia`, `OneApi`, `QualcommAi`, `AmdXdna` variants
-- `synapse-core/lifecycle/manager`: `prepare_load()` now maps all 10 `AcceleratorKind` variants to `AcceleratorType` for backend routing
+- `ifran-core/hardware/detect`: Extended detection to 10 accelerator families — added TPU (via `/dev/accel*`), Metal (via `system_profiler`), Vulkan (via `vulkaninfo`), Gaudi (via `hl-smi`), Inferentia (via `neuron-ls`), OneApi (via `xpu-smi`), Qualcomm AI 100 (via `/dev/qaic*`), AMD XDNA (via sysfs `amdxdna` driver)
+- `ifran-types/backend`: `AcceleratorType` extended with `Tpu`, `Gaudi`, `Inferentia`, `OneApi`, `QualcommAi`, `AmdXdna` variants
+- `ifran-core/lifecycle/manager`: `prepare_load()` now maps all 10 `AcceleratorKind` variants to `AcceleratorType` for backend routing
 
 #### `ai-hwaccel` Integration
-- `synapse-core`: Optional `ai-hwaccel` dependency behind `ai-hwaccel` feature flag
-- `synapse-core/hardware/detect`: When `ai-hwaccel` feature is enabled, `detect()` delegates to `ai_hwaccel::AcceleratorRegistry::detect()` for richer hardware discovery (13 backend families including Apple ANE, Intel NPU, and detailed metadata like driver versions, generation info, and ranked device selection)
-- `synapse-core/hardware/detect`: `detect_registry()` function exposes full `ai_hwaccel::AcceleratorRegistry` for callers wanting the richer API (quantization suggestions, sharding plans, accelerator profiles)
-- `synapse-core/hardware/detect`: Re-exports `ai_hwaccel` crate when feature is enabled
+- `ifran-core`: Optional `ai-hwaccel` dependency behind `ai-hwaccel` feature flag
+- `ifran-core/hardware/detect`: When `ai-hwaccel` feature is enabled, `detect()` delegates to `ai_hwaccel::AcceleratorRegistry::detect()` for richer hardware discovery (13 backend families including Apple ANE, Intel NPU, and detailed metadata like driver versions, generation info, and ranked device selection)
+- `ifran-core/hardware/detect`: `detect_registry()` function exposes full `ai_hwaccel::AcceleratorRegistry` for callers wanting the richer API (quantization suggestions, sharding plans, accelerator profiles)
+- `ifran-core/hardware/detect`: Re-exports `ai_hwaccel` crate when feature is enabled
 - Built-in per-backend detection functions compiled out via `cfg(not(feature = "ai-hwaccel"))` when the external crate handles detection — zero dead code warnings in either configuration
-- Conversion layer maps `ai_hwaccel::AcceleratorType` → synapse `AcceleratorKind` and `AcceleratorProfile` → `GpuDevice`/`SystemHardware` so all downstream code (allocator, telemetry, budget checks, backend routing) works unchanged
+- Conversion layer maps `ai_hwaccel::AcceleratorType` → ifran `AcceleratorKind` and `AcceleratorProfile` → `GpuDevice`/`SystemHardware` so all downstream code (allocator, telemetry, budget checks, backend routing) works unchanged
 
 ---
 
@@ -97,27 +97,27 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 ### Added
 
 #### AI Training Studio Backend
-- `synapse-train/dataset/labeler`: Auto-labeling pipeline — `AutoLabeler` job manager with `run_labeling()` function that reads unlabeled JSONL, calls model inference per sample, writes labeled JSONL with progress tracking
-- `synapse-api/rest/datasets`: Auto-labeling REST endpoints — `POST /datasets/auto-label` (create+start), `GET /datasets/auto-label/jobs` (list), `GET /datasets/auto-label/jobs/{id}` (status)
-- `synapse-train/dataset/processor`: Data augmentation strategies — 5 offline text augmentation methods: synonym replacement, random insertion, random deletion, random swap, character noise
-- `synapse-api/rest/datasets`: Augmentation REST endpoint — `POST /datasets/augment` with configurable strategies, augment factor, word probability, and reproducible seeding
-- `synapse-api/state`: `auto_labeler` added to `AppState`
+- `ifran-train/dataset/labeler`: Auto-labeling pipeline — `AutoLabeler` job manager with `run_labeling()` function that reads unlabeled JSONL, calls model inference per sample, writes labeled JSONL with progress tracking
+- `ifran-api/rest/datasets`: Auto-labeling REST endpoints — `POST /datasets/auto-label` (create+start), `GET /datasets/auto-label/jobs` (list), `GET /datasets/auto-label/jobs/{id}` (status)
+- `ifran-train/dataset/processor`: Data augmentation strategies — 5 offline text augmentation methods: synonym replacement, random insertion, random deletion, random swap, character noise
+- `ifran-api/rest/datasets`: Augmentation REST endpoint — `POST /datasets/augment` with configurable strategies, augment factor, word probability, and reproducible seeding
+- `ifran-api/state`: `auto_labeler` added to `AppState`
 
 #### Dataset Operations
-- `synapse-api/rest/datasets`: `POST /datasets/validate` — pre-flight data quality check (format compliance, row counts, error details)
-- `synapse-api/rest/datasets`: `POST /datasets/preview` — preview first N rows (default 5, max 50) from JSONL/CSV files with parsed JSON output
+- `ifran-api/rest/datasets`: `POST /datasets/validate` — pre-flight data quality check (format compliance, row counts, error details)
+- `ifran-api/rest/datasets`: `POST /datasets/preview` — preview first N rows (default 5, max 50) from JSONL/CSV files with parsed JSON output
 
 #### Training Observability
-- `synapse-api/rest/training`: `GET /training/jobs/{id}/checkpoints` — list saved checkpoints with step, epoch, loss, path, timestamp
-- `synapse-api/rest/training`: `GET /training/jobs/{id}/metrics` — combined job state + checkpoint data for training dashboards
+- `ifran-api/rest/training`: `GET /training/jobs/{id}/checkpoints` — list saved checkpoints with step, epoch, loss, path, timestamp
+- `ifran-api/rest/training`: `GET /training/jobs/{id}/metrics` — combined job state + checkpoint data for training dashboards
 
 #### Standardized Pagination
-- `synapse-api/rest/pagination`: Shared `PaginationQuery` (limit/offset) and `PaginatedResponse<T>` (`{ data: [...], pagination: { total, limit, offset } }`)
+- `ifran-api/rest/pagination`: Shared `PaginationQuery` (limit/offset) and `PaginatedResponse<T>` (`{ data: [...], pagination: { total, limit, offset } }`)
 - Applied to: `GET /models`, `GET /training/jobs`, `GET /training/distributed/jobs`, `GET /eval/runs`, `GET /datasets/auto-label/jobs`
 - Default limit: 50, max limit: 1000, all query params optional with sensible defaults
 
 #### Structured Error Responses
-- `synapse-api/rest/error`: `ApiError` type with `code`, `message`, and optional `hint` fields
+- `ifran-api/rest/error`: `ApiError` type with `code`, `message`, and optional `hint` fields
 - `ApiErrorResponse` with builder helpers: `not_found()`, `bad_request()`, `internal()`, `with_hint()`
 - Implements `IntoResponse` for direct use in axum handlers
 
@@ -133,34 +133,34 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 ### Added
 
 #### GPU Improvements
-- `synapse-core/hardware/allocator`: Compute capability filtering — `allocate()` accepts `min_compute_capability` to restrict to GPUs meeting precision requirements (e.g., BF16 needs Ampere+)
-- `synapse-core/hardware/telemetry`: Periodic GPU telemetry loop — polls utilization, temperature, memory via nvidia-smi/ROCm sysfs at configurable intervals
-- `synapse-core/hardware/events`: GPU event bus — broadcasts `Allocated`/`Released` events via tokio broadcast channel for observability
-- `synapse-api/rest/system`: `GET /system/gpu/telemetry` endpoint for live GPU metrics
+- `ifran-core/hardware/allocator`: Compute capability filtering — `allocate()` accepts `min_compute_capability` to restrict to GPUs meeting precision requirements (e.g., BF16 needs Ampere+)
+- `ifran-core/hardware/telemetry`: Periodic GPU telemetry loop — polls utilization, temperature, memory via nvidia-smi/ROCm sysfs at configurable intervals
+- `ifran-core/hardware/events`: GPU event bus — broadcasts `Allocated`/`Released` events via tokio broadcast channel for observability
+- `ifran-api/rest/system`: `GET /system/gpu/telemetry` endpoint for live GPU metrics
 
 #### Fleet Management
-- `synapse-core/fleet/manager`: Fleet node management — registration, heartbeat processing, 3-tier health states (Online/Suspect/Offline), fleet statistics
-- `synapse-api/rest/fleet`: REST endpoints — `POST /fleet/nodes`, `POST /fleet/nodes/{id}/heartbeat`, `GET /fleet/nodes`, `GET /fleet/stats`, `DELETE /fleet/nodes/{id}`
-- `synapse-core/config`: `[fleet]` config section with `enabled`, `suspect_timeout_secs`, `offline_timeout_secs`, `health_check_interval_secs`
+- `ifran-core/fleet/manager`: Fleet node management — registration, heartbeat processing, 3-tier health states (Online/Suspect/Offline), fleet statistics
+- `ifran-api/rest/fleet`: REST endpoints — `POST /fleet/nodes`, `POST /fleet/nodes/{id}/heartbeat`, `GET /fleet/nodes`, `GET /fleet/stats`, `DELETE /fleet/nodes/{id}`
+- `ifran-core/config`: `[fleet]` config section with `enabled`, `suspect_timeout_secs`, `offline_timeout_secs`, `health_check_interval_secs`
 - Fleet self-registration on startup when `fleet.enabled = true`
 
 #### Distributed Training
-- `synapse-train/distributed/placement`: Pluggable placement policies — `GpuAffinityPolicy` (pack onto fewest nodes), `BalancedPolicy` (round-robin), `CostAwarePolicy` (cheapest first)
-- `synapse-train/distributed/coordinator`: `auto_place()` method — assigns workers using fleet nodes + placement policies without requiring SecureYeoman
-- `synapse-api/rest/distributed`: `POST /training/distributed/jobs/{id}/auto-place` endpoint for fleet-based worker placement
+- `ifran-train/distributed/placement`: Pluggable placement policies — `GpuAffinityPolicy` (pack onto fewest nodes), `BalancedPolicy` (round-robin), `CostAwarePolicy` (cheapest first)
+- `ifran-train/distributed/coordinator`: `auto_place()` method — assigns workers using fleet nodes + placement policies without requiring SecureYeoman
+- `ifran-api/rest/distributed`: `POST /training/distributed/jobs/{id}/auto-place` endpoint for fleet-based worker placement
 
 #### Privacy & Routing
-- `synapse-types/inference`: `DataSensitivity` enum — `Public`, `Internal`, `Confidential`, `Restricted`
-- `synapse-types/backend`: `BackendLocality` enum — `Local`, `Remote` on `BackendCapabilities`
-- `synapse-backends/router`: `select_with_privacy()` — restricts to local backends for confidential/restricted data
+- `ifran-types/inference`: `DataSensitivity` enum — `Public`, `Internal`, `Confidential`, `Restricted`
+- `ifran-types/backend`: `BackendLocality` enum — `Local`, `Remote` on `BackendCapabilities`
+- `ifran-backends/router`: `select_with_privacy()` — restricts to local backends for confidential/restricted data
 
 #### Model Discovery
-- `synapse-core/registry/discovery`: Auto-discovery of local inference servers — probes Ollama, LM Studio, LocalAI
-- `synapse-api/rest/system`: `GET /models/discover` endpoint
+- `ifran-core/registry/discovery`: Auto-discovery of local inference servers — probes Ollama, LM Studio, LocalAI
+- `ifran-api/rest/system`: `GET /models/discover` endpoint
 
 #### Standalone Operation
-- `synapse-core/training_events`: Local training event bus — broadcasts job lifecycle events (started, progress, cancelled, completed, failed, worker assigned, checkpoint ready) without SY dependency
-- `synapse-api/rest/system`: `GET /system/training/events` SSE endpoint for real-time training monitoring
+- `ifran-core/training_events`: Local training event bus — broadcasts job lifecycle events (started, progress, cancelled, completed, failed, worker assigned, checkpoint ready) without SY dependency
+- `ifran-api/rest/system`: `GET /system/training/events` SSE endpoint for real-time training monitoring
 - Training and distributed training handlers now emit local events before optionally forwarding to SY bridge
 - Daimon endpoint now configurable via `DAIMON_ENDPOINT` env var (no longer hardcoded)
 
@@ -183,68 +183,68 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 ### Added
 
 #### Bridge Completion
-- `synapse-bridge/server`: `PullModel` RPC — streams `resolving` → `accepted` progress (full HF download pipeline to be wired in)
-- `synapse-bridge/server`: `RunInference` RPC — resolves loaded model by name, dispatches to backend, returns response
-- `synapse-bridge/server`: `StreamInference` RPC — resolves loaded model, bridges backend token stream to gRPC `StreamChunk` stream
-- `synapse-bridge/client`: `request_worker_assignment()` — encodes as structured `ReportProgress` RPC (`worker_assignment:<rank>:<endpoint>:<devices>`)
-- `synapse-bridge/client`: `sync_checkpoint()` — encodes as structured `ReportProgress` RPC (`checkpoint_sync:<rank>:<path>`)
-- All 5 SynapseBridge server RPCs and all 7 YeomanBridge client methods now implemented (no more stubs)
+- `ifran-bridge/server`: `PullModel` RPC — streams `resolving` → `accepted` progress (full HF download pipeline to be wired in)
+- `ifran-bridge/server`: `RunInference` RPC — resolves loaded model by name, dispatches to backend, returns response
+- `ifran-bridge/server`: `StreamInference` RPC — resolves loaded model, bridges backend token stream to gRPC `StreamChunk` stream
+- `ifran-bridge/client`: `request_worker_assignment()` — encodes as structured `ReportProgress` RPC (`worker_assignment:<rank>:<endpoint>:<devices>`)
+- `ifran-bridge/client`: `sync_checkpoint()` — encodes as structured `ReportProgress` RPC (`checkpoint_sync:<rank>:<path>`)
+- All 5 IfranBridge server RPCs and all 7 YeomanBridge client methods now implemented (no more stubs)
 
 #### Agnosticos OS Integration
-- `deploy/synapse.service`: `ExecHealthCheck` directive using `curl` against `/health` endpoint
-- `deploy/synapse-inference.conf`: Systemd drop-in override for inference-only mode — tighter sandbox (no checkpoint writes, no subprocess spawning)
-- `deploy/synapse-training.conf`: Systemd drop-in override for training mode — relaxed sandbox (checkpoint writes, Docker access, subprocess spawning)
-- `synapse-core/hardware/allocator`: GPU device allocator with fair scheduling — tracks per-device memory, assigns least-loaded devices, supports concurrent allocation/deallocation
-- `synapse-api/middleware/telemetry`: `init_tracing()` with optional OTLP export — `otlp` feature flag gates OpenTelemetry dependencies, exports to daimon's OTLP collector when `OTEL_EXPORTER_OTLP_ENDPOINT` is set
-- `synapse-bridge/protocol`: Dynamic capability advertising — `Capabilities` struct extended with `backends`, `loaded_models`, `supported_formats`, `supported_quants` fields populated from actual runtime state
-- `synapse-bridge/discovery`: `discover_async()` with daimon service registry lookup — queries `GET http://127.0.0.1:9400/v1/discover?service=secureyeoman` before falling back to well-known endpoint
-- `synapse-core/budget/checker`: GPU budget enforcement via hoosh accounting — `BudgetChecker` queries `{hoosh_endpoint}/v1/budget/gpu?tenant={id}`, falls back gracefully when hoosh is unavailable
-- `synapse-core/config`: `[budget]` config section with `enabled`, `hoosh_endpoint`, `max_gpu_hours_per_day`
-- `synapse-core/storage/encryption`: Encrypted storage detection — checks dm-crypt/LUKS via `/proc/mounts` and `/sys/block/*/dm/uuid`, `request_unlock()` for daimon key management integration
-- `synapse-core/config`: `require_encrypted_storage` in `[security]` — server refuses to start if models_dir is not on an encrypted volume
+- `deploy/ifran.service`: `ExecHealthCheck` directive using `curl` against `/health` endpoint
+- `deploy/ifran-inference.conf`: Systemd drop-in override for inference-only mode — tighter sandbox (no checkpoint writes, no subprocess spawning)
+- `deploy/ifran-training.conf`: Systemd drop-in override for training mode — relaxed sandbox (checkpoint writes, Docker access, subprocess spawning)
+- `ifran-core/hardware/allocator`: GPU device allocator with fair scheduling — tracks per-device memory, assigns least-loaded devices, supports concurrent allocation/deallocation
+- `ifran-api/middleware/telemetry`: `init_tracing()` with optional OTLP export — `otlp` feature flag gates OpenTelemetry dependencies, exports to daimon's OTLP collector when `OTEL_EXPORTER_OTLP_ENDPOINT` is set
+- `ifran-bridge/protocol`: Dynamic capability advertising — `Capabilities` struct extended with `backends`, `loaded_models`, `supported_formats`, `supported_quants` fields populated from actual runtime state
+- `ifran-bridge/discovery`: `discover_async()` with daimon service registry lookup — queries `GET http://127.0.0.1:9400/v1/discover?service=secureyeoman` before falling back to well-known endpoint
+- `ifran-core/budget/checker`: GPU budget enforcement via hoosh accounting — `BudgetChecker` queries `{hoosh_endpoint}/v1/budget/gpu?tenant={id}`, falls back gracefully when hoosh is unavailable
+- `ifran-core/config`: `[budget]` config section with `enabled`, `hoosh_endpoint`, `max_gpu_hours_per_day`
+- `ifran-core/storage/encryption`: Encrypted storage detection — checks dm-crypt/LUKS via `/proc/mounts` and `/sys/block/*/dm/uuid`, `request_unlock()` for daimon key management integration
+- `ifran-core/config`: `require_encrypted_storage` in `[security]` — server refuses to start if models_dir is not on an encrypted volume
 #### Training Feature Parity
-- `synapse-types/lineage`: Pipeline lineage types — `LineageNode`, `PipelineStage` (Dataset/Training/Evaluation/Deployment/Checkpoint/Merge)
-- `synapse-core/lineage/store`: SQLite lineage graph store — `record`, `get`, `get_ancestry` (graph traversal), `list`, `find_by_artifact` with tenant isolation
-- `synapse-api/rest/lineage`: REST endpoints — `POST /lineage`, `GET /lineage`, `GET /lineage/{id}`, `GET /lineage/{id}/ancestry`
-- `synapse-types/versioning`: Model versioning types — `ModelVersion`, `VersionComparison`
-- `synapse-core/versioning/store`: SQLite version store — `create`, `get`, `list_by_family`, `latest`, `get_lineage` (parent chain traversal)
-- `synapse-api/rest/versioning`: REST endpoints — `POST /versions`, `GET /versions`, `GET /versions/{id}`, `GET /versions/{id}/lineage`
-- `synapse-types/drift`: Drift detection types — `BaselineSnapshot`, `DriftResult`, `DriftSeverity` with z-score classification
-- `synapse-core/drift/detector`: SQLite-backed drift detector — `record_baseline`, `check_drift` (z-score comparison), `list_baselines`
-- `synapse-core/scoring/quality`: Inference quality scoring — `score_response()` with 4 weighted heuristic criteria (length, completeness, repetition, coherence), `filter_high_quality()` batch filter
-- `synapse-types/dataset`: Dataset curation types — `CuratedDataset`, `RefreshJob`, `RefreshStatus`
-- `synapse-core/dataset/curator`: SQLite curator store — dataset registration, content fingerprint deduplication, version tracking
-- `synapse-core/preference/store`: Standalone preference pair store for DPO/RLHF — `add`, `list`, `export_dpo`, `add_batch` with tenant isolation
-- `synapse-types/ab_test`: A/B testing types — `AbTest`, `AbTestStatus`, `AbTestResult`
-- `synapse-core/ab_test/router`: Traffic splitting router — `select_variant()` based on configurable split fraction
+- `ifran-types/lineage`: Pipeline lineage types — `LineageNode`, `PipelineStage` (Dataset/Training/Evaluation/Deployment/Checkpoint/Merge)
+- `ifran-core/lineage/store`: SQLite lineage graph store — `record`, `get`, `get_ancestry` (graph traversal), `list`, `find_by_artifact` with tenant isolation
+- `ifran-api/rest/lineage`: REST endpoints — `POST /lineage`, `GET /lineage`, `GET /lineage/{id}`, `GET /lineage/{id}/ancestry`
+- `ifran-types/versioning`: Model versioning types — `ModelVersion`, `VersionComparison`
+- `ifran-core/versioning/store`: SQLite version store — `create`, `get`, `list_by_family`, `latest`, `get_lineage` (parent chain traversal)
+- `ifran-api/rest/versioning`: REST endpoints — `POST /versions`, `GET /versions`, `GET /versions/{id}`, `GET /versions/{id}/lineage`
+- `ifran-types/drift`: Drift detection types — `BaselineSnapshot`, `DriftResult`, `DriftSeverity` with z-score classification
+- `ifran-core/drift/detector`: SQLite-backed drift detector — `record_baseline`, `check_drift` (z-score comparison), `list_baselines`
+- `ifran-core/scoring/quality`: Inference quality scoring — `score_response()` with 4 weighted heuristic criteria (length, completeness, repetition, coherence), `filter_high_quality()` batch filter
+- `ifran-types/dataset`: Dataset curation types — `CuratedDataset`, `RefreshJob`, `RefreshStatus`
+- `ifran-core/dataset/curator`: SQLite curator store — dataset registration, content fingerprint deduplication, version tracking
+- `ifran-core/preference/store`: Standalone preference pair store for DPO/RLHF — `add`, `list`, `export_dpo`, `add_batch` with tenant isolation
+- `ifran-types/ab_test`: A/B testing types — `AbTest`, `AbTestStatus`, `AbTestResult`
+- `ifran-core/ab_test/router`: Traffic splitting router — `select_variant()` based on configurable split fraction
 
 #### Evaluation & Responsible AI
-- `synapse-core/eval/judge`: LLM-as-judge evaluation — `JudgeRubric`, `build_judge_prompt`, `parse_verdict`, `aggregate_verdicts` for pairwise model comparison
-- `synapse-core/eval/responsible_ai`: Fairness metrics — `compute_report()` with cohort error analysis, demographic parity gap, disparate impact ratio, 80% rule check
-- `synapse-core/rag/optimizer`: Thompson Sampling bandit for RAG retrieval — `RetrievalOptimizer` with Beta-distributed arms, `select`, `record_reward`, `best_strategy`
+- `ifran-core/eval/judge`: LLM-as-judge evaluation — `JudgeRubric`, `build_judge_prompt`, `parse_verdict`, `aggregate_verdicts` for pairwise model comparison
+- `ifran-core/eval/responsible_ai`: Fairness metrics — `compute_report()` with cohort error analysis, demographic parity gap, disparate impact ratio, 80% rule check
+- `ifran-core/rag/optimizer`: Thompson Sampling bandit for RAG retrieval — `RetrievalOptimizer` with Beta-distributed arms, `select`, `record_reward`, `best_strategy`
 
 #### Training Pipeline Enhancements
-- `synapse-train/continual/config`: Continual learning config and `ReplayBuffer` with sliding-window eviction and sampling
-- `synapse-train/approval/gate`: Approval gates — `ApprovalGate` managing pending/approved/rejected lifecycle with reviewer tracking
-- `synapse-train/workflow/pipeline`: DAG-based ML workflow — `Pipeline` with step types (Curate/Train/Evaluate/Approve/Deploy), `ready_steps()`, `validate_dag()` cycle detection
-- `synapse-train/integration/ollama`: Ollama adapter registration — `register_adapter()`, `build_modelfile()`, `check_ollama()`
-- `synapse-backends/cost`: Cost-aware backend routing — `CostConfig` with `cheapest()` and `select_within_budget()`
+- `ifran-train/continual/config`: Continual learning config and `ReplayBuffer` with sliding-window eviction and sampling
+- `ifran-train/approval/gate`: Approval gates — `ApprovalGate` managing pending/approved/rejected lifecycle with reviewer tracking
+- `ifran-train/workflow/pipeline`: DAG-based ML workflow — `Pipeline` with step types (Curate/Train/Evaluate/Approve/Deploy), `ready_steps()`, `validate_dag()` cycle detection
+- `ifran-train/integration/ollama`: Ollama adapter registration — `register_adapter()`, `build_modelfile()`, `check_ollama()`
+- `ifran-backends/cost`: Cost-aware backend routing — `CostConfig` with `cheapest()` and `select_within_budget()`
 
 #### Infrastructure Stubs Completed
-- `synapse-core/registry/oci`: OCI registry client — Docker Registry v2 manifest retrieval, blob URL construction, model layer identification
-- `synapse-core/registry/direct`: Direct URL downloader — HEAD-based `resolve()` for content length, type, range support, filename extraction
-- `synapse-core/storage/cache`: LRU model cache — size-based eviction, touch/insert/remove with ordered tracking
-- `synapse-core/lifecycle/pool`: Hot model pool — async slot management with `put`, `get`, `hot_swap` (atomic replace), concurrent access
+- `ifran-core/registry/oci`: OCI registry client — Docker Registry v2 manifest retrieval, blob URL construction, model layer identification
+- `ifran-core/registry/direct`: Direct URL downloader — HEAD-based `resolve()` for content length, type, range support, filename extraction
+- `ifran-core/storage/cache`: LRU model cache — size-based eviction, touch/insert/remove with ordered tracking
+- `ifran-core/lifecycle/pool`: Hot model pool — async slot management with `put`, `get`, `hot_swap` (atomic replace), concurrent access
 - 1,043 tests across all crates
 
 #### Multi-Tenant Support
-- `synapse-types/tenant`: `TenantId` newtype with `default_tenant()`, `is_default()`, Display, serde support
-- `synapse-types/error`: `TenantNotFound(String)` and `Unauthorized(String)` error variants
-- `synapse-core/tenant/store`: SQLite tenant store — `tenants` table with BLAKE3-hashed API keys, CRUD operations (create, resolve by key, list, disable, enable)
-- `synapse-core/config`: `multi_tenant` boolean in `[security]` config section (default: `false`, fully backward compatible)
-- `synapse-api/middleware/auth`: Rewritten for dual-mode auth — single-tenant (legacy `SYNAPSE_API_KEY`) and multi-tenant (TenantStore key lookup). Injects `TenantId` into request extensions for all handlers
-- `synapse-api/rest/tenants`: Admin API — `POST /admin/tenants` (create, returns API key once), `GET /admin/tenants` (list), `DELETE /admin/tenants/{id}` (disable). Protected by `SYNAPSE_ADMIN_KEY` env var. Only mounted when `multi_tenant = true`
-- `synapse-api/state`: `tenant_store` field — conditionally initialized when `multi_tenant = true`
+- `ifran-types/tenant`: `TenantId` newtype with `default_tenant()`, `is_default()`, Display, serde support
+- `ifran-types/error`: `TenantNotFound(String)` and `Unauthorized(String)` error variants
+- `ifran-core/tenant/store`: SQLite tenant store — `tenants` table with BLAKE3-hashed API keys, CRUD operations (create, resolve by key, list, disable, enable)
+- `ifran-core/config`: `multi_tenant` boolean in `[security]` config section (default: `false`, fully backward compatible)
+- `ifran-api/middleware/auth`: Rewritten for dual-mode auth — single-tenant (legacy `IFRAN_API_KEY`) and multi-tenant (TenantStore key lookup). Injects `TenantId` into request extensions for all handlers
+- `ifran-api/rest/tenants`: Admin API — `POST /admin/tenants` (create, returns API key once), `GET /admin/tenants` (list), `DELETE /admin/tenants/{id}` (disable). Protected by `IFRAN_ADMIN_KEY` env var. Only mounted when `multi_tenant = true`
+- `ifran-api/state`: `tenant_store` field — conditionally initialized when `multi_tenant = true`
 - All SQLite stores gain `tenant_id TEXT NOT NULL DEFAULT 'default'` column with idempotent migration: `models`, `eval_results`, `marketplace_entries`, `rag_pipelines`, `annotation_sessions`, `experiments`
 - All store CRUD methods accept `&TenantId` parameter for tenant-scoped queries
 - All REST handlers extract `TenantId` from request extensions and pass to storage layer
@@ -259,19 +259,19 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - **SECURITY**: Budget checker URL injection — tenant_id now passed via reqwest `.query()` builder instead of string interpolation
 - **SECURITY**: Marketplace `pull` endpoint now scopes downloaded models to requesting tenant
 - **SECURITY**: Error message sanitization — lineage, versioning, and tenant admin endpoints no longer leak raw database errors to clients
-- `synapse-core/hardware/allocator`: Integer overflow in memory calculation now caught via `checked_mul()`
-- `synapse-core/rag/optimizer`: Thompson Sampling `select()` now samples each arm once then picks max (was re-sampling per comparison)
-- `synapse-backends/cost`: NaN costs no longer panic — `partial_cmp` returns `Equal` for NaN
-- `synapse-core/lineage/store`: UUID parse `.unwrap()` replaced with `.unwrap_or_default()` (prevents panic on corrupt data)
-- `synapse-core/preference/store`: `add_batch()` now wrapped in SQLite transaction for atomicity
-- `synapse-train/job/store`: Schema now includes `tenant_id` column — crash recovery preserves tenant ownership
-- `synapse-train/job/manager`: `start_job()` now verifies tenant ownership before spawning background task
-- `synapse-core/config`: Added `validate()` method — rejects NaN/Inf/negative budget values
+- `ifran-core/hardware/allocator`: Integer overflow in memory calculation now caught via `checked_mul()`
+- `ifran-core/rag/optimizer`: Thompson Sampling `select()` now samples each arm once then picks max (was re-sampling per comparison)
+- `ifran-backends/cost`: NaN costs no longer panic — `partial_cmp` returns `Equal` for NaN
+- `ifran-core/lineage/store`: UUID parse `.unwrap()` replaced with `.unwrap_or_default()` (prevents panic on corrupt data)
+- `ifran-core/preference/store`: `add_batch()` now wrapped in SQLite transaction for atomicity
+- `ifran-train/job/store`: Schema now includes `tenant_id` column — crash recovery preserves tenant ownership
+- `ifran-train/job/manager`: `start_job()` now verifies tenant ownership before spawning background task
+- `ifran-core/config`: Added `validate()` method — rejects NaN/Inf/negative budget values
 - All SQLite stores: Added `PRAGMA journal_mode=WAL` and `PRAGMA busy_timeout=5000` for concurrent access performance
-- `synapse-core/storage/encryption`: `verify_encryption_requirement()` now wired at startup
+- `ifran-core/storage/encryption`: `verify_encryption_requirement()` now wired at startup
 - Pagination added to lineage and versioning list endpoints (default 100, max 1000)
-- `synapse-train/job/manager`: `list_jobs`, `get_job`, `cancel_job` now filter by tenant_id
-- `synapse-core/lifecycle/manager`: `list_loaded` now accepts `Option<&TenantId>` for tenant-scoped filtering
+- `ifran-train/job/manager`: `list_jobs`, `get_job`, `cancel_job` now filter by tenant_id
+- `ifran-core/lifecycle/manager`: `list_loaded` now accepts `Option<&TenantId>` for tenant-scoped filtering
 
 ### Changed
 - Workspace version bumped to 2026.3.15
@@ -289,7 +289,7 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - Prompt length validation with configurable max (default 100K chars, HTTP 413)
 - Configurable CORS origins — replaces `CorsLayer::permissive()` with `[security] cors_allowed_origins`
 - Input validation for model names and filenames (path traversal prevention, HTTP 400)
-- Auth-required mode: server refuses to start without `SYNAPSE_API_KEY` when `auth_required = true`
+- Auth-required mode: server refuses to start without `IFRAN_API_KEY` when `auth_required = true`
 - New `[security]` config section with `#[serde(default)]` for full backward compatibility
 - `middleware::validation` module with `validate_prompt_length`, `validate_model_name`, `validate_filename`
 - `middleware::rate_limit` module wrapping `governor::RateLimiter`
@@ -297,23 +297,23 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 
 #### Milestone 6 — 80% Hardening
 - `proptest` added to workspace dependencies for property-based testing
-- `synapse-types/model`: Property-based tests — `ModelFormat`, `QuantLevel`, and `ModelInfo` serde roundtrip invariants; invalid JSON rejection tests
-- `synapse-types/backend`: Property-based tests — `AcceleratorType`, `BackendId`, `DeviceConfig` serde roundtrip invariants; invalid JSON rejection
-- `synapse-types/inference`: Property-based tests — `FinishReason`, `TokenUsage`, `InferenceRequest`, `StreamChunk` serde roundtrip invariants; invalid JSON rejection
-- `synapse-types/training`: Property-based tests — `TrainingMethod`, `TrainingStatus`, `DatasetFormat` roundtrips; `HyperParams` validation (valid params always pass); invalid JSON rejection; comprehensive validation edge cases (zero lr, zero epochs, zero batch, zero seq_len)
-- `synapse-types/eval`: Property-based tests — `BenchmarkKind`, `EvalStatus` roundtrips; `EvalResult` score/samples preservation; invalid JSON rejection; dataset path and no-details edge cases
-- `synapse-types/error`: Display tests for all remaining error variants (BackendError, DownloadError, TrainingError, BridgeError, ConfigError, StorageError, HardwareError, EvalError, MarketplaceError, DistributedError, RagError, Other); debug format, IO kind preservation, structured error field inclusion
-- `synapse-backends/router`: Concurrent DashMap access tests — register+read (20 writers + 20 readers), register+unregister (concurrent mutation + selection), concurrent select with preference; edge cases (overwrite same ID, unregister nonexistent, select_with_id no match)
-- `synapse-core/lifecycle/manager`: Concurrent RwLock access tests — register+list (20 concurrent registrations + reads), register+unregister (concurrent mutation + queries); edge cases (unregister not found, overwrite same ID, empty vram)
-- `synapse-train/job/manager`: Concurrent RwLock access tests — create+list (20 concurrent job creations + reads), create+update_progress (10 jobs × 10 steps concurrent updates); error paths (invalid hyperparams, zero batch size, nonexistent job progress update, empty list)
-- `synapse-api` integration tests: eval extended (create+get, list after create, create with dataset path, all benchmark kinds); bridge extended (heartbeat interval, no endpoint when disabled, connect+status); inference error paths (no model loaded, stream no model, invalid JSON); training error paths (invalid hyperparams, create+list); model edge cases (invalid UUID fallthrough); OpenAI error path (completions no model); marketplace error (publish nonexistent); distributed error (assign worker not found); method not allowed
+- `ifran-types/model`: Property-based tests — `ModelFormat`, `QuantLevel`, and `ModelInfo` serde roundtrip invariants; invalid JSON rejection tests
+- `ifran-types/backend`: Property-based tests — `AcceleratorType`, `BackendId`, `DeviceConfig` serde roundtrip invariants; invalid JSON rejection
+- `ifran-types/inference`: Property-based tests — `FinishReason`, `TokenUsage`, `InferenceRequest`, `StreamChunk` serde roundtrip invariants; invalid JSON rejection
+- `ifran-types/training`: Property-based tests — `TrainingMethod`, `TrainingStatus`, `DatasetFormat` roundtrips; `HyperParams` validation (valid params always pass); invalid JSON rejection; comprehensive validation edge cases (zero lr, zero epochs, zero batch, zero seq_len)
+- `ifran-types/eval`: Property-based tests — `BenchmarkKind`, `EvalStatus` roundtrips; `EvalResult` score/samples preservation; invalid JSON rejection; dataset path and no-details edge cases
+- `ifran-types/error`: Display tests for all remaining error variants (BackendError, DownloadError, TrainingError, BridgeError, ConfigError, StorageError, HardwareError, EvalError, MarketplaceError, DistributedError, RagError, Other); debug format, IO kind preservation, structured error field inclusion
+- `ifran-backends/router`: Concurrent DashMap access tests — register+read (20 writers + 20 readers), register+unregister (concurrent mutation + selection), concurrent select with preference; edge cases (overwrite same ID, unregister nonexistent, select_with_id no match)
+- `ifran-core/lifecycle/manager`: Concurrent RwLock access tests — register+list (20 concurrent registrations + reads), register+unregister (concurrent mutation + queries); edge cases (unregister not found, overwrite same ID, empty vram)
+- `ifran-train/job/manager`: Concurrent RwLock access tests — create+list (20 concurrent job creations + reads), create+update_progress (10 jobs × 10 steps concurrent updates); error paths (invalid hyperparams, zero batch size, nonexistent job progress update, empty list)
+- `ifran-api` integration tests: eval extended (create+get, list after create, create with dataset path, all benchmark kinds); bridge extended (heartbeat interval, no endpoint when disabled, connect+status); inference error paths (no model loaded, stream no model, invalid JSON); training error paths (invalid hyperparams, create+list); model edge cases (invalid UUID fallthrough); OpenAI error path (completions no model); marketplace error (publish nonexistent); distributed error (assign worker not found); method not allowed
 - CI coverage threshold lowered from 80% to 65% (realistic target)
 - RLHF integration tests: create/list sessions, add/annotate pairs, export DPO format
 - RAG integration tests: pipeline lifecycle (create, get, list, ingest, query, delete)
 - Eval integration tests: create/get/list runs, nonexistent run 404
-- `synapse-cli/train`: extracted `parse_method` and `parse_strategy` helpers with full test coverage
-- `synapse-api/rest/eval`: unit tests for `run_to_response`, request/response serialization
-- `synapse-api/rest/bridge`: unit tests for `BridgeStatusResponse` serialization
+- `ifran-cli/train`: extracted `parse_method` and `parse_strategy` helpers with full test coverage
+- `ifran-api/rest/eval`: unit tests for `run_to_response`, request/response serialization
+- `ifran-api/rest/bridge`: unit tests for `BridgeStatusResponse` serialization
 - 700+ tests across all crates, 73% coverage
 
 ### Changed
@@ -326,27 +326,27 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 ### Added
 
 #### RAG Pipeline Integration
-- `synapse-types/rag`: RAG types — `RagPipelineConfig`, `DocumentInfo`, `ChunkInfo`, `RagQuery`, `RagResult`, `RagSource` with serde defaults for chunk_size (512), chunk_overlap (64), similarity_top_k (5)
-- `synapse-types/error`: `RagError(String)` variant added to `SynapseError`
-- `synapse-core/rag/store`: SQLite RAG store — `rag_pipelines`, `rag_documents`, `rag_chunks` tables with full CRUD, embedding blob serialization (f32 → little-endian bytes), cosine similarity search
-- `synapse-core/rag/chunker`: Token-boundary-aware text splitter with configurable chunk size and overlap
-- `synapse-core/rag/pipeline`: RAG pipeline orchestrator — document ingestion (chunk → embed → store) and similarity-based retrieval with pluggable embedding function
-- `synapse-api/rest/rag`: REST endpoints — `POST /rag/pipelines`, `GET /rag/pipelines`, `GET /rag/pipelines/{id}`, `DELETE /rag/pipelines/{id}`, `POST /rag/pipelines/{id}/ingest`, `POST /rag/query`
-- `synapse-api/state`: `rag_store` added to `AppState`
+- `ifran-types/rag`: RAG types — `RagPipelineConfig`, `DocumentInfo`, `ChunkInfo`, `RagQuery`, `RagResult`, `RagSource` with serde defaults for chunk_size (512), chunk_overlap (64), similarity_top_k (5)
+- `ifran-types/error`: `RagError(String)` variant added to `IfranError`
+- `ifran-core/rag/store`: SQLite RAG store — `rag_pipelines`, `rag_documents`, `rag_chunks` tables with full CRUD, embedding blob serialization (f32 → little-endian bytes), cosine similarity search
+- `ifran-core/rag/chunker`: Token-boundary-aware text splitter with configurable chunk size and overlap
+- `ifran-core/rag/pipeline`: RAG pipeline orchestrator — document ingestion (chunk → embed → store) and similarity-based retrieval with pluggable embedding function
+- `ifran-api/rest/rag`: REST endpoints — `POST /rag/pipelines`, `GET /rag/pipelines`, `GET /rag/pipelines/{id}`, `DELETE /rag/pipelines/{id}`, `POST /rag/pipelines/{id}/ingest`, `POST /rag/query`
+- `ifran-api/state`: `rag_store` added to `AppState`
 
 #### WebAssembly Builds
-- `synapse-backends/wasm`: WebAssembly backend implementing `InferenceBackend` — feature-gated (`wasm`, opt-in, not in defaults), supports GGUF and ONNX formats, CPU-only, 4096 context
-- `synapse-backends/wasm`: Pluggable `WasmRuntime` trait for mock testing and real browser execution, `StubWasmRuntime` default for server-side testing
-- `synapse-backends/Cargo.toml`: `wasm` feature flag added
+- `ifran-backends/wasm`: WebAssembly backend implementing `InferenceBackend` — feature-gated (`wasm`, opt-in, not in defaults), supports GGUF and ONNX formats, CPU-only, 4096 context
+- `ifran-backends/wasm`: Pluggable `WasmRuntime` trait for mock testing and real browser execution, `StubWasmRuntime` default for server-side testing
+- `ifran-backends/Cargo.toml`: `wasm` feature flag added
 
 #### RLHF Annotation UI
-- `synapse-types/rlhf`: RLHF types — `AnnotationSession`, `AnnotationSessionStatus`, `AnnotationPair`, `Preference` (ResponseA/ResponseB/Tie/BothBad), `AnnotationStats`, `AnnotationExport`
-- `synapse-core/rlhf/store`: SQLite annotation store — `annotation_sessions` and `annotation_pairs` tables with session/pair CRUD, preference annotation, stats computation, DPO-format export
-- `synapse-core/rlhf/generator`: Annotation pair generation — single pair creation and batch generation from prompts with pluggable inference function
-- `synapse-api/rest/rlhf`: REST endpoints — `POST /rlhf/sessions`, `GET /rlhf/sessions`, `GET /rlhf/sessions/{id}`, `POST /rlhf/sessions/{id}/pairs`, `GET /rlhf/sessions/{id}/pairs`, `POST /rlhf/pairs/{id}/annotate`, `POST /rlhf/sessions/{id}/export`, `GET /rlhf/sessions/{id}/stats`
-- `synapse-api/state`: `annotation_store` added to `AppState`
-- `synapse-desktop/commands/rlhf`: Tauri commands — `list_sessions`, `create_session`, `get_next_pair`, `submit_annotation`, `get_session_stats`, `export_session`
-- `synapse-desktop/routes/rlhf`: Annotation UI — session management, side-by-side response comparison, preference buttons, progress bar, JSON export
+- `ifran-types/rlhf`: RLHF types — `AnnotationSession`, `AnnotationSessionStatus`, `AnnotationPair`, `Preference` (ResponseA/ResponseB/Tie/BothBad), `AnnotationStats`, `AnnotationExport`
+- `ifran-core/rlhf/store`: SQLite annotation store — `annotation_sessions` and `annotation_pairs` tables with session/pair CRUD, preference annotation, stats computation, DPO-format export
+- `ifran-core/rlhf/generator`: Annotation pair generation — single pair creation and batch generation from prompts with pluggable inference function
+- `ifran-api/rest/rlhf`: REST endpoints — `POST /rlhf/sessions`, `GET /rlhf/sessions`, `GET /rlhf/sessions/{id}`, `POST /rlhf/sessions/{id}/pairs`, `GET /rlhf/sessions/{id}/pairs`, `POST /rlhf/pairs/{id}/annotate`, `POST /rlhf/sessions/{id}/export`, `GET /rlhf/sessions/{id}/stats`
+- `ifran-api/state`: `annotation_store` added to `AppState`
+- `ifran-desktop/commands/rlhf`: Tauri commands — `list_sessions`, `create_session`, `get_next_pair`, `submit_annotation`, `get_session_stats`, `export_session`
+- `ifran-desktop/routes/rlhf`: Annotation UI — session management, side-by-side response comparison, preference buttons, progress bar, JSON export
 
 ---
 
@@ -355,17 +355,17 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 ### Added
 
 #### Autonomous Experiment System (AutoResearch-Inspired)
-- `synapse-types/experiment`: Experiment types — `ExperimentProgram`, `ExperimentStatus`, `TrialResult`, `Direction`, `SearchStrategy`, `ParamRange`, `ParamValues` with full serde support
-- `synapse-types/training`: `max_steps` and `time_budget_secs` fields on `TrainingJobConfig` for time-boxed training (backward-compatible via `#[serde(default)]`)
-- `synapse-core/experiment/store`: SQLite experiment store — `experiments` and `experiment_trials` tables with full CRUD, leaderboard queries with direction-aware ordering
-- `synapse-train/experiment/search`: Search space engine — grid (cartesian product) and random sampling strategies, `apply_param()` mapping to `HyperParams` fields
-- `synapse-train/experiment/runner`: Autonomous experiment loop — generates trials from search space, submits time-budgeted training jobs, polls for completion, compares scores, tracks best trial
-- `synapse-train/executor/subprocess`: Time budget enforcement via `tokio::time::timeout` (budget + 30s grace) around `child.wait()`
-- `synapse-train/executor/docker`: Time budget enforcement via `tokio::time::timeout` around `docker run`, graceful `docker stop` on timeout
+- `ifran-types/experiment`: Experiment types — `ExperimentProgram`, `ExperimentStatus`, `TrialResult`, `Direction`, `SearchStrategy`, `ParamRange`, `ParamValues` with full serde support
+- `ifran-types/training`: `max_steps` and `time_budget_secs` fields on `TrainingJobConfig` for time-boxed training (backward-compatible via `#[serde(default)]`)
+- `ifran-core/experiment/store`: SQLite experiment store — `experiments` and `experiment_trials` tables with full CRUD, leaderboard queries with direction-aware ordering
+- `ifran-train/experiment/search`: Search space engine — grid (cartesian product) and random sampling strategies, `apply_param()` mapping to `HyperParams` fields
+- `ifran-train/experiment/runner`: Autonomous experiment loop — generates trials from search space, submits time-budgeted training jobs, polls for completion, compares scores, tracks best trial
+- `ifran-train/executor/subprocess`: Time budget enforcement via `tokio::time::timeout` (budget + 30s grace) around `child.wait()`
+- `ifran-train/executor/docker`: Time budget enforcement via `tokio::time::timeout` around `docker run`, graceful `docker stop` on timeout
 - Python training scripts: `TimeBudgetCallback` for HuggingFace Trainer (SFT, full, DPO, distillation) — stops training on wall-clock expiry; `max_steps` override support; RLHF (PPO) loop time/step checks
-- `synapse-cli/experiment`: `synapse experiment run|list|status|leaderboard|stop` commands — run experiments from TOML program files, view results
-- `synapse-api/rest/experiment`: REST endpoints — `POST /experiments`, `GET /experiments`, `GET /experiments/{id}`, `GET /experiments/{id}/leaderboard`, `POST /experiments/{id}/stop`
-- `synapse-api/state`: `experiment_store` and `experiment_runners` added to `AppState`
+- `ifran-cli/experiment`: `ifran experiment run|list|status|leaderboard|stop` commands — run experiments from TOML program files, view results
+- `ifran-api/rest/experiment`: REST endpoints — `POST /experiments`, `GET /experiments`, `GET /experiments/{id}`, `GET /experiments/{id}/leaderboard`, `POST /experiments/{id}/stop`
+- `ifran-api/state`: `experiment_store` and `experiment_runners` added to `AppState`
 - TOML experiment program format for declarative hyperparameter sweep specification
 - 31 new tests across experiment types, store, search space, and API (543 total)
 
@@ -376,128 +376,128 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 ### Added
 
 #### Testing
-- `synapse-types`: Comprehensive serde roundtrip tests for all type modules (model, backend, inference, training, eval, registry, marketplace, distributed)
-- `synapse-types`: Error Display and `From<io::Error>` conversion tests for all `SynapseError` variants
-- `synapse-cli`: Clap arg parsing tests for all commands (pull, list, run, serve, train, status, remove, eval, marketplace)
-- `synapse-backends`: Unit tests for `build_messages`, `parse_completion_response`, `LlamaCppBackend` construction/capabilities/port allocation
-- `synapse-backends`: `ModelHandle` equality, hashing, and Debug tests
+- `ifran-types`: Comprehensive serde roundtrip tests for all type modules (model, backend, inference, training, eval, registry, marketplace, distributed)
+- `ifran-types`: Error Display and `From<io::Error>` conversion tests for all `IfranError` variants
+- `ifran-cli`: Clap arg parsing tests for all commands (pull, list, run, serve, train, status, remove, eval, marketplace)
+- `ifran-backends`: Unit tests for `build_messages`, `parse_completion_response`, `LlamaCppBackend` construction/capabilities/port allocation
+- `ifran-backends`: `ModelHandle` equality, hashing, and Debug tests
 - Test coverage roadmap with 6 staged milestones (30% → 80%)
 - CI coverage threshold set to 30% as baseline
-- **Milestone 2 — Core Logic (40%)**: 48 new tests across synapse-core and synapse-api
-  - `synapse-core/pull/downloader`: Mock HTTP tests — download, resume from `.part`, SHA-256 verification, progress events, error handling
-  - `synapse-core/pull/verifier`: verify_auto detection, BLAKE3 roundtrip, empty file hashing, integrity error content, nonexistent file error
-  - `synapse-core/registry/huggingface`: Mock API tests — model_info (success/404/500), list_gguf filtering, resolve_gguf with quant filter, auth token, serde roundtrips
-  - `synapse-core/registry/scanner`: TensorRT/PyTorch format detection, case-insensitive matching, size reporting, tokenizer.bin exclusion
-  - `synapse-api/state`: AppState construction, cloneability, bridge disabled, database file creation
-  - `synapse-api/rest/system`: health handler, status JSON structure with bridge fields
+- **Milestone 2 — Core Logic (40%)**: 48 new tests across ifran-core and ifran-api
+  - `ifran-core/pull/downloader`: Mock HTTP tests — download, resume from `.part`, SHA-256 verification, progress events, error handling
+  - `ifran-core/pull/verifier`: verify_auto detection, BLAKE3 roundtrip, empty file hashing, integrity error content, nonexistent file error
+  - `ifran-core/registry/huggingface`: Mock API tests — model_info (success/404/500), list_gguf filtering, resolve_gguf with quant filter, auth token, serde roundtrips
+  - `ifran-core/registry/scanner`: TensorRT/PyTorch format detection, case-insensitive matching, size reporting, tokenizer.bin exclusion
+  - `ifran-api/state`: AppState construction, cloneability, bridge disabled, database file creation
+  - `ifran-api/rest/system`: health handler, status JSON structure with bridge fields
 - CI coverage threshold raised to 40%
-- Added `mockito` for HTTP mocking in synapse-core dev-dependencies
+- Added `mockito` for HTTP mocking in ifran-core dev-dependencies
 - `HfClient::with_base_url()` for testable HuggingFace API client
-- **Milestone 3 — Backend Integration (50%)**: 40 new tests across synapse-backends and synapse-api
-  - `synapse-backends/ollama`: Mock HTTP tests — load/unload/infer/health, message building, capabilities, error handling
-  - `synapse-backends/vllm`: Mock HTTP tests — load/unload/infer/health, OpenAI response parsing, capabilities, error handling
-  - `synapse-backends/llamacpp`: Mock server infer cycle via instance injection, process lifecycle, error handling
-  - `synapse-api/rest/models`: Handler unit tests — list (empty/populated), get (by name/UUID/not found), delete (success/not found), field validation
+- **Milestone 3 — Backend Integration (50%)**: 40 new tests across ifran-backends and ifran-api
+  - `ifran-backends/ollama`: Mock HTTP tests — load/unload/infer/health, message building, capabilities, error handling
+  - `ifran-backends/vllm`: Mock HTTP tests — load/unload/infer/health, OpenAI response parsing, capabilities, error handling
+  - `ifran-backends/llamacpp`: Mock server infer cycle via instance injection, process lifecycle, error handling
+  - `ifran-api/rest/models`: Handler unit tests — list (empty/populated), get (by name/UUID/not found), delete (success/not found), field validation
 - CI coverage threshold raised to 50%
-- Added `mockito` for HTTP mocking in synapse-backends dev-dependencies
-- **Milestone 4 — API & Training (60%)**: 40 new tests across synapse-api and synapse-train
-  - `synapse-api/rest/inference`: InferenceBody serde tests (defaults, stream flag), no-model-loaded error paths for both endpoints
-  - `synapse-api/rest/openai_compat`: ChatCompletionRequest/ChatMessage serde, list_models (empty/with data), no-model error path
-  - `synapse-api/rest/training`: Full handler lifecycle — create (queued/auto-start), list, get, cancel, not-found errors, serde, job_to_response conversion
-  - `synapse-train/executor/docker`: Construction, container naming, cancel behavior, config serialization
-  - `synapse-train/executor/subprocess`: Construction, cancel with process kill, config serialization
-  - `synapse-train/executor/mod`: Extracted shared `script_for_method()` from docker/subprocess with full coverage
+- Added `mockito` for HTTP mocking in ifran-backends dev-dependencies
+- **Milestone 4 — API & Training (60%)**: 40 new tests across ifran-api and ifran-train
+  - `ifran-api/rest/inference`: InferenceBody serde tests (defaults, stream flag), no-model-loaded error paths for both endpoints
+  - `ifran-api/rest/openai_compat`: ChatCompletionRequest/ChatMessage serde, list_models (empty/with data), no-model error path
+  - `ifran-api/rest/training`: Full handler lifecycle — create (queued/auto-start), list, get, cancel, not-found errors, serde, job_to_response conversion
+  - `ifran-train/executor/docker`: Construction, container naming, cancel behavior, config serialization
+  - `ifran-train/executor/subprocess`: Construction, cancel with process kill, config serialization
+  - `ifran-train/executor/mod`: Extracted shared `script_for_method()` from docker/subprocess with full coverage
 - CI coverage threshold raised to 60%
 - Added `Debug` derive to `JobResponse` struct
-- **Milestone 5 — Bridge & CLI (70%)**: 55 new tests across synapse-api, synapse-bridge, and synapse-cli
-  - `synapse-api/rest/distributed`: Full handler unit tests — create, list, get, assign_worker, start, fail, worker_completed lifecycle, serde for all request/response types
-  - `synapse-api/rest/marketplace`: Handler unit tests — search (with/without query/no match), list_entries, unpublish (success/not found), serde for SearchQuery/PublishRequest/PullRequest, entry_to_response conversion
-  - `synapse-bridge/protocol`: Connection state variant distinctness, copy semantics, debug formatting, custom config, heartbeat/capabilities roundtrip with all fields
-  - `synapse-bridge/client`: Connect resets reconnect count, report_progress without connect, GPU request stub
-  - `synapse-bridge/server`: Custom heartbeat interval, zero-value heartbeat, full state transition chain
-  - `synapse-bridge/discovery`: Empty config fallthrough, debug format, DiscoveryMethod copy
-  - `synapse-cli/commands/list`: format_size (GB/MB/boundary/zero), truncate (short/exact/long)
+- **Milestone 5 — Bridge & CLI (70%)**: 55 new tests across ifran-api, ifran-bridge, and ifran-cli
+  - `ifran-api/rest/distributed`: Full handler unit tests — create, list, get, assign_worker, start, fail, worker_completed lifecycle, serde for all request/response types
+  - `ifran-api/rest/marketplace`: Handler unit tests — search (with/without query/no match), list_entries, unpublish (success/not found), serde for SearchQuery/PublishRequest/PullRequest, entry_to_response conversion
+  - `ifran-bridge/protocol`: Connection state variant distinctness, copy semantics, debug formatting, custom config, heartbeat/capabilities roundtrip with all fields
+  - `ifran-bridge/client`: Connect resets reconnect count, report_progress without connect, GPU request stub
+  - `ifran-bridge/server`: Custom heartbeat interval, zero-value heartbeat, full state transition chain
+  - `ifran-bridge/discovery`: Empty config fallthrough, debug format, DiscoveryMethod copy
+  - `ifran-cli/commands/list`: format_size (GB/MB/boundary/zero), truncate (short/exact/long)
 - CI coverage threshold raised to 70%
 - Added `Debug` derive to `DistributedJobResponse` struct
 
 #### Core
-- `synapse-types`: Core data structures — models, backends, inference, training, eval, marketplace, distributed, errors
-- `synapse-core/config`: TOML config loading with auto-discovery (`SYNAPSE_CONFIG` → `~/.synapse/` → `/etc/synapse/` → defaults)
-- `synapse-core/storage/db`: SQLite model catalog with full CRUD, schema migrations, and indexes
-- `synapse-core/storage/layout`: Filesystem layout for `~/.synapse/models/` with slug generation
-- `synapse-core/hardware/detect`: GPU detection (NVIDIA via nvidia-smi, AMD via sysfs, CPU from /proc)
-- `synapse-core/registry/huggingface`: HuggingFace Hub API — model info, GGUF resolution by quant, search
-- `synapse-core/registry/scanner`: Local filesystem scanner for GGUF, SafeTensors, ONNX, PyTorch, TensorRT files
-- `synapse-core/pull/downloader`: Chunked HTTP download with resume via `.part` files and Range headers
-- `synapse-core/pull/verifier`: SHA-256 and BLAKE3 integrity verification with auto-detection
-- `synapse-core/pull/progress`: Broadcast-channel progress tracking for multi-consumer updates
-- `synapse-core/lifecycle/manager`: Model load/unload orchestration with backend-agnostic handle tracking
-- `synapse-core/lifecycle/memory`: VRAM/RAM budget estimation with GPU/CPU fallback
-- `synapse-core/eval/runner`: Eval runner with run lifecycle, custom benchmark execution via closure-based inference
-- `synapse-core/eval/store`: SQLite eval results store with CRUD
-- `synapse-core/eval/benchmarks`: JSONL sample loading, exact/contains match scoring
-- `synapse-core/marketplace/catalog`: SQLite marketplace catalog — publish, search, list, unpublish
-- `synapse-core/marketplace/publisher`: Create marketplace entries from local models
-- `synapse-core/marketplace/resolver`: Peer management for remote marketplace search
+- `ifran-types`: Core data structures — models, backends, inference, training, eval, marketplace, distributed, errors
+- `ifran-core/config`: TOML config loading with auto-discovery (`IFRAN_CONFIG` → `~/.ifran/` → `/etc/ifran/` → defaults)
+- `ifran-core/storage/db`: SQLite model catalog with full CRUD, schema migrations, and indexes
+- `ifran-core/storage/layout`: Filesystem layout for `~/.ifran/models/` with slug generation
+- `ifran-core/hardware/detect`: GPU detection (NVIDIA via nvidia-smi, AMD via sysfs, CPU from /proc)
+- `ifran-core/registry/huggingface`: HuggingFace Hub API — model info, GGUF resolution by quant, search
+- `ifran-core/registry/scanner`: Local filesystem scanner for GGUF, SafeTensors, ONNX, PyTorch, TensorRT files
+- `ifran-core/pull/downloader`: Chunked HTTP download with resume via `.part` files and Range headers
+- `ifran-core/pull/verifier`: SHA-256 and BLAKE3 integrity verification with auto-detection
+- `ifran-core/pull/progress`: Broadcast-channel progress tracking for multi-consumer updates
+- `ifran-core/lifecycle/manager`: Model load/unload orchestration with backend-agnostic handle tracking
+- `ifran-core/lifecycle/memory`: VRAM/RAM budget estimation with GPU/CPU fallback
+- `ifran-core/eval/runner`: Eval runner with run lifecycle, custom benchmark execution via closure-based inference
+- `ifran-core/eval/store`: SQLite eval results store with CRUD
+- `ifran-core/eval/benchmarks`: JSONL sample loading, exact/contains match scoring
+- `ifran-core/marketplace/catalog`: SQLite marketplace catalog — publish, search, list, unpublish
+- `ifran-core/marketplace/publisher`: Create marketplace entries from local models
+- `ifran-core/marketplace/resolver`: Peer management for remote marketplace search
 - CalVer versioning via `VERSION` file — all crates inherit from workspace
 - Protobuf definitions for core, bridge, and training services
 
 #### Backends
-- `synapse-backends/traits`: `InferenceBackend` trait — load, unload, infer, stream, health check
-- `synapse-backends/llamacpp`: llama.cpp via `llama-server` subprocess with auto port allocation
-- `synapse-backends/ollama`: Ollama HTTP client — chat, streaming, model load/unload via keep_alive
-- `synapse-backends/vllm`: vLLM HTTP client — OpenAI-compatible chat and streaming
-- `synapse-backends/tensorrt`: TensorRT-LLM HTTP client to Triton server with streaming
-- `synapse-backends/candle`: Candle (pure Rust) backend for SafeTensors — trait impl, inference pending candle crate dep
-- `synapse-backends/gguf`: Direct GGUF loading backend — trait impl, inference pending candle-gguf dep
-- `synapse-backends/onnx`: ONNX Runtime backend — trait impl, inference pending ort crate dep
-- `synapse-backends/router`: Smart backend auto-selection by format, hardware, and user preference
+- `ifran-backends/traits`: `InferenceBackend` trait — load, unload, infer, stream, health check
+- `ifran-backends/llamacpp`: llama.cpp via `llama-server` subprocess with auto port allocation
+- `ifran-backends/ollama`: Ollama HTTP client — chat, streaming, model load/unload via keep_alive
+- `ifran-backends/vllm`: vLLM HTTP client — OpenAI-compatible chat and streaming
+- `ifran-backends/tensorrt`: TensorRT-LLM HTTP client to Triton server with streaming
+- `ifran-backends/candle`: Candle (pure Rust) backend for SafeTensors — trait impl, inference pending candle crate dep
+- `ifran-backends/gguf`: Direct GGUF loading backend — trait impl, inference pending candle-gguf dep
+- `ifran-backends/onnx`: ONNX Runtime backend — trait impl, inference pending ort crate dep
+- `ifran-backends/router`: Smart backend auto-selection by format, hardware, and user preference
 
 #### API Server
-- `synapse-api/rest/router`: Axum router with all route groups, CORS, telemetry, auth
-- `synapse-api/rest/models`: `GET /models`, `GET /models/:id`, `DELETE /models/:id`
-- `synapse-api/rest/inference`: `POST /inference`, `POST /inference/stream` (SSE)
-- `synapse-api/rest/openai_compat`: `POST /v1/chat/completions` (streaming + non-streaming), `GET /v1/models`
-- `synapse-api/rest/training`: `POST /training/jobs`, `GET /training/jobs`, `GET /training/jobs/:id`, `POST /training/jobs/:id/cancel`
-- `synapse-api/rest/eval`: `POST /eval/runs`, `GET /eval/runs`, `GET /eval/runs/:id`
-- `synapse-api/rest/marketplace`: `GET /marketplace/search`, `GET /marketplace/entries`, `POST /marketplace/publish`, `DELETE /marketplace/entries/:name`
-- `synapse-api/rest/system`: `GET /health`, `GET /system/status`
-- `synapse-api/middleware/telemetry`: Request tracing via tower-http
-- `synapse-api/middleware/auth`: Optional Bearer token auth via `SYNAPSE_API_KEY`
-- `synapse-api/state`: Shared application state with config, DB, backend router, model manager, job manager
+- `ifran-api/rest/router`: Axum router with all route groups, CORS, telemetry, auth
+- `ifran-api/rest/models`: `GET /models`, `GET /models/:id`, `DELETE /models/:id`
+- `ifran-api/rest/inference`: `POST /inference`, `POST /inference/stream` (SSE)
+- `ifran-api/rest/openai_compat`: `POST /v1/chat/completions` (streaming + non-streaming), `GET /v1/models`
+- `ifran-api/rest/training`: `POST /training/jobs`, `GET /training/jobs`, `GET /training/jobs/:id`, `POST /training/jobs/:id/cancel`
+- `ifran-api/rest/eval`: `POST /eval/runs`, `GET /eval/runs`, `GET /eval/runs/:id`
+- `ifran-api/rest/marketplace`: `GET /marketplace/search`, `GET /marketplace/entries`, `POST /marketplace/publish`, `DELETE /marketplace/entries/:name`
+- `ifran-api/rest/system`: `GET /health`, `GET /system/status`
+- `ifran-api/middleware/telemetry`: Request tracing via tower-http
+- `ifran-api/middleware/auth`: Optional Bearer token auth via `IFRAN_API_KEY`
+- `ifran-api/state`: Shared application state with config, DB, backend router, model manager, job manager
 
 #### Training
-- `synapse-train/job/manager`: Job lifecycle (create, start, cancel) with concurrent job limits
-- `synapse-train/job/scheduler`: FIFO priority queue
-- `synapse-train/job/status`: Job state machine (Queued → Running → Completed/Failed/Cancelled)
-- `synapse-train/executor/docker`: Docker container executor with GPU passthrough and method-specific script selection
-- `synapse-train/executor/subprocess`: Python subprocess executor
-- `synapse-train/dataset/loader`: JSONL, CSV, Parquet, HuggingFace dataset loading with sample counting
-- `synapse-train/dataset/validator`: Schema validation for JSONL and CSV formats
-- `synapse-train/methods`: LoRA/QLoRA, full fine-tune, DPO, RLHF, distillation configs and arg generation
-- `synapse-train/checkpoint/store`: Checkpoint save/load/list/prune with metadata
-- `synapse-train/checkpoint/merger`: LoRA adapter merging into base model via PEFT
-- `synapse-train/distributed/coordinator`: Distributed job creation, worker assignment, lifecycle
-- `synapse-train/distributed/worker`: Worker local state, distributed CLI arg generation, lifecycle
-- `synapse-train/distributed/aggregator`: Checkpoint aggregation plans (average/weighted), command builder
+- `ifran-train/job/manager`: Job lifecycle (create, start, cancel) with concurrent job limits
+- `ifran-train/job/scheduler`: FIFO priority queue
+- `ifran-train/job/status`: Job state machine (Queued → Running → Completed/Failed/Cancelled)
+- `ifran-train/executor/docker`: Docker container executor with GPU passthrough and method-specific script selection
+- `ifran-train/executor/subprocess`: Python subprocess executor
+- `ifran-train/dataset/loader`: JSONL, CSV, Parquet, HuggingFace dataset loading with sample counting
+- `ifran-train/dataset/validator`: Schema validation for JSONL and CSV formats
+- `ifran-train/methods`: LoRA/QLoRA, full fine-tune, DPO, RLHF, distillation configs and arg generation
+- `ifran-train/checkpoint/store`: Checkpoint save/load/list/prune with metadata
+- `ifran-train/checkpoint/merger`: LoRA adapter merging into base model via PEFT
+- `ifran-train/distributed/coordinator`: Distributed job creation, worker assignment, lifecycle
+- `ifran-train/distributed/worker`: Worker local state, distributed CLI arg generation, lifecycle
+- `ifran-train/distributed/aggregator`: Checkpoint aggregation plans (average/weighted), command builder
 - Python training scripts: `train_sft.py`, `train_full.py`, `train_dpo.py`, `train_rlhf.py`, `train_distill.py`
 
 #### SY Bridge
-- `synapse-bridge/server`: gRPC server with connection state machine, heartbeat, degraded mode
-- `synapse-bridge/client`: gRPC client with reconnect (exponential backoff), capability announcement, GPU requests
-- `synapse-bridge/protocol`: Connection states, heartbeat config, capability announcement types
-- `synapse-bridge/discovery`: SY endpoint discovery (config → `SY_ENDPOINT` env → localhost:9420)
+- `ifran-bridge/server`: gRPC server with connection state machine, heartbeat, degraded mode
+- `ifran-bridge/client`: gRPC client with reconnect (exponential backoff), capability announcement, GPU requests
+- `ifran-bridge/protocol`: Connection states, heartbeat config, capability announcement types
+- `ifran-bridge/discovery`: SY endpoint discovery (config → `SY_ENDPOINT` env → localhost:9420)
 
 #### CLI
-- `synapse pull`: Model pull with HuggingFace resolution, progress bar, integrity check, catalog registration
-- `synapse list`: Table-formatted model listing
-- `synapse rm`: Model removal with confirmation, disk cleanup, catalog deletion
-- `synapse run`: Interactive inference with streaming output
-- `synapse serve`: Full API server
-- `synapse train`: Training job creation with `--base-model`, `--dataset`, `--method`
-- `synapse status`: Hardware and catalog status
-- `synapse eval`: Model evaluation with benchmark selection (`--benchmark`, `--dataset`, `--sample-limit`)
-- `synapse marketplace search/publish/unpublish`: Model marketplace management
+- `ifran pull`: Model pull with HuggingFace resolution, progress bar, integrity check, catalog registration
+- `ifran list`: Table-formatted model listing
+- `ifran rm`: Model removal with confirmation, disk cleanup, catalog deletion
+- `ifran run`: Interactive inference with streaming output
+- `ifran serve`: Full API server
+- `ifran train`: Training job creation with `--base-model`, `--dataset`, `--method`
+- `ifran status`: Hardware and catalog status
+- `ifran eval`: Model evaluation with benchmark selection (`--benchmark`, `--dataset`, `--sample-limit`)
+- `ifran marketplace search/publish/unpublish`: Model marketplace management
 
 #### Desktop Application
 - Tauri v2 + SvelteKit scaffold with dark theme UI
@@ -506,13 +506,13 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - Chat page: model selection, message history, OpenAI-compatible inference
 - Training page: job list with progress bars, step/epoch/loss, cancel
 - Settings page: server status, hardware info, config guidance
-- 10 Tauri commands bridging frontend to Synapse REST API
+- 10 Tauri commands bridging frontend to Ifran REST API
 
 #### Agnosticos Integration
-- `deploy/synapse.service`: systemd unit with security hardening (ProtectSystem, PrivateTmp, NoNewPrivileges, GPU device access)
-- `deploy/agnosticos/synapse.pkg.toml`: Package spec with user creation hooks, capability registration, systemd setup
-- `deploy/synapse.toml.example`: System-level config template with all backends documented
-- Config auto-discovery chain: `SYNAPSE_CONFIG` env → `~/.synapse/synapse.toml` → `/etc/synapse/synapse.toml` → defaults
+- `deploy/ifran.service`: systemd unit with security hardening (ProtectSystem, PrivateTmp, NoNewPrivileges, GPU device access)
+- `deploy/agnosticos/ifran.pkg.toml`: Package spec with user creation hooks, capability registration, systemd setup
+- `deploy/ifran.toml.example`: System-level config template with all backends documented
+- Config auto-discovery chain: `IFRAN_CONFIG` env → `~/.ifran/ifran.toml` → `/etc/ifran/ifran.toml` → defaults
 - Agent-runtime capability provider registration with Agnosticos
 
 #### Infrastructure
@@ -526,80 +526,80 @@ Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 - 510 tests across all modules (~70% coverage)
 
 #### Model Evaluation Benchmarks
-- `synapse-core/eval/benchmarks`: MMLU, HellaSwag, HumanEval, perplexity prompt formatting and scoring
-- `synapse-core/eval/runner`: `run_benchmark()` dispatcher with per-benchmark runners (MMLU, HellaSwag, HumanEval, perplexity)
-- `synapse-api/rest/eval`: Background benchmark execution wired to inference backends via closure-based `infer_fn`
-- `synapse-cli/eval`: CLI eval command wired to local API with all benchmark types
+- `ifran-core/eval/benchmarks`: MMLU, HellaSwag, HumanEval, perplexity prompt formatting and scoring
+- `ifran-core/eval/runner`: `run_benchmark()` dispatcher with per-benchmark runners (MMLU, HellaSwag, HumanEval, perplexity)
+- `ifran-api/rest/eval`: Background benchmark execution wired to inference backends via closure-based `infer_fn`
+- `ifran-cli/eval`: CLI eval command wired to local API with all benchmark types
 
 #### Model Marketplace — Remote & Trust
-- `synapse-core/marketplace/resolver`: Remote peer search via `GET /marketplace/search` on each peer, deduplication
-- `synapse-core/marketplace/trust`: Trust/verification layer — `TrustLevel` (Untrusted/ChecksumVerified/TrustedPublisher), `TrustPolicy`, `verify_entry()`, `verify_download()`
-- `synapse-api/rest/marketplace`: Model download endpoint (`GET /marketplace/download/:name`), model pull endpoint (`POST /marketplace/pull`) with SHA-256 verification
-- `synapse-cli/marketplace`: `synapse marketplace pull --peer <url>` command with trust verification
+- `ifran-core/marketplace/resolver`: Remote peer search via `GET /marketplace/search` on each peer, deduplication
+- `ifran-core/marketplace/trust`: Trust/verification layer — `TrustLevel` (Untrusted/ChecksumVerified/TrustedPublisher), `TrustPolicy`, `verify_entry()`, `verify_download()`
+- `ifran-api/rest/marketplace`: Model download endpoint (`GET /marketplace/download/:name`), model pull endpoint (`POST /marketplace/pull`) with SHA-256 verification
+- `ifran-cli/marketplace`: `ifran marketplace pull --peer <url>` command with trust verification
 
 #### Distributed Training
-- `synapse-api/rest/distributed`: Full REST API for distributed job management (create, list, get, assign workers, start, complete, fail, aggregate)
-- `synapse-cli/train`: `--distributed`, `--world-size`, `--strategy` flags for distributed training
-- `synapse-bridge/client`: `request_worker_assignment()` and `sync_checkpoint()` RPCs for cross-node coordination
-- `synapse-train/distributed/coordinator`: `collect_checkpoint_paths()` for checkpoint synchronization
-- `synapse-train/distributed/aggregator`: `FederatedConfig`, `build_federated_command()` for federated averaging
+- `ifran-api/rest/distributed`: Full REST API for distributed job management (create, list, get, assign workers, start, complete, fail, aggregate)
+- `ifran-cli/train`: `--distributed`, `--world-size`, `--strategy` flags for distributed training
+- `ifran-bridge/client`: `request_worker_assignment()` and `sync_checkpoint()` RPCs for cross-node coordination
+- `ifran-train/distributed/coordinator`: `collect_checkpoint_paths()` for checkpoint synchronization
+- `ifran-train/distributed/aggregator`: `FederatedConfig`, `build_federated_command()` for federated averaging
 
 #### SY Bridge Integration
-- `synapse-api/state`: Bridge client/server initialized in AppState when `bridge.enabled = true`, with SY endpoint discovery
-- `synapse-api/rest/bridge`: REST endpoints — `GET /bridge/status`, `POST /bridge/connect`, `POST /bridge/heartbeat`
-- `synapse-api/main`: Auto-connect to SY on startup, background heartbeat task with loaded models/GPU/active jobs
-- `synapse-api/rest/system`: Bridge connection state included in `/system/status`
-- `synapse-api/rest/training`: Training job start and cancel events reported to SY via bridge client
-- `synapse-api/rest/distributed`: Worker assignments forwarded to SY via `RequestWorkerAssignment`, checkpoint sync via `SyncCheckpoint` on worker completion, job completion reported to SY
+- `ifran-api/state`: Bridge client/server initialized in AppState when `bridge.enabled = true`, with SY endpoint discovery
+- `ifran-api/rest/bridge`: REST endpoints — `GET /bridge/status`, `POST /bridge/connect`, `POST /bridge/heartbeat`
+- `ifran-api/main`: Auto-connect to SY on startup, background heartbeat task with loaded models/GPU/active jobs
+- `ifran-api/rest/system`: Bridge connection state included in `/system/status`
+- `ifran-api/rest/training`: Training job start and cancel events reported to SY via bridge client
+- `ifran-api/rest/distributed`: Worker assignments forwarded to SY via `RequestWorkerAssignment`, checkpoint sync via `SyncCheckpoint` on worker completion, job completion reported to SY
 - 510 tests across all modules (~70% coverage)
 
 ### Fixed
-- **SECURITY**: SQL injection in `synapse-core/marketplace/catalog.rs` — `search()` now uses parameterized queries instead of string interpolation
-- **SECURITY**: Python code injection in `synapse-train/checkpoint/merger.rs` — `merge_lora()` now passes paths via environment variables instead of interpolating into Python source
-- `synapse-core/pull/downloader.rs`: Corrupted `.part` files are now cleaned up when SHA-256 verification fails, preventing infinite retry loops
-- `synapse-core/registry/huggingface.rs`: Replaced `.unwrap()` with proper error handling in `resolve_gguf()` fallback path
-- `synapse-core/marketplace/catalog.rs`: Replaced `serde_json::to_string().unwrap()` calls with proper error propagation in `publish()`
-- `synapse-api/rest/openai_compat.rs`: `list_models` now returns `Result` — database errors are propagated as 500 instead of silently returning empty list
-- `synapse-api/rest/inference.rs`: Both `/inference` and `/inference/stream` now use the loaded model's actual backend instead of hardcoding `"llamacpp"`
-- `synapse-api/rest/models.rs`: Failed filesystem cleanup during model deletion is now logged as a warning instead of silently ignored
-- `synapse-api/rest/marketplace.rs`: Model download endpoint now streams files via `tokio_util::io::ReaderStream` instead of loading entire model into memory (prevents OOM on large files)
-- `synapse-train/executor/subprocess.rs`: Fixed potential deadlock in `run()` — child process is now removed from the tracking map before awaiting, so `cancel()` can acquire the write lock concurrently
-- `synapse-backends/llamacpp`: `unload_model()` now calls `wait()` after `kill()` to reap child processes and prevent zombie `llama-server` processes
-- `synapse-backends/ollama`: `unload_model()` now logs HTTP errors instead of silently discarding them with `let _ =`
-- `synapse-backends/ollama`: Stream errors in `infer_stream()` now logged with `warn!` instead of silently breaking
-- `synapse-backends/router`: `select()` now logs a warning when the user's preferred backend is not found, before falling back to auto-selection
-- `synapse-train/job/manager`: Fixed potential deadlock in `cancel_job()` — read lock is now released before calling `executor.cancel()`, preventing deadlock when the executor needs write access
-- `synapse-train/executor/docker`: Container is now tracked BEFORE `docker run` executes, so `cancel()` can find and stop the container during long-running training
-- `synapse-train/distributed/coordinator`: `worker_completed()` now guards against over-counting — duplicate completion reports after all workers have finished are no-ops
-- `synapse-api/rest/training`: `create_job` auto-start failures are now logged as warnings instead of silently ignored with `let _ =`
-- `synapse-core/marketplace/resolver`: HTTP client builder failure now logs a warning and falls back to default client instead of silently using `unwrap_or_default()`
-- `synapse-core/marketplace/resolver`: Format filter serialization failure in `query_peer()` now returns an error instead of silently dropping the filter via `unwrap_or_default()`
-- `synapse-core/lifecycle/manager`: Replaced `.unwrap()` on `best_accelerator()` with proper error propagation — prevents panic when GPU is detected but accelerator type is undetermined
-- `synapse-core/lifecycle/memory`: `estimate_gguf()` now rounds up file size to nearest MB instead of truncating, preventing underestimation of memory requirements
-- `synapse-backends/router`: `select()` no longer returns an incompatible backend as fallback — returns `None` when no backend supports the requested format, instead of silently picking any backend
-- `synapse-backends/ollama`: `load_model()` now validates the HTTP response status — previously a failed load (HTTP 500) was silently treated as success, causing phantom loaded models
-- `synapse-train/executor/docker`: `cancel()` now removes the container from tracking after stopping, preventing unbounded memory growth from accumulated stale entries
-- `synapse-train/executor/docker`: `cancel()` now logs `docker stop` errors instead of silently discarding them with `let _ =`
-- `synapse-train/executor/docker`: Container tracking cleanup on spawn failure is now synchronous instead of fire-and-forget `tokio::spawn`
-- `synapse-train/job/manager`: Fixed race condition in `start_job()` — running job count is now checked inside the write lock, preventing concurrent calls from exceeding `max_concurrent`
-- `synapse-train/job/manager`: `cancel_job()` now re-validates terminal state after reacquiring write lock, preventing Cancelled from overwriting a concurrent Completed transition
-- `synapse-api/rest/models`: `delete_model` now deletes from database first, then cleans up filesystem — prevents orphaned DB records if FS deletion succeeds but DB deletion fails
-- `synapse-api/rest/marketplace`: Download endpoint removes TOCTOU race — uses `File::open()` error handling instead of separate `exists()` check, and gets metadata from the open file handle
-- `synapse-api/middleware/auth`: Replaced hardcoded `&header[7..]` string slice with `strip_prefix("Bearer ")` for safer token extraction
-- `synapse-api/main`: Heartbeat bridge communication errors now logged with `warn!` instead of silently discarded
+- **SECURITY**: SQL injection in `ifran-core/marketplace/catalog.rs` — `search()` now uses parameterized queries instead of string interpolation
+- **SECURITY**: Python code injection in `ifran-train/checkpoint/merger.rs` — `merge_lora()` now passes paths via environment variables instead of interpolating into Python source
+- `ifran-core/pull/downloader.rs`: Corrupted `.part` files are now cleaned up when SHA-256 verification fails, preventing infinite retry loops
+- `ifran-core/registry/huggingface.rs`: Replaced `.unwrap()` with proper error handling in `resolve_gguf()` fallback path
+- `ifran-core/marketplace/catalog.rs`: Replaced `serde_json::to_string().unwrap()` calls with proper error propagation in `publish()`
+- `ifran-api/rest/openai_compat.rs`: `list_models` now returns `Result` — database errors are propagated as 500 instead of silently returning empty list
+- `ifran-api/rest/inference.rs`: Both `/inference` and `/inference/stream` now use the loaded model's actual backend instead of hardcoding `"llamacpp"`
+- `ifran-api/rest/models.rs`: Failed filesystem cleanup during model deletion is now logged as a warning instead of silently ignored
+- `ifran-api/rest/marketplace.rs`: Model download endpoint now streams files via `tokio_util::io::ReaderStream` instead of loading entire model into memory (prevents OOM on large files)
+- `ifran-train/executor/subprocess.rs`: Fixed potential deadlock in `run()` — child process is now removed from the tracking map before awaiting, so `cancel()` can acquire the write lock concurrently
+- `ifran-backends/llamacpp`: `unload_model()` now calls `wait()` after `kill()` to reap child processes and prevent zombie `llama-server` processes
+- `ifran-backends/ollama`: `unload_model()` now logs HTTP errors instead of silently discarding them with `let _ =`
+- `ifran-backends/ollama`: Stream errors in `infer_stream()` now logged with `warn!` instead of silently breaking
+- `ifran-backends/router`: `select()` now logs a warning when the user's preferred backend is not found, before falling back to auto-selection
+- `ifran-train/job/manager`: Fixed potential deadlock in `cancel_job()` — read lock is now released before calling `executor.cancel()`, preventing deadlock when the executor needs write access
+- `ifran-train/executor/docker`: Container is now tracked BEFORE `docker run` executes, so `cancel()` can find and stop the container during long-running training
+- `ifran-train/distributed/coordinator`: `worker_completed()` now guards against over-counting — duplicate completion reports after all workers have finished are no-ops
+- `ifran-api/rest/training`: `create_job` auto-start failures are now logged as warnings instead of silently ignored with `let _ =`
+- `ifran-core/marketplace/resolver`: HTTP client builder failure now logs a warning and falls back to default client instead of silently using `unwrap_or_default()`
+- `ifran-core/marketplace/resolver`: Format filter serialization failure in `query_peer()` now returns an error instead of silently dropping the filter via `unwrap_or_default()`
+- `ifran-core/lifecycle/manager`: Replaced `.unwrap()` on `best_accelerator()` with proper error propagation — prevents panic when GPU is detected but accelerator type is undetermined
+- `ifran-core/lifecycle/memory`: `estimate_gguf()` now rounds up file size to nearest MB instead of truncating, preventing underestimation of memory requirements
+- `ifran-backends/router`: `select()` no longer returns an incompatible backend as fallback — returns `None` when no backend supports the requested format, instead of silently picking any backend
+- `ifran-backends/ollama`: `load_model()` now validates the HTTP response status — previously a failed load (HTTP 500) was silently treated as success, causing phantom loaded models
+- `ifran-train/executor/docker`: `cancel()` now removes the container from tracking after stopping, preventing unbounded memory growth from accumulated stale entries
+- `ifran-train/executor/docker`: `cancel()` now logs `docker stop` errors instead of silently discarding them with `let _ =`
+- `ifran-train/executor/docker`: Container tracking cleanup on spawn failure is now synchronous instead of fire-and-forget `tokio::spawn`
+- `ifran-train/job/manager`: Fixed race condition in `start_job()` — running job count is now checked inside the write lock, preventing concurrent calls from exceeding `max_concurrent`
+- `ifran-train/job/manager`: `cancel_job()` now re-validates terminal state after reacquiring write lock, preventing Cancelled from overwriting a concurrent Completed transition
+- `ifran-api/rest/models`: `delete_model` now deletes from database first, then cleans up filesystem — prevents orphaned DB records if FS deletion succeeds but DB deletion fails
+- `ifran-api/rest/marketplace`: Download endpoint removes TOCTOU race — uses `File::open()` error handling instead of separate `exists()` check, and gets metadata from the open file handle
+- `ifran-api/middleware/auth`: Replaced hardcoded `&header[7..]` string slice with `strip_prefix("Bearer ")` for safer token extraction
+- `ifran-api/main`: Heartbeat bridge communication errors now logged with `warn!` instead of silently discarded
 - CI/CD container image build timeout: switched from compiling Rust inside Docker (30+ min under QEMU for arm64) to using pre-built binaries from the build-release job via `Dockerfile.release` with `TARGETARCH`
 
 ### Enhanced
-- `synapse-backends/*`: All 4 HTTP backends (llamacpp, ollama, vllm, tensorrt) now use 300-second request timeouts instead of unbounded `reqwest::Client::new()`
-- `synapse-backends/*`: All 4 streaming backends now check `tx.is_closed()` to stop processing when the receiver is dropped (early client disconnect)
-- `synapse-backends/*`: All 4 streaming backends enforce a 1 MB buffer limit to prevent unbounded memory growth from malformed SSE streams
-- `synapse-backends/llamacpp`: `load_model()` now validates that the model file exists before spawning `llama-server`, providing a clear error instead of a cryptic process failure
-- `synapse-api/rest/inference`: Both `/inference` and `/inference/stream` now match the requested model by name instead of always using the first loaded model
-- `synapse-api/rest/openai_compat`: `/v1/chat/completions` now matches the requested model by name instead of always using the first loaded model
-- `synapse-api/rest/eval`: Eval run inference now targets the requested model by name instead of always using the first loaded model
-- `synapse-core/lifecycle/manager`: `LoadedModel` now carries `model_name` to support model selection by name in inference endpoints
-- `synapse-types/training`: `HyperParams::validate()` rejects `learning_rate <= 0`, `epochs == 0`, `batch_size == 0`, and `max_seq_length == 0`
-- `synapse-train/job/manager`: `create_job()` now validates hyperparameters before creating the job
-- `synapse-train/checkpoint/store`: `prune()` now handles already-deleted checkpoints gracefully (ENOENT-tolerant) instead of propagating errors
-- `synapse-train/dataset/validator`: CSV validation now handles RFC 4180 quoted fields — commas inside `"quoted,field"` no longer cause false column-count mismatches
+- `ifran-backends/*`: All 4 HTTP backends (llamacpp, ollama, vllm, tensorrt) now use 300-second request timeouts instead of unbounded `reqwest::Client::new()`
+- `ifran-backends/*`: All 4 streaming backends now check `tx.is_closed()` to stop processing when the receiver is dropped (early client disconnect)
+- `ifran-backends/*`: All 4 streaming backends enforce a 1 MB buffer limit to prevent unbounded memory growth from malformed SSE streams
+- `ifran-backends/llamacpp`: `load_model()` now validates that the model file exists before spawning `llama-server`, providing a clear error instead of a cryptic process failure
+- `ifran-api/rest/inference`: Both `/inference` and `/inference/stream` now match the requested model by name instead of always using the first loaded model
+- `ifran-api/rest/openai_compat`: `/v1/chat/completions` now matches the requested model by name instead of always using the first loaded model
+- `ifran-api/rest/eval`: Eval run inference now targets the requested model by name instead of always using the first loaded model
+- `ifran-core/lifecycle/manager`: `LoadedModel` now carries `model_name` to support model selection by name in inference endpoints
+- `ifran-types/training`: `HyperParams::validate()` rejects `learning_rate <= 0`, `epochs == 0`, `batch_size == 0`, and `max_seq_length == 0`
+- `ifran-train/job/manager`: `create_job()` now validates hyperparameters before creating the job
+- `ifran-train/checkpoint/store`: `prune()` now handles already-deleted checkpoints gracefully (ENOENT-tolerant) instead of propagating errors
+- `ifran-train/dataset/validator`: CSV validation now handles RFC 4180 quoted fields — commas inside `"quoted,field"` no longer cause false column-count mismatches
 - 512 tests across all modules

@@ -1,31 +1,31 @@
-# SY ↔ Synapse Bridge Protocol
+# SY ↔ Ifran Bridge Protocol
 
-Synapse and SecureYeoman maintain a cyclic relationship via gRPC bidirectional streaming.
+Ifran and SecureYeoman maintain a cyclic relationship via gRPC bidirectional streaming.
 
 ## Protocol Overview
 
 Two gRPC services define the bridge:
 
-### SynapseBridge (SY → Synapse)
-SY sends commands to Synapse:
+### IfranBridge (SY → Ifran)
+SY sends commands to Ifran:
 - `SubmitTrainingJob` — delegate a training job
 - `GetJobStatus` — stream job progress updates
 - `PullModel` — pull a model with progress streaming
 - `RunInference` / `StreamInference` — run inference
 
-### YeomanBridge (Synapse → SY)
-Synapse calls back to SY:
+### YeomanBridge (Ifran → SY)
+Ifran calls back to SY:
 - `RequestGpuAllocation` — request GPU resources for a job
 - `ReportProgress` — stream training/download progress
-- `RequestScaleOut` — request additional Synapse instances
+- `RequestScaleOut` — request additional Ifran instances
 - `RegisterCompletedModel` — notify SY of a newly trained model
 
 ## Connection Lifecycle
 
-1. Synapse reads the SY endpoint from config or `SY_ENDPOINT` env var
+1. Ifran reads the SY endpoint from config or `SY_ENDPOINT` env var
 2. Connects to SY and announces capabilities (GPU count, supported methods)
 3. Heartbeats flow every 10 seconds with instance status (loaded models, free VRAM, active jobs)
-4. If SY is unavailable, Synapse operates in degraded mode (no orchestration)
+4. If SY is unavailable, Ifran operates in degraded mode (no orchestration)
 5. Reconnection is automatic with exponential backoff (max 10 attempts)
 
 ## Protocol Configuration
@@ -40,7 +40,7 @@ Synapse calls back to SY:
 ## Discovery
 
 SY endpoint is resolved in order:
-1. `bridge.sy_endpoint` in `synapse.toml`
+1. `bridge.sy_endpoint` in `ifran.toml`
 2. `SY_ENDPOINT` environment variable
 3. `http://127.0.0.1:9420` (well-known local address)
 
@@ -56,7 +56,7 @@ Bridge status is also included in the `/system/status` response.
 
 ## Auto-Initialization
 
-When `bridge.enabled = true` in config, synapse-server automatically:
+When `bridge.enabled = true` in config, ifran-server automatically:
 
 1. Discovers the SY endpoint (config → env → well-known)
 2. Connects the bridge client to SY

@@ -1,21 +1,21 @@
-# Synapse CLI Reference
+# Ifran CLI Reference
 
-The `synapse` command-line interface manages local LLM inference, training, evaluation, and model distribution.
+The `ifran` command-line interface manages local LLM inference, training, evaluation, and model distribution.
 
 ```
-synapse <COMMAND>
+ifran <COMMAND>
 ```
 
 ---
 
-## synapse pull
+## ifran pull
 
 Download a model from a remote registry (Hugging Face) to local storage.
 
 ### Usage
 
 ```
-synapse pull <MODEL> [--quant <QUANT>]
+ifran pull <MODEL> [--quant <QUANT>]
 ```
 
 ### Arguments
@@ -29,42 +29,42 @@ synapse pull <MODEL> [--quant <QUANT>]
 
 ```sh
 # Pull a model at default precision
-synapse pull meta-llama/Llama-3.1-8B-Instruct
+ifran pull meta-llama/Llama-3.1-8B-Instruct
 
 # Pull a specific quantization
-synapse pull meta-llama/Llama-3.1-8B-Instruct --quant q4_k_m
+ifran pull meta-llama/Llama-3.1-8B-Instruct --quant q4_k_m
 ```
 
 ---
 
-## synapse list
+## ifran list
 
 List all locally available models. Displays name, format, quantization level, size, and pull date.
 
 ### Usage
 
 ```
-synapse list
+ifran list
 ```
 
 ### Examples
 
 ```sh
-synapse list
+ifran list
 ```
 
 Output columns: `NAME`, `FORMAT`, `QUANT`, `SIZE`, `PULLED`.
 
 ---
 
-## synapse run
+## ifran run
 
 Start an interactive inference session with a local model. Prompts are entered line-by-line; responses stream back in real time. Press `Ctrl+D` to quit.
 
 ### Usage
 
 ```
-synapse run <MODEL>
+ifran run <MODEL>
 ```
 
 ### Arguments
@@ -76,47 +76,47 @@ synapse run <MODEL>
 ### Examples
 
 ```sh
-synapse run meta-llama/Llama-3.1-8B-Instruct
+ifran run meta-llama/Llama-3.1-8B-Instruct
 ```
 
 ---
 
-## synapse serve
+## ifran serve
 
-Start the Synapse API server. Exposes a REST API and an OpenAI-compatible `/v1/chat/completions` endpoint.
+Start the Ifran API server. Exposes a REST API and an OpenAI-compatible `/v1/chat/completions` endpoint.
 
 ### Usage
 
 ```
-synapse serve [--bind <ADDRESS>]
+ifran serve [--bind <ADDRESS>]
 ```
 
 ### Arguments
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `-b, --bind <ADDRESS>` | No | Bind address and port. Defaults to the value in the Synapse config (typically `0.0.0.0:8420`). |
+| `-b, --bind <ADDRESS>` | No | Bind address and port. Defaults to the value in the Ifran config (typically `0.0.0.0:8420`). |
 
 ### Examples
 
 ```sh
 # Start with default bind address
-synapse serve
+ifran serve
 
 # Start on a custom port
-synapse serve --bind 0.0.0.0:9000
+ifran serve --bind 0.0.0.0:9000
 ```
 
 ---
 
-## synapse train
+## ifran train
 
 Start a local or distributed training job.
 
 ### Usage
 
 ```
-synapse train --base-model <MODEL> --dataset <PATH> [OPTIONS]
+ifran train --base-model <MODEL> --dataset <PATH> [OPTIONS]
 ```
 
 ### Arguments
@@ -134,13 +134,13 @@ synapse train --base-model <MODEL> --dataset <PATH> [OPTIONS]
 
 ```sh
 # LoRA fine-tune (default method)
-synapse train --base-model meta-llama/Llama-3.1-8B-Instruct --dataset ./data/train.jsonl
+ifran train --base-model meta-llama/Llama-3.1-8B-Instruct --dataset ./data/train.jsonl
 
 # QLoRA fine-tune
-synapse train --base-model meta-llama/Llama-3.1-8B-Instruct --dataset ./data/train.jsonl --method qlora
+ifran train --base-model meta-llama/Llama-3.1-8B-Instruct --dataset ./data/train.jsonl --method qlora
 
 # Distributed training with 4 workers using model parallelism
-synapse train \
+ifran train \
   --base-model meta-llama/Llama-3.1-8B-Instruct \
   --dataset ./data/train.jsonl \
   --method full \
@@ -153,32 +153,32 @@ When `--distributed` is used, the local node is automatically assigned as rank 0
 
 ---
 
-## synapse status
+## ifran status
 
 Show system status including detected hardware and the number of models in the local catalog.
 
 ### Usage
 
 ```
-synapse status
+ifran status
 ```
 
 ### Examples
 
 ```sh
-synapse status
+ifran status
 ```
 
 ---
 
-## synapse remove
+## ifran remove
 
 Remove a locally stored model from disk and the catalog.
 
 ### Usage
 
 ```
-synapse remove <MODEL> [-y]
+ifran remove <MODEL> [-y]
 ```
 
 ### Arguments
@@ -192,22 +192,22 @@ synapse remove <MODEL> [-y]
 
 ```sh
 # Remove with confirmation prompt
-synapse remove meta-llama/Llama-3.1-8B-Instruct
+ifran remove meta-llama/Llama-3.1-8B-Instruct
 
 # Remove without confirmation
-synapse remove meta-llama/Llama-3.1-8B-Instruct -y
+ifran remove meta-llama/Llama-3.1-8B-Instruct -y
 ```
 
 ---
 
-## synapse eval
+## ifran eval
 
-Run an evaluation benchmark against a model. Requires the API server to be running (`synapse serve`), as evaluation sends inference requests over HTTP.
+Run an evaluation benchmark against a model. Requires the API server to be running (`ifran serve`), as evaluation sends inference requests over HTTP.
 
 ### Usage
 
 ```
-synapse eval <MODEL> [--benchmark <BENCHMARK>] [--dataset <PATH>] [--sample-limit <N>]
+ifran eval <MODEL> [--benchmark <BENCHMARK>] [--dataset <PATH>] [--sample-limit <N>]
 ```
 
 ### Arguments
@@ -223,27 +223,27 @@ synapse eval <MODEL> [--benchmark <BENCHMARK>] [--dataset <PATH>] [--sample-limi
 
 ```sh
 # Run default perplexity benchmark
-synapse eval llama-8b --dataset ./data/eval.jsonl
+ifran eval llama-8b --dataset ./data/eval.jsonl
 
 # Run MMLU with a sample limit
-synapse eval llama-8b --benchmark mmlu --dataset ./data/mmlu.jsonl --sample-limit 500
+ifran eval llama-8b --benchmark mmlu --dataset ./data/mmlu.jsonl --sample-limit 500
 
 # Run a custom benchmark
-synapse eval llama-8b --benchmark custom --dataset ./data/my-eval.jsonl
+ifran eval llama-8b --benchmark custom --dataset ./data/my-eval.jsonl
 ```
 
 ---
 
-## synapse marketplace
+## ifran marketplace
 
-Peer-to-peer model marketplace commands. Search, publish, unpublish, and pull models across Synapse nodes.
+Peer-to-peer model marketplace commands. Search, publish, unpublish, and pull models across Ifran nodes.
 
-### synapse marketplace search
+### ifran marketplace search
 
 Search the local marketplace catalog.
 
 ```
-synapse marketplace search [QUERY]
+ifran marketplace search [QUERY]
 ```
 
 | Argument | Required | Description |
@@ -251,16 +251,16 @@ synapse marketplace search [QUERY]
 | `[QUERY]` | No | Search query string. Omit to list all entries. |
 
 ```sh
-synapse marketplace search llama
-synapse marketplace search
+ifran marketplace search llama
+ifran marketplace search
 ```
 
-### synapse marketplace publish
+### ifran marketplace publish
 
 Publish a local model to the marketplace so other peers can discover and pull it.
 
 ```
-synapse marketplace publish <MODEL>
+ifran marketplace publish <MODEL>
 ```
 
 | Argument | Required | Description |
@@ -268,15 +268,15 @@ synapse marketplace publish <MODEL>
 | `<MODEL>` | Yes | Name of a local model to publish |
 
 ```sh
-synapse marketplace publish my-finetuned-llama
+ifran marketplace publish my-finetuned-llama
 ```
 
-### synapse marketplace unpublish
+### ifran marketplace unpublish
 
 Remove a model listing from the marketplace.
 
 ```
-synapse marketplace unpublish <MODEL>
+ifran marketplace unpublish <MODEL>
 ```
 
 | Argument | Required | Description |
@@ -284,15 +284,15 @@ synapse marketplace unpublish <MODEL>
 | `<MODEL>` | Yes | Name of the model to unpublish |
 
 ```sh
-synapse marketplace unpublish my-finetuned-llama
+ifran marketplace unpublish my-finetuned-llama
 ```
 
-### synapse marketplace pull
+### ifran marketplace pull
 
 Pull a model from a remote marketplace peer. Downloads the model and verifies integrity using SHA-256 if available.
 
 ```
-synapse marketplace pull <MODEL> --peer <URL>
+ifran marketplace pull <MODEL> --peer <URL>
 ```
 
 | Argument | Required | Description |
@@ -301,21 +301,21 @@ synapse marketplace pull <MODEL> --peer <URL>
 | `--peer <URL>` | Yes | Peer URL (e.g. `http://node-2:8420`) |
 
 ```sh
-synapse marketplace pull llama-8b-finetuned --peer http://node-2:8420
+ifran marketplace pull llama-8b-finetuned --peer http://node-2:8420
 ```
 
 ---
 
-## synapse experiment
+## ifran experiment
 
 Autonomous hyperparameter experiment commands. Runs are defined in TOML program files that specify a search space, objective metric, and time budget.
 
-### synapse experiment run
+### ifran experiment run
 
 Launch an experiment from a TOML program file. Blocks until the experiment completes, printing the best score as trials finish.
 
 ```
-synapse experiment run <PROGRAM>
+ifran experiment run <PROGRAM>
 ```
 
 | Argument | Required | Description |
@@ -323,27 +323,27 @@ synapse experiment run <PROGRAM>
 | `<PROGRAM>` | Yes | Path to an experiment program TOML file |
 
 ```sh
-synapse experiment run experiments/lr-sweep.toml
+ifran experiment run experiments/lr-sweep.toml
 ```
 
-### synapse experiment list
+### ifran experiment list
 
 List all experiments with their ID, name, status, and best score.
 
 ```
-synapse experiment list
+ifran experiment list
 ```
 
 ```sh
-synapse experiment list
+ifran experiment list
 ```
 
-### synapse experiment status
+### ifran experiment status
 
 Show detailed experiment status including per-trial results. If no ID is given, shows the latest experiment.
 
 ```
-synapse experiment status [ID]
+ifran experiment status [ID]
 ```
 
 | Argument | Required | Description |
@@ -352,18 +352,18 @@ synapse experiment status [ID]
 
 ```sh
 # Show latest experiment
-synapse experiment status
+ifran experiment status
 
 # Show a specific experiment
-synapse experiment status a1b2c3d4-e5f6-7890-abcd-ef1234567890
+ifran experiment status a1b2c3d4-e5f6-7890-abcd-ef1234567890
 ```
 
-### synapse experiment leaderboard
+### ifran experiment leaderboard
 
 Display a ranked leaderboard of trials for a given experiment, sorted by the objective metric.
 
 ```
-synapse experiment leaderboard <ID> [--limit <N>]
+ifran experiment leaderboard <ID> [--limit <N>]
 ```
 
 | Argument | Required | Description |
@@ -372,16 +372,16 @@ synapse experiment leaderboard <ID> [--limit <N>]
 | `--limit <N>` | No | Maximum number of results to show (default: `20`) |
 
 ```sh
-synapse experiment leaderboard a1b2c3d4-e5f6-7890-abcd-ef1234567890
-synapse experiment leaderboard a1b2c3d4-e5f6-7890-abcd-ef1234567890 --limit 10
+ifran experiment leaderboard a1b2c3d4-e5f6-7890-abcd-ef1234567890
+ifran experiment leaderboard a1b2c3d4-e5f6-7890-abcd-ef1234567890 --limit 10
 ```
 
-### synapse experiment stop
+### ifran experiment stop
 
 Stop a running experiment. Trials already in progress will complete before the experiment fully stops.
 
 ```
-synapse experiment stop <ID>
+ifran experiment stop <ID>
 ```
 
 | Argument | Required | Description |
@@ -389,5 +389,5 @@ synapse experiment stop <ID>
 | `<ID>` | Yes | Experiment UUID |
 
 ```sh
-synapse experiment stop a1b2c3d4-e5f6-7890-abcd-ef1234567890
+ifran experiment stop a1b2c3d4-e5f6-7890-abcd-ef1234567890
 ```

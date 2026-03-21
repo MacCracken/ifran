@@ -2,7 +2,7 @@
 
 ## Overview
 
-Synapse orchestrates LLM training through Docker containers or subprocess execution. It supports LoRA, QLoRA, full fine-tuning, DPO, RLHF, and distillation.
+Ifran orchestrates LLM training through Docker containers or subprocess execution. It supports LoRA, QLoRA, full fine-tuning, DPO, RLHF, and distillation.
 
 ## Quick Start: LoRA Fine-Tune
 
@@ -21,12 +21,12 @@ Supported formats: JSONL, CSV, Parquet, HuggingFace datasets.
 
 ```bash
 # LoRA fine-tune (default method)
-synapse train --base-model meta-llama/Llama-3.1-8B-Instruct --dataset ./my-dataset.jsonl
+ifran train --base-model meta-llama/Llama-3.1-8B-Instruct --dataset ./my-dataset.jsonl
 
 # Explicit method selection
-synapse train --base-model meta-llama/Llama-3.1-8B-Instruct --dataset ./data.jsonl --method qlora
-synapse train --base-model meta-llama/Llama-3.1-8B-Instruct --dataset ./data.jsonl --method dpo
-synapse train --base-model meta-llama/Llama-3.1-8B-Instruct --dataset ./data.jsonl --method full
+ifran train --base-model meta-llama/Llama-3.1-8B-Instruct --dataset ./data.jsonl --method qlora
+ifran train --base-model meta-llama/Llama-3.1-8B-Instruct --dataset ./data.jsonl --method dpo
+ifran train --base-model meta-llama/Llama-3.1-8B-Instruct --dataset ./data.jsonl --method full
 ```
 
 The CLI validates the dataset, selects the appropriate executor (Docker or subprocess), and submits the job to the training manager.
@@ -34,7 +34,7 @@ The CLI validates the dataset, selects the appropriate executor (Docker or subpr
 ### 3. Monitor progress
 
 ```bash
-synapse status
+ifran status
 ```
 
 ### 4. Advanced: Config file
@@ -82,16 +82,16 @@ target_modules = ["q_proj", "v_proj", "k_proj", "o_proj"]
 
 Training runs via one of two executors:
 
-- **docker** (default): Runs in a `synapse-trainer` container with GPU passthrough (`--gpus all`) and all Python dependencies pre-installed
+- **docker** (default): Runs in a `ifran-trainer` container with GPU passthrough (`--gpus all`) and all Python dependencies pre-installed
 - **subprocess**: Spawns Python training scripts directly on the host (requires local Python + transformers/PEFT/trl)
 
 ## SecureYeoman Integration
 
-SY can delegate training jobs to Synapse via the gRPC bridge:
+SY can delegate training jobs to Ifran via the gRPC bridge:
 
 ```
-SY → Synapse: SubmitTrainingJob
-Synapse → SY: ReportProgress (streaming)
-Synapse → SY: RequestGpuAllocation (if more resources needed)
-Synapse → SY: RegisterCompletedModel (on success)
+SY → Ifran: SubmitTrainingJob
+Ifran → SY: ReportProgress (streaming)
+Ifran → SY: RequestGpuAllocation (if more resources needed)
+Ifran → SY: RegisterCompletedModel (on success)
 ```

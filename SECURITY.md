@@ -8,7 +8,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in Synapse, please report it responsibly:
+If you discover a security vulnerability in Ifran, please report it responsibly:
 
 1. **Do not** open a public GitHub issue for security vulnerabilities.
 2. Email **security@maccracken.dev** with:
@@ -23,9 +23,9 @@ You should receive an acknowledgment within 48 hours. We will work with you to u
 
 ### API Authentication
 
-Synapse supports Bearer token authentication via the `SYNAPSE_API_KEY` environment variable. When deployed in production:
+Ifran supports Bearer token authentication via the `IFRAN_API_KEY` environment variable. When deployed in production:
 
-- Always set `SYNAPSE_API_KEY` to a strong, random token
+- Always set `IFRAN_API_KEY` to a strong, random token
 - Set `auth_required = true` in `[security]` config — the server will refuse to start without an API key
 - Use TLS termination (reverse proxy) in front of the API server
 - Bind to `127.0.0.1` instead of `0.0.0.0` if only local access is needed
@@ -38,7 +38,7 @@ The API enforces **per-IP** rate limiting via the `governor` crate backed by `Da
 - Default: 60 requests/second per IP with burst of 120
 - Returns HTTP 429 Too Many Requests when exceeded
 - One client exhausting its limit does not affect other clients
-- Configure via `[security]` in `synapse.toml`:
+- Configure via `[security]` in `ifran.toml`:
   ```toml
   [security]
   rate_limit_per_second = 30
@@ -73,17 +73,17 @@ cors_allowed_origins = ["https://app.example.com"]
 
 ### Systemd Hardening
 
-The provided `synapse.service` unit includes security hardening:
+The provided `ifran.service` unit includes security hardening:
 
 - `ProtectSystem=strict` — read-only filesystem except allowed paths
 - `ProtectHome=true` — no access to home directories
 - `PrivateTmp=true` — isolated /tmp
 - `NoNewPrivileges=true` — no privilege escalation
-- Dedicated `synapse` system user with minimal permissions
+- Dedicated `ifran` system user with minimal permissions
 
 ### Model Storage
 
-- Models are stored in `~/.synapse/models/` (user) or `/var/lib/synapse/models/` (system)
+- Models are stored in `~/.ifran/models/` (user) or `/var/lib/ifran/models/` (system)
 - Downloaded files are verified via SHA-256 checksums when available
 - The model catalog uses SQLite with parameterized queries (no SQL injection)
 

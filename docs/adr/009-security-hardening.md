@@ -4,7 +4,7 @@
 
 ## Context
 
-Synapse exposes a REST API for model inference, training, evaluation, RLHF annotation, RAG pipelines, and marketplace operations. Before this work, the API had:
+Ifran exposes a REST API for model inference, training, evaluation, RLHF annotation, RAG pipelines, and marketplace operations. Before this work, the API had:
 
 - Optional Bearer token auth (disabled by default)
 - Permissive CORS (`Access-Control-Allow-Origin: *`)
@@ -29,7 +29,7 @@ Implement six defense-in-depth security layers, all configurable via a new `[sec
 
 5. **Input validation** — `validate_model_name()` rejects path traversal (`..`), control characters, and overly long names. `validate_filename()` rejects path separators, hidden files, and traversal. Applied at handler entry points for inference, RAG ingest, and marketplace operations.
 
-6. **Auth-required mode** — When `auth_required = true`, the server refuses to start without `SYNAPSE_API_KEY` set. Fail-fast at startup rather than silently running unauthenticated.
+6. **Auth-required mode** — When `auth_required = true`, the server refuses to start without `IFRAN_API_KEY` set. Fail-fast at startup rather than silently running unauthenticated.
 
 ### Middleware stack order (outermost to innermost)
 

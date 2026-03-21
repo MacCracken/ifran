@@ -1,21 +1,21 @@
-# Contributing to Synapse
+# Contributing to Ifran
 
-Thank you for your interest in contributing to Synapse. This document provides guidelines and information to help you get started.
+Thank you for your interest in contributing to Ifran. This document provides guidelines and information to help you get started.
 
 ## Project Overview
 
-Synapse is a Rust-based LLM controller that provides a unified interface for managing, serving, and training large language models. The project is organized as a Cargo workspace containing 8 crates:
+Ifran is a Rust-based LLM controller that provides a unified interface for managing, serving, and training large language models. The project is organized as a Cargo workspace containing 8 crates:
 
 | Crate | Purpose |
 |---|---|
-| `synapse-types` | Shared type definitions, error types, and data models |
-| `synapse-core` | Core engine: model registry, download manager, configuration |
-| `synapse-backends` | Pluggable inference backend trait and implementations |
-| `synapse-train` | Training orchestration with Docker/subprocess/native executors |
-| `synapse-api` | REST (Axum) and gRPC (tonic) server |
-| `synapse-bridge` | Bidirectional gRPC bridge (SY <-> Synapse) |
-| `synapse-cli` | Command-line interface |
-| `synapse-desktop` | Tauri-based desktop application shell |
+| `ifran-types` | Shared type definitions, error types, and data models |
+| `ifran-core` | Core engine: model registry, download manager, configuration |
+| `ifran-backends` | Pluggable inference backend trait and implementations |
+| `ifran-train` | Training orchestration with Docker/subprocess/native executors |
+| `ifran-api` | REST (Axum) and gRPC (tonic) server |
+| `ifran-bridge` | Bidirectional gRPC bridge (SY <-> Ifran) |
+| `ifran-cli` | Command-line interface |
+| `ifran-desktop` | Tauri-based desktop application shell |
 
 ## Prerequisites
 
@@ -29,8 +29,8 @@ Synapse is a Rust-based LLM controller that provides a unified interface for man
 
 ```bash
 # Clone the repository
-git clone https://github.com/MacCracken/synapse.git
-cd synapse
+git clone https://github.com/MacCracken/ifran.git
+cd ifran
 
 # Install build dependencies (Linux)
 ./scripts/install-build-deps.sh
@@ -137,7 +137,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 ## Testing
 
 - **Unit tests** live alongside source code in each crate (`#[cfg(test)]` modules).
-- **Integration tests** live alongside each crate (e.g. `crates/synapse-api/tests/`).
+- **Integration tests** live alongside each crate (e.g. `crates/ifran-api/tests/`).
 - Coverage target: **65%** minimum (CI enforced, current: ~73%).
 - CI runs tests per-package in parallel.
 
@@ -146,7 +146,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 
 # Run tests for a specific crate
-cargo test -p synapse-core
+cargo test -p ifran-core
 
 # Run with coverage (requires cargo-tarpaulin)
 cargo tarpaulin --workspace --out html
@@ -167,7 +167,7 @@ cargo tarpaulin --workspace --out html
 
 ## Release Process
 
-Synapse uses **Calendar Versioning** (CalVer):
+Ifran uses **Calendar Versioning** (CalVer):
 
 - Format: `YYYY.M.D` for releases (e.g., `2026.3.9`)
 - Format: `YYYY.M.D-N` for same-day patch releases (e.g., `2026.3.9-1`)
@@ -184,15 +184,15 @@ Releases are created through the `release-automation` GitHub Actions workflow, w
 
 When working on a specific crate, keep these responsibilities in mind:
 
-- **synapse-types** -- Keep this crate dependency-free where possible. Changes here affect the entire workspace.
-- **synapse-core** -- The engine. Manages model registry, downloads, and configuration. Does not depend on any specific backend.
-- **synapse-backends** -- Implement the `InferenceBackend` trait for new backends. Each backend is feature-gated.
-- **synapse-train** -- Orchestrates training jobs. Executor implementations (Docker, subprocess, native) live here.
-- **synapse-api** -- HTTP and gRPC endpoints. Delegates to core and backends. OpenAI-compatible API surface.
-- **synapse-bridge** -- Handles bidirectional communication with SY. Protocol defined in `proto/`.
-- **synapse-cli** -- Thin layer over core functionality. Keep business logic out of this crate.
-- **synapse-desktop** -- Tauri shell. Frontend lives in `crates/synapse-desktop/src/`.
+- **ifran-types** -- Keep this crate dependency-free where possible. Changes here affect the entire workspace.
+- **ifran-core** -- The engine. Manages model registry, downloads, and configuration. Does not depend on any specific backend.
+- **ifran-backends** -- Implement the `InferenceBackend` trait for new backends. Each backend is feature-gated.
+- **ifran-train** -- Orchestrates training jobs. Executor implementations (Docker, subprocess, native) live here.
+- **ifran-api** -- HTTP and gRPC endpoints. Delegates to core and backends. OpenAI-compatible API surface.
+- **ifran-bridge** -- Handles bidirectional communication with SY. Protocol defined in `proto/`.
+- **ifran-cli** -- Thin layer over core functionality. Keep business logic out of this crate.
+- **ifran-desktop** -- Tauri shell. Frontend lives in `crates/ifran-desktop/src/`.
 
 ---
 
-Thank you for contributing to Synapse.
+Thank you for contributing to Ifran.

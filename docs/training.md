@@ -1,6 +1,6 @@
 # Training
 
-Synapse orchestrates LLM training via subprocess/Docker executors, avoiding embedding a Python runtime in Rust.
+Ifran orchestrates LLM training via subprocess/Docker executors, avoiding embedding a Python runtime in Rust.
 
 ## Training Methods
 
@@ -26,7 +26,7 @@ The dataset loader auto-detects column structure. The validator checks schema be
 
 Training jobs are submitted as configurations and executed by one of two executors:
 
-1. **Docker** (default) — launches a container with the `synapse-trainer` image containing Python + PyTorch + PEFT + TRL. Method-specific script is selected automatically.
+1. **Docker** (default) — launches a container with the `ifran-trainer` image containing Python + PyTorch + PEFT + TRL. Method-specific script is selected automatically.
 2. **Subprocess** — directly spawns `python3 scripts/train_<method>.py` for environments without Docker.
 
 Both executors pass training config as JSON (`--config-json` argument or `TRAINING_CONFIG` env var).
@@ -41,7 +41,7 @@ The `JobManager` enforces a concurrent job limit (default: 2). The `JobScheduler
 
 ## Python Scripts
 
-Located in `crates/synapse-train/src/scripts/`:
+Located in `crates/ifran-train/src/scripts/`:
 
 - **`train_sft.py`** — SFT with LoRA/QLoRA/full support via transformers + PEFT + TRL
 - **`train_full.py`** — Full parameter fine-tuning with gradient checkpointing
@@ -53,12 +53,12 @@ Config is passed via `--config-json`, `--config-file`, or `TRAINING_CONFIG` env 
 
 ## Distributed Training
 
-Synapse supports distributed training across multiple nodes using data parallelism.
+Ifran supports distributed training across multiple nodes using data parallelism.
 
 ### Architecture
 
 - **Coordinator**: Manages the distributed job lifecycle, worker assignments, and aggregation
-- **Workers**: Each Synapse instance participates as a worker with a unique rank
+- **Workers**: Each Ifran instance participates as a worker with a unique rank
 - **Aggregator**: Merges checkpoints from all workers after training completes
 
 ### Strategies
@@ -71,7 +71,7 @@ Synapse supports distributed training across multiple nodes using data paralleli
 
 ```bash
 # Start distributed training (local node becomes rank 0)
-synapse train --base-model meta-llama/Llama-3.1-8B --dataset data.jsonl \
+ifran train --base-model meta-llama/Llama-3.1-8B --dataset data.jsonl \
   --distributed --world-size 2 --strategy data_parallel
 ```
 
@@ -103,4 +103,4 @@ POST /training/distributed/jobs/:id/aggregate
 
 ## SecureYeoman Integration
 
-SY can delegate training jobs to Synapse via the gRPC bridge. Synapse reports progress back and can request additional GPU allocation from SY when needed. For distributed training, SY coordinates cross-node worker assignments via `RequestWorkerAssignment` and checkpoint synchronization via `SyncCheckpoint` RPCs.
+SY can delegate training jobs to Ifran via the gRPC bridge. Ifran reports progress back and can request additional GPU allocation from SY when needed. For distributed training, SY coordinates cross-node worker assignments via `RequestWorkerAssignment` and checkpoint synchronization via `SyncCheckpoint` RPCs.

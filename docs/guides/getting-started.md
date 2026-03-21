@@ -1,4 +1,4 @@
-# Getting Started with Synapse
+# Getting Started with Ifran
 
 ## Prerequisites
 
@@ -12,34 +12,34 @@
 ### From Source
 
 ```bash
-git clone git@github.com:MacCracken/synapse.git
-cd synapse
+git clone git@github.com:MacCracken/ifran.git
+cd ifran
 cargo build --release
 ```
 
 The binaries will be at:
-- `target/release/synapse` — CLI
-- `target/release/synapse-api` — API server
+- `target/release/ifran` — CLI
+- `target/release/ifran-api` — API server
 
 ### On Agnosticos
 
 ```bash
-pkg install synapse
-systemctl enable --now synapse
+pkg install ifran
+systemctl enable --now ifran
 ```
 
 This installs:
-- `/usr/local/bin/synapse` and `/usr/local/bin/synapse-server`
-- `/etc/synapse/synapse.toml` (system config)
-- `/var/lib/synapse/` (models, database, checkpoints, cache)
-- `synapse.service` (systemd unit with security hardening)
+- `/usr/local/bin/ifran` and `/usr/local/bin/ifran-server`
+- `/etc/ifran/ifran.toml` (system config)
+- `/var/lib/ifran/` (models, database, checkpoints, cache)
+- `ifran.service` (systemd unit with security hardening)
 
 ## First Steps
 
 ### 1. Pull a model
 
 ```bash
-synapse pull meta-llama/Llama-3.1-8B-Instruct --quant q4_k_m
+ifran pull meta-llama/Llama-3.1-8B-Instruct --quant q4_k_m
 ```
 
 This resolves the model on HuggingFace Hub, finds the matching GGUF file for the requested quantization, downloads it with a progress bar, verifies SHA-256 integrity, and registers it in the local SQLite catalog.
@@ -49,13 +49,13 @@ Downloads support resume — if interrupted, re-running the same command picks u
 Set `HF_TOKEN` for gated models:
 ```bash
 export HF_TOKEN=hf_xxxxx
-synapse pull meta-llama/Llama-3.1-8B-Instruct --quant q4_k_m
+ifran pull meta-llama/Llama-3.1-8B-Instruct --quant q4_k_m
 ```
 
 ### 2. List models
 
 ```bash
-synapse list
+ifran list
 ```
 
 Shows all locally registered models with name, format, quantization, size, and pull date.
@@ -63,8 +63,8 @@ Shows all locally registered models with name, format, quantization, size, and p
 ### 3. Remove a model
 
 ```bash
-synapse rm meta-llama/Llama-3.1-8B-Instruct
-synapse rm <model-name> -y   # skip confirmation
+ifran rm meta-llama/Llama-3.1-8B-Instruct
+ifran rm <model-name> -y   # skip confirmation
 ```
 
 Removes the model files from disk and deletes it from the catalog.
@@ -72,13 +72,13 @@ Removes the model files from disk and deletes it from the catalog.
 ### 4. Chat with it
 
 ```bash
-synapse run meta-llama/Llama-3.1-8B-Instruct
+ifran run meta-llama/Llama-3.1-8B-Instruct
 ```
 
 ### 5. Start the API server
 
 ```bash
-synapse serve
+ifran serve
 ```
 
 The server exposes:
@@ -89,8 +89,8 @@ The server exposes:
 ### 6. Enable authentication
 
 ```bash
-export SYNAPSE_API_KEY=your-secret-token
-synapse serve
+export IFRAN_API_KEY=your-secret-token
+ifran serve
 ```
 
 All endpoints except `/health` will require `Authorization: Bearer your-secret-token`.
@@ -98,26 +98,26 @@ All endpoints except `/health` will require `Authorization: Bearer your-secret-t
 ### 7. Use the desktop app
 
 ```bash
-cd crates/synapse-desktop
+cd crates/ifran-desktop
 cargo tauri dev
 ```
 
 ## Configuration
 
-Synapse discovers config in this order:
+Ifran discovers config in this order:
 
-1. `SYNAPSE_CONFIG` environment variable (explicit path)
-2. `~/.synapse/synapse.toml` (user config)
-3. `/etc/synapse/synapse.toml` (system config, Agnosticos)
+1. `IFRAN_CONFIG` environment variable (explicit path)
+2. `~/.ifran/ifran.toml` (user config)
+3. `/etc/ifran/ifran.toml` (system config, Agnosticos)
 4. Built-in defaults
 
-Create `~/.synapse/synapse.toml` or copy from `deploy/synapse.toml.example`.
+Create `~/.ifran/ifran.toml` or copy from `deploy/ifran.toml.example`.
 
 Key settings:
 - `server.bind` — REST API address (default: `0.0.0.0:8420`)
 - `server.grpc_bind` — gRPC address (default: `0.0.0.0:8421`)
-- `storage.models_dir` — where models are stored (default: `~/.synapse/models/`)
-- `storage.database` — SQLite catalog path (default: `~/.synapse/synapse.db`)
+- `storage.models_dir` — where models are stored (default: `~/.ifran/models/`)
+- `storage.database` — SQLite catalog path (default: `~/.ifran/ifran.db`)
 - `backends.default` — which inference backend to use (default: `llamacpp`)
 - `training.executor` — `docker` or `subprocess` (default: `docker`)
 - `bridge.sy_endpoint` — SecureYeoman connection (if using orchestration)
@@ -125,12 +125,12 @@ Key settings:
 
 ## Storage Layout
 
-Synapse stores all data under `~/.synapse/` by default (or `/var/lib/synapse/` on Agnosticos):
+Ifran stores all data under `~/.ifran/` by default (or `/var/lib/ifran/` on Agnosticos):
 
 ```text
-~/.synapse/
-├── synapse.toml        # Configuration file
-├── synapse.db          # SQLite model catalog
+~/.ifran/
+├── ifran.toml        # Configuration file
+├── ifran.db          # SQLite model catalog
 ├── cache/              # Temporary download cache
 ├── checkpoints/        # Training checkpoints
 └── models/
@@ -140,7 +140,7 @@ Synapse stores all data under `~/.synapse/` by default (or `/var/lib/synapse/` o
         └── model.gguf
 ```
 
-Models are tracked in a SQLite catalog (`synapse.db`) and stored in slugified directories under `models/`.
+Models are tracked in a SQLite catalog (`ifran.db`) and stored in slugified directories under `models/`.
 
 ## Next Steps
 

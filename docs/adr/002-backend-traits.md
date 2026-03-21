@@ -5,7 +5,7 @@
 
 ## Context
 
-Synapse must support multiple inference runtimes (llama.cpp, Candle, Ollama, vLLM, ONNX, TensorRT). Each has different capabilities, model format support, and hardware requirements.
+Ifran must support multiple inference runtimes (llama.cpp, Candle, Ollama, vLLM, ONNX, TensorRT). Each has different capabilities, model format support, and hardware requirements.
 
 ## Decision
 

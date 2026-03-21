@@ -1,10 +1,10 @@
-# Synapse
+# Ifran
 
 LLM controller for pulling, managing, and training language models. A self-contained product with CLI, REST/gRPC API, and desktop interfaces.
 
 ## Overview
 
-Synapse is a Rust-based tool that provides:
+Ifran is a Rust-based tool that provides:
 
 - **Model pulling** from HuggingFace with resume, integrity verification, and catalog tracking
 - **Inference** through 15 pluggable backends (llama.cpp, Candle, Ollama, vLLM, GGUF, ONNX, TensorRT, TPU, Gaudi, Inferentia, OneAPI, Qualcomm AI 100, Metal, Vulkan, AMD XDNA)
@@ -27,19 +27,19 @@ Synapse is a Rust-based tool that provides:
 
 ```bash
 # Pull a model
-synapse pull meta-llama/Llama-3.1-8B-Instruct --quant q4_k_m
+ifran pull meta-llama/Llama-3.1-8B-Instruct --quant q4_k_m
 
 # Run interactive chat
-synapse run meta-llama/Llama-3.1-8B-Instruct
+ifran run meta-llama/Llama-3.1-8B-Instruct
 
 # Start the API server
-synapse serve
+ifran serve
 
 # List local models
-synapse list
+ifran list
 
 # Start a training job
-synapse train --base-model meta-llama/Llama-3.1-8B-Instruct --dataset ./data.jsonl --method lora
+ifran train --base-model meta-llama/Llama-3.1-8B-Instruct --dataset ./data.jsonl --method lora
 ```
 
 ## Installation
@@ -47,58 +47,58 @@ synapse train --base-model meta-llama/Llama-3.1-8B-Instruct --dataset ./data.jso
 ### From Source
 
 ```bash
-git clone git@github.com:MacCracken/synapse.git
-cd synapse
+git clone git@github.com:MacCracken/ifran.git
+cd ifran
 cargo build --release
 ```
 
-Binaries: `target/release/synapse` (CLI), `target/release/synapse-api` (server).
+Binaries: `target/release/ifran` (CLI), `target/release/ifran-api` (server).
 
 ### On Agnosticos
 
 ```bash
-pkg install synapse
-systemctl start synapse
+pkg install ifran
+systemctl start ifran
 ```
 
-Installs to `/usr/local/bin/`, config at `/etc/synapse/synapse.toml`, data at `/var/lib/synapse/`.
+Installs to `/usr/local/bin/`, config at `/etc/ifran/ifran.toml`, data at `/var/lib/ifran/`.
 
 ## Configuration
 
-Synapse discovers config in this order:
+Ifran discovers config in this order:
 
-1. `SYNAPSE_CONFIG` environment variable
-2. `~/.synapse/synapse.toml` (user config)
-3. `/etc/synapse/synapse.toml` (system config, Agnosticos)
+1. `IFRAN_CONFIG` environment variable
+2. `~/.ifran/ifran.toml` (user config)
+3. `/etc/ifran/ifran.toml` (system config, Agnosticos)
 4. Built-in defaults
 
-See [deploy/synapse.toml.example](deploy/synapse.toml.example) for all options.
+See [deploy/ifran.toml.example](deploy/ifran.toml.example) for all options.
 
-Default storage: `~/.synapse/` (models, database, cache, checkpoints).
+Default storage: `~/.ifran/` (models, database, cache, checkpoints).
 
 ### Authentication
 
-Set `SYNAPSE_API_KEY` to enable Bearer token authentication on all API endpoints (except `/health`):
+Set `IFRAN_API_KEY` to enable Bearer token authentication on all API endpoints (except `/health`):
 
 ```bash
-export SYNAPSE_API_KEY=your-secret-token
-synapse serve
+export IFRAN_API_KEY=your-secret-token
+ifran serve
 ```
 
-Without `SYNAPSE_API_KEY`, the API is open (suitable for local development).
+Without `IFRAN_API_KEY`, the API is open (suitable for local development).
 
 ## Project Structure
 
 ```
 crates/
-├── synapse-types      # Shared types + protobuf codegen
-├── synapse-core       # Model registry, pull engine, lifecycle, hardware
-├── synapse-backends   # Pluggable inference backends (trait-based)
-├── synapse-train      # Training orchestration
-├── synapse-api        # Axum REST + tonic gRPC server
-├── synapse-bridge     # SY↔Synapse bidirectional gRPC
-├── synapse-cli        # CLI (binary: synapse)
-└── synapse-desktop    # Tauri v2 + SvelteKit (desktop app)
+├── ifran-types      # Shared types + protobuf codegen
+├── ifran-core       # Model registry, pull engine, lifecycle, hardware
+├── ifran-backends   # Pluggable inference backends (trait-based)
+├── ifran-train      # Training orchestration
+├── ifran-api        # Axum REST + tonic gRPC server
+├── ifran-bridge     # SY↔Ifran bidirectional gRPC
+├── ifran-cli        # CLI (binary: ifran)
+└── ifran-desktop    # Tauri v2 + SvelteKit (desktop app)
 ```
 
 ## Documentation

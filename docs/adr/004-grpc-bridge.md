@@ -5,13 +5,13 @@
 
 ## Context
 
-Synapse and SecureYeoman have a cyclic relationship: SY orchestrates Synapse instances, and Synapse calls back to SY for resource allocation and progress reporting. The protocol must support bidirectional streaming and be strongly typed.
+Ifran and SecureYeoman have a cyclic relationship: SY orchestrates Ifran instances, and Ifran calls back to SY for resource allocation and progress reporting. The protocol must support bidirectional streaming and be strongly typed.
 
 ## Decision
 
 Use gRPC via `tonic` for the bridge protocol. Two services define the contract:
-- `SynapseBridge`: SY → Synapse (commands)
-- `YeomanBridge`: Synapse → SY (callbacks)
+- `IfranBridge`: SY → Ifran (commands)
+- `YeomanBridge`: Ifran → SY (callbacks)
 
 Proto definitions in `proto/bridge.proto` are the shared source of truth.
 
