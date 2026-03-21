@@ -1,0 +1,46 @@
+[package]
+name = "ifran-backends"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["llamacpp", "candle-backend", "gguf", "ollama", "vllm", "onnx", "tensorrt", "tpu", "gaudi", "inferentia", "oneapi", "qualcomm", "xdna"]
+llamacpp = []
+candle-backend = []
+gguf = []
+onnx = []
+tensorrt = []
+tpu = []
+vllm = []
+ollama = []
+wasm = []
+gaudi = []
+inferentia = []
+metal = []
+vulkan = []
+oneapi = []
+qualcomm = []
+xdna = []
+
+[dependencies]
+ifran-types = { path = "../ifran-types" }
+ifran-core = { path = "../ifran-core" }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+dashmap = { workspace = true }
+thiserror = { workspace = true }
+reqwest = { workspace = true }
+serde_json = { workspace = true }
+futures = { workspace = true }
+
+[dev-dependencies]
+mockito = "1"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+uuid = { workspace = true }
+chrono = { workspace = true }
+proptest = { workspace = true }
+
+[lints]
+workspace = true

@@ -9,7 +9,7 @@ if [[ "$FILE" != *.rs ]]; then
   exit 0
 fi
 
-cd /home/macro/Repos/synapse
+cd /home/macro/Repos/ifran
 cargo fmt --all
 cargo clippy --workspace -- -D warnings
 cargo check --workspace

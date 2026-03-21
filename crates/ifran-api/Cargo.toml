@@ -1,0 +1,45 @@
+[package]
+name = "ifran-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+otlp = ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tracing-opentelemetry"]
+
+[dependencies]
+ifran-types = { path = "../ifran-types" }
+ifran-core = { path = "../ifran-core" }
+ifran-backends = { path = "../ifran-backends" }
+ifran-train = { path = "../ifran-train" }
+ifran-bridge = { path = "../ifran-bridge" }
+tokio = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+tonic = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rusqlite = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true }
+async-stream = "0.3"
+tokio-stream = { workspace = true }
+majra = { workspace = true }
+tokio-util = { workspace = true }
+opentelemetry = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true }
+tracing-opentelemetry = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+tower = { workspace = true, features = ["util"] }
+http-body-util = "0.1"
+
+[lints]
+workspace = true

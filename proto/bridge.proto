@@ -1,8 +1,8 @@
 syntax = "proto3";
-package synapse.bridge;
+package ifran.bridge;
 
-// SY -> Synapse commands
-service SynapseBridge {
+// SY -> Ifran commands
+service IfranBridge {
   rpc SubmitTrainingJob(TrainingJobRequest) returns (TrainingJobResponse);
   rpc GetJobStatus(JobStatusRequest) returns (stream JobStatusUpdate);
   rpc PullModel(PullModelRequest) returns (stream PullProgress);
@@ -10,7 +10,7 @@ service SynapseBridge {
   rpc StreamInference(InferenceRequest) returns (stream StreamChunk);
 }
 
-// Synapse -> SY callbacks
+// Ifran -> SY callbacks
 service YeomanBridge {
   rpc RequestGpuAllocation(GpuRequest) returns (GpuAllocation);
   rpc ReportProgress(stream ProgressUpdate) returns (Ack);

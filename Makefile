@@ -20,7 +20,7 @@ clean:
 # === Development ===
 
 dev:
-	cargo watch -x 'run --package synapse-api'
+	cargo watch -x 'run --package ifran-api'
 
 # === Quality ===
 
@@ -69,15 +69,15 @@ ci-docs: docs
 # === Docker ===
 
 docker-build:
-	docker build -t synapse:$(VERSION) -f docker/Dockerfile .
-	docker build -t synapse-trainer:$(VERSION) -f docker/Dockerfile.trainer .
+	docker build -t ifran:$(VERSION) -f docker/Dockerfile .
+	docker build -t ifran-trainer:$(VERSION) -f docker/Dockerfile.trainer .
 
 docker-dev:
 	docker compose -f docker/docker-compose.yml up --build
 
 docker-release:
-	docker build -t ghcr.io/maccracken/synapse:$(VERSION) -f docker/Dockerfile .
-	docker tag ghcr.io/maccracken/synapse:$(VERSION) ghcr.io/maccracken/synapse:latest
+	docker build -t ghcr.io/maccracken/ifran:$(VERSION) -f docker/Dockerfile .
+	docker tag ghcr.io/maccracken/ifran:$(VERSION) ghcr.io/maccracken/ifran:latest
 
 # === Version ===
 

@@ -1,0 +1,32 @@
+[package]
+name = "ifran-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ifran"
+path = "src/main.rs"
+
+[dependencies]
+ifran-types = { path = "../ifran-types" }
+ifran-core = { path = "../ifran-core" }
+ifran-backends = { path = "../ifran-backends" }
+ifran-train = { path = "../ifran-train" }
+ifran-api = { path = "../ifran-api" }
+tokio = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+indicatif = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+rusqlite = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+axum = { workspace = true }
+futures = { workspace = true }
+owo-colors = { workspace = true }
+
+[lints]
+workspace = true

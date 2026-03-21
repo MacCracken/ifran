@@ -54,8 +54,8 @@ jobs:
         with:
           name: binaries-${{ matrix.target }}
           path: |
-            target/${{ matrix.target }}/release/synapse
-            target/${{ matrix.target }}/release/synapse-api
+            target/${{ matrix.target }}/release/ifran
+            target/${{ matrix.target }}/release/ifran-api
           retention-days: 7
 
   fmt:
@@ -82,13 +82,13 @@ jobs:
       fail-fast: false
       matrix:
         package:
-          - synapse-types
-          - synapse-core
-          - synapse-backends
-          - synapse-train
-          - synapse-api
-          - synapse-bridge
-          - synapse-cli
+          - ifran-types
+          - ifran-core
+          - ifran-backends
+          - ifran-train
+          - ifran-api
+          - ifran-bridge
+          - ifran-cli
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -190,13 +190,13 @@ jobs:
       fail-fast: false
       matrix:
         package:
-          - synapse-types
-          - synapse-core
-          - synapse-backends
-          - synapse-train
-          - synapse-api
-          - synapse-bridge
-          - synapse-cli
+          - ifran-types
+          - ifran-core
+          - ifran-backends
+          - ifran-train
+          - ifran-api
+          - ifran-bridge
+          - ifran-cli
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -312,13 +312,13 @@ jobs:
           file: docker/Dockerfile
           push: false
           load: true
-          tags: synapse:ci-test
+          tags: ifran:ci-test
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Smoke test container
         run: |
-          docker run --rm -d --name synapse-test -p 8420:8420 synapse:ci-test
+          docker run --rm -d --name ifran-test -p 8420:8420 ifran:ci-test
           echo "Waiting for server to start..."
           for i in $(seq 1 30); do
             if curl -sf http://localhost:8420/health > /dev/null 2>&1; then
@@ -339,8 +339,8 @@ jobs:
           fi
           curl -sf http://localhost:8420/system/status | grep -q "version"
           echo "GET /system/status: ok"
-          docker logs synapse-test
-          docker stop synapse-test
+          docker logs ifran-test
+          docker stop ifran-test
 
   license:
     name: License Check

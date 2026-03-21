@@ -9,7 +9,7 @@ if ! echo "$CMD" | grep -qE '^git\s+commit\b'; then
   exit 0
 fi
 
-cd /home/macro/Repos/synapse
+cd /home/macro/Repos/ifran
 
 cargo fmt --all -- --check || { echo '{"decision":"block","reason":"cargo fmt check failed"}'; exit 0; }
 cargo clippy --workspace -- -D warnings || { echo '{"decision":"block","reason":"cargo clippy failed"}'; exit 0; }

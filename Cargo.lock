@@ -1075,6 +1075,170 @@ dependencies = [
 ]
 
 [[package]]
+name = "ifran-api"
+version = "2026.3.19"
+dependencies = [
+ "async-stream",
+ "axum 0.8.8",
+ "chrono",
+ "futures",
+ "http-body-util",
+ "ifran-backends",
+ "ifran-bridge",
+ "ifran-core",
+ "ifran-train",
+ "ifran-types",
+ "majra",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tonic",
+ "tower 0.5.3",
+ "tower-http",
+ "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "ifran-backends"
+version = "2026.3.19"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "dashmap",
+ "futures",
+ "ifran-core",
+ "ifran-types",
+ "mockito",
+ "proptest",
+ "reqwest",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ifran-bridge"
+version = "2026.3.19"
+dependencies = [
+ "chrono",
+ "ifran-backends",
+ "ifran-core",
+ "ifran-train",
+ "ifran-types",
+ "prost",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ifran-cli"
+version = "2026.3.19"
+dependencies = [
+ "axum 0.8.8",
+ "chrono",
+ "clap",
+ "futures",
+ "ifran-api",
+ "ifran-backends",
+ "ifran-core",
+ "ifran-train",
+ "ifran-types",
+ "indicatif",
+ "owo-colors",
+ "rusqlite",
+ "serde_json",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "ifran-core"
+version = "2026.3.19"
+dependencies = [
+ "ai-hwaccel",
+ "anyhow",
+ "blake3",
+ "chrono",
+ "futures",
+ "ifran-types",
+ "majra",
+ "mockito",
+ "proptest",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "toml",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ifran-train"
+version = "2026.3.19"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "ifran-core",
+ "ifran-types",
+ "majra",
+ "rand 0.10.0",
+ "rand_core 0.10.0",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ifran-types"
+version = "2026.3.19"
+dependencies = [
+ "chrono",
+ "proptest",
+ "prost",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tonic",
+ "tonic-build",
+ "uuid",
+]
+
+[[package]]
 name = "indexmap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1224,6 +1388,7 @@ version = "0.21.0"
 dependencies = [
  "chrono",
  "dashmap",
+ "rusqlite",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -2158,170 +2323,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "synapse-api"
-version = "2026.3.19"
-dependencies = [
- "async-stream",
- "axum 0.8.8",
- "chrono",
- "futures",
- "http-body-util",
- "majra",
- "opentelemetry",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
- "rusqlite",
- "serde",
- "serde_json",
- "synapse-backends",
- "synapse-bridge",
- "synapse-core",
- "synapse-train",
- "synapse-types",
- "tempfile",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tonic",
- "tower 0.5.3",
- "tower-http",
- "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "synapse-backends"
-version = "2026.3.19"
-dependencies = [
- "async-trait",
- "chrono",
- "dashmap",
- "futures",
- "mockito",
- "proptest",
- "reqwest",
- "serde_json",
- "synapse-core",
- "synapse-types",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "synapse-bridge"
-version = "2026.3.19"
-dependencies = [
- "chrono",
- "prost",
- "reqwest",
- "serde",
- "serde_json",
- "synapse-backends",
- "synapse-core",
- "synapse-train",
- "synapse-types",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "tonic",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "synapse-cli"
-version = "2026.3.19"
-dependencies = [
- "axum 0.8.8",
- "chrono",
- "clap",
- "futures",
- "indicatif",
- "owo-colors",
- "rusqlite",
- "serde_json",
- "synapse-api",
- "synapse-backends",
- "synapse-core",
- "synapse-train",
- "synapse-types",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "synapse-core"
-version = "2026.3.19"
-dependencies = [
- "ai-hwaccel",
- "anyhow",
- "blake3",
- "chrono",
- "futures",
- "majra",
- "mockito",
- "proptest",
- "reqwest",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "synapse-types",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "toml",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "synapse-train"
-version = "2026.3.19"
-dependencies = [
- "async-trait",
- "chrono",
- "majra",
- "rand 0.10.0",
- "rand_core 0.10.0",
- "reqwest",
- "rusqlite",
- "serde",
- "serde_json",
- "synapse-core",
- "synapse-types",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "toml",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "synapse-types"
-version = "2026.3.19"
-dependencies = [
- "chrono",
- "proptest",
- "prost",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tonic",
- "tonic-build",
- "uuid",
 ]
 
 [[package]]

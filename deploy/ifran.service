@@ -1,0 +1,51 @@
+[Unit]
+Description=Ifran LLM Controller
+Documentation=https://github.com/MacCracken/ifran
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/ifran serve
+Environment=IFRAN_CONFIG=/etc/ifran/ifran.toml
+Environment=RUST_LOG=info
+
+# Run as dedicated service user
+User=ifran
+Group=ifran
+
+# Restart policy
+Restart=on-failure
+RestartSec=5
+WatchdogSec=30
+ExecHealthCheck=/usr/bin/curl -sf http://127.0.0.1:8420/health
+
+# Resource limits
+LimitNOFILE=65536
+LimitMEMLOCK=infinity
+
+# Security hardening
+# NOTE: Drop-in overrides for inference-only and training modes are available.
+# See deploy/ifran-inference.conf and deploy/ifran-training.conf.
+# Install to /etc/systemd/system/ifran.service.d/ as needed.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ReadWritePaths=/var/lib/ifran
+ReadOnlyPaths=/etc/ifran
+
+# GPU access — NVIDIA devices and DRI for AMD ROCm
+DeviceAllow=/dev/nvidia* rwm
+DeviceAllow=/dev/nvidiactl rwm
+DeviceAllow=/dev/nvidia-uvm rwm
+DeviceAllow=/dev/nvidia-uvm-tools rwm
+DeviceAllow=/dev/dri/* rwm
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ifran
+
+[Install]
+WantedBy=multi-user.target

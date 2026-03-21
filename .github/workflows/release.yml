@@ -14,7 +14,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   REGISTRY: ghcr.io
-  IMAGE_NAME: maccracken/synapse
+  IMAGE_NAME: maccracken/ifran
 
 jobs:
   ci-gate:
@@ -64,11 +64,11 @@ jobs:
           VERSION=${{ steps.setup.outputs.project-version }}
           # Convert CalVer YYYY.M.D[-N] to compact YYYYMMDD[N]
           COMPACT_DATE=$(echo "$VERSION" | awk -F'[.-]' '{s=sprintf("%04d%02d%02d", $1, $2, $3); if ($4) s=s $4; print s}')
-          TARBALL_NAME="synapse-${COMPACT_DATE}-linux-${{ matrix.arch }}"
+          TARBALL_NAME="ifran-${COMPACT_DATE}-linux-${{ matrix.arch }}"
           mkdir -p "${TARBALL_NAME}"
 
-          cp target/${{ matrix.target }}/release/synapse "${TARBALL_NAME}/"
-          cp target/${{ matrix.target }}/release/synapse-api "${TARBALL_NAME}/"
+          cp target/${{ matrix.target }}/release/ifran "${TARBALL_NAME}/"
+          cp target/${{ matrix.target }}/release/ifran-api "${TARBALL_NAME}/"
           cp LICENSE "${TARBALL_NAME}/"
           cp README.md "${TARBALL_NAME}/"
 
@@ -84,8 +84,8 @@ jobs:
         with:
           name: release-${{ matrix.arch }}
           path: |
-            synapse-*.tar.gz
-            synapse-*.tar.gz.sha256
+            ifran-*.tar.gz
+            ifran-*.tar.gz.sha256
           retention-days: 7
 
   generate-sbom:
@@ -176,7 +176,7 @@ jobs:
           TEST_COUNT=$(grep -r '#\[test\]' crates/ --include='*.rs' | wc -l || echo "?")
 
           cat > changelog.md << EOF
-          ## Synapse ${VERSION}
+          ## Ifran ${VERSION}
 
           | | |
           |---|---|
@@ -227,11 +227,11 @@ jobs:
 
           | Platform | Architecture | File |
           |----------|-------------|------|
-          | Linux | x86_64 (amd64) | `synapse-*-linux-amd64.tar.gz` |
-          | Linux | aarch64 (arm64) | `synapse-*-linux-arm64.tar.gz` |
-          | Container | multi-arch | `ghcr.io/maccracken/synapse` |
+          | Linux | x86_64 (amd64) | `ifran-*-linux-amd64.tar.gz` |
+          | Linux | aarch64 (arm64) | `ifran-*-linux-arm64.tar.gz` |
+          | Container | multi-arch | `ghcr.io/maccracken/ifran` |
 
-          Each tarball includes `synapse` (CLI) and `synapse-server` (API server), plus LICENSE, README, and docs.
+          Each tarball includes `ifran` (CLI) and `ifran-server` (API server), plus LICENSE, README, and docs.
 
           SHA-256 checksums are provided as `.sha256` files alongside each tarball.
 
@@ -239,21 +239,21 @@ jobs:
 
           **Binary:**
           ```bash
-          tar xzf synapse-*-linux-amd64.tar.gz
-          cd synapse-*/
-          ./synapse serve
+          tar xzf ifran-*-linux-amd64.tar.gz
+          cd ifran-*/
+          ./ifran serve
           # API available at http://localhost:8420
           ```
 
           **Container:**
           ```bash
-          docker pull ghcr.io/maccracken/synapse:latest
-          docker run -p 8420:8420 ghcr.io/maccracken/synapse:latest
+          docker pull ghcr.io/maccracken/ifran:latest
+          docker run -p 8420:8420 ghcr.io/maccracken/ifran:latest
           ```
 
           **Verify download:**
           ```bash
-          sha256sum -c synapse-*-linux-amd64.tar.gz.sha256
+          sha256sum -c ifran-*-linux-amd64.tar.gz.sha256
           ```
 
           ### Supply Chain
@@ -283,7 +283,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "Synapse ${{ steps.version.outputs.version }}"
+          name: "Ifran ${{ steps.version.outputs.version }}"
           body_path: changelog.md
           prerelease: ${{ steps.prerelease.outputs.is_prerelease }}
           make_latest: ${{ steps.prerelease.outputs.is_prerelease == 'false' }}
@@ -325,15 +325,15 @@ jobs:
           mkdir -p bin/amd64 bin/arm64
 
           # Extract amd64 binaries
-          tar xzf artifacts/amd64/synapse-*-linux-amd64.tar.gz
-          cp synapse-*-linux-amd64/synapse bin/amd64/synapse
-          cp synapse-*-linux-amd64/synapse-api bin/amd64/synapse-api
+          tar xzf artifacts/amd64/ifran-*-linux-amd64.tar.gz
+          cp ifran-*-linux-amd64/ifran bin/amd64/ifran
+          cp ifran-*-linux-amd64/ifran-api bin/amd64/ifran-api
           chmod +x bin/amd64/*
 
           # Extract arm64 binaries
-          tar xzf artifacts/arm64/synapse-*-linux-arm64.tar.gz
-          cp synapse-*-linux-arm64/synapse bin/arm64/synapse
-          cp synapse-*-linux-arm64/synapse-api bin/arm64/synapse-api
+          tar xzf artifacts/arm64/ifran-*-linux-arm64.tar.gz
+          cp ifran-*-linux-arm64/ifran bin/arm64/ifran
+          cp ifran-*-linux-arm64/ifran-api bin/arm64/ifran-api
           chmod +x bin/arm64/*
 
       - name: Set up QEMU

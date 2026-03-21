@@ -1,21 +1,21 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/synapse-types",
-    "crates/synapse-core",
-    "crates/synapse-backends",
-    "crates/synapse-train",
-    "crates/synapse-api",
-    "crates/synapse-bridge",
-    "crates/synapse-cli",
-    # "crates/synapse-desktop/src-tauri",
+    "crates/ifran-types",
+    "crates/ifran-core",
+    "crates/ifran-backends",
+    "crates/ifran-train",
+    "crates/ifran-api",
+    "crates/ifran-bridge",
+    "crates/ifran-cli",
+    # "crates/ifran-desktop/src-tauri",
 ]
 
 [workspace.package]
 version = "2026.3.19"
 edition = "2024"
 license = "AGPL-3.0-only"
-repository = "https://github.com/MacCracken/synapse"
+repository = "https://github.com/MacCracken/ifran"
 
 [workspace.lints.clippy]
 collapsible_if = "allow"

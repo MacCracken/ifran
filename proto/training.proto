@@ -1,5 +1,5 @@
 syntax = "proto3";
-package synapse.training;
+package ifran.training;
 
 service TrainingService {
   rpc CreateJob(CreateJobRequest) returns (CreateJobResponse);

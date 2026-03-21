@@ -12,4 +12,4 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /workspace
 VOLUME ["/workspace"]
 
-CMD ["cargo", "watch", "-x", "run --package synapse-api"]
+CMD ["cargo", "watch", "-x", "run --package ifran-api"]

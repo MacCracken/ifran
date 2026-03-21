@@ -1,0 +1,100 @@
+[package]
+name = "ifran"
+description = "LLM controller for pulling, managing, and training language models"
+license = "MIT"
+version_file = "VERSION"
+homepage = "https://github.com/MacCracken/ifran"
+
+[build]
+type = "cargo"
+workspace_members = ["ifran-cli", "ifran-api"]
+release = true
+
+[install]
+bin = [
+    { src = "ifran", dst = "/usr/local/bin/ifran" },
+    { src = "ifran-api", dst = "/usr/local/bin/ifran-server" },
+]
+config = [
+    { src = "deploy/ifran.toml.example", dst = "/etc/ifran/ifran.toml", mode = "0644" },
+]
+service = [
+    { src = "deploy/ifran.service", dst = "/etc/systemd/system/ifran.service" },
+]
+dirs = [
+    { path = "/var/lib/ifran", owner = "ifran", group = "ifran", mode = "0750" },
+    { path = "/var/lib/ifran/models", owner = "ifran", group = "ifran", mode = "0750" },
+    { path = "/var/lib/ifran/checkpoints", owner = "ifran", group = "ifran", mode = "0750" },
+    { path = "/var/lib/ifran/cache", owner = "ifran", group = "ifran", mode = "0750" },
+    { path = "/etc/ifran", owner = "root", group = "ifran", mode = "0750" },
+]
+
+[user]
+name = "ifran"
+group = "ifran"
+system = true
+home = "/var/lib/ifran"
+shell = "/usr/sbin/nologin"
+description = "Ifran LLM Controller"
+
+[hooks]
+pre_install = """
+# Create ifran system user if it doesn't exist
+if ! getent passwd ifran >/dev/null 2>&1; then
+    useradd --system --user-group --home-dir /var/lib/ifran \
+            --shell /usr/sbin/nologin --comment "Ifran LLM Controller" ifran
+fi
+"""
+
+post_install = """
+# Ensure ownership
+chown -R ifran:ifran /var/lib/ifran
+chmod 0750 /var/lib/ifran
+
+# Reload systemd and enable service
+systemctl daemon-reload
+systemctl enable ifran.service
+
+# Register as Agnosticos capability provider
+if command -v agnosticos >/dev/null 2>&1; then
+    agnosticos capability register ifran \
+        --type llm-inference \
+        --endpoint http://127.0.0.1:8420 \
+        --grpc-endpoint http://127.0.0.1:8421 \
+        --capabilities 'model-pull,inference,training,openai-compat' \
+        --health-check http://127.0.0.1:8420/health \
+        2>/dev/null || true
+fi
+
+echo "Ifran installed. Start with: systemctl start ifran"
+"""
+
+post_remove = """
+# Deregister from Agnosticos
+if command -v agnosticos >/dev/null 2>&1; then
+    agnosticos capability deregister ifran 2>/dev/null || true
+fi
+
+systemctl stop ifran.service 2>/dev/null || true
+systemctl disable ifran.service 2>/dev/null || true
+systemctl daemon-reload
+"""
+
+[capabilities]
+# Agnosticos agent-runtime capability provider registration
+type = "llm-inference"
+name = "ifran"
+version_source = "VERSION"
+endpoints = [
+    { protocol = "http", port = 8420, path = "/health", role = "rest-api" },
+    { protocol = "grpc", port = 8421, role = "bridge" },
+]
+provides = [
+    "model-pull",
+    "model-management",
+    "inference",
+    "inference-streaming",
+    "openai-compatible-api",
+    "training",
+    "hardware-detection",
+]

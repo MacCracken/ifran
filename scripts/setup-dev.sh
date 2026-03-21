@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "Setting up Synapse development environment..."
+echo "Setting up Ifran development environment..."
 
 # Install protobuf compiler
 if ! command -v protoc &>/dev/null; then
