@@ -17,17 +17,24 @@ Current: **1,406 tests** across 7 crates. CI threshold: 65%.
 - [ ] **Drop `axum` if possible** — evaluate embedding hoosh's server builder (pending hoosh `HooshServer::builder()` API) to serve both inference and management endpoints from one process
 
 ### Majra — concurrency primitives (replaces governor, dashmap, manual broadcast)
-- [ ] **Replace `governor` rate limiting with `majra::ratelimit`** — includes automatic stale-key eviction (pending majra roadmap item)
+- [ ] **Replace `governor` rate limiting with `majra::ratelimit`** — includes automatic stale-key eviction
 - [ ] **Replace fleet heartbeat with `majra::heartbeat`** — drop custom `Arc<RwLock<HashMap>>` fleet manager and telemetry loop
 - [ ] **Unify event buses under `majra::pubsub`** — replace 3 separate `broadcast::channel` instances (training, GPU, progress) with topic-based pub/sub
-- [ ] **Replace FIFO job scheduler with `majra::queue`** — get priority queues + DAG scheduling + GPU-aware dequeue (pending majra roadmap items)
+- [ ] **Replace FIFO job scheduler with `majra::queue`** — get priority queues + DAG scheduling + GPU-aware dequeue
 - [ ] **Use `majra::barrier` for distributed training** — replace manual worker coordination with N-way barrier sync
+- [ ] **Use `majra::fleet` for multi-node GPU scheduling** — `FleetQueue` with work-stealing replaces manual node selection; `ResourcePool`/`ResourceReq` for GPU-aware routing
+- [ ] **Use `majra::dag` for training pipelines** — model lifecycle (download → convert → quantise → index) is a DAG; `WorkflowEngine` provides tier-based parallel execution, retry, error policies
+- [ ] **Use `majra::namespace` for multi-tenant isolation** — prefix queue names, topics, rate limiter keys per tenant; pairs with auth system
+- [ ] **Wire `majra::metrics::PrometheusMetrics`** — plug into `GET /metrics` endpoint; `NamespacedMetrics` for per-tenant metric partitioning
+- [ ] **Use `majra::ws` for real-time dashboards** — `WsBridge` fans out training progress and fleet status to WebSocket clients, replacing manual broadcast
+- [ ] **Evaluate `majra::redis_backend` for multi-instance** — `RedisRateLimiter` for distributed rate limiting, `RedisHeartbeatTracker` for cross-instance fleet health
+- [ ] **Evaluate `majra::postgres` for durable job scheduling** — `PostgresQueueBackend` for `ManagedQueue` persistence (currently SQLite); `PostgresWorkflowStorage` for DAG workflow runs
 - [ ] **Drop `dashmap` dep** — all concurrent map uses migrate to majra primitives or standard `Arc<RwLock<HashMap>>` where appropriate
 
 ### Dependency cleanup post-migration
 - [ ] Remove: `governor`, `dashmap`, `ai-hwaccel`, `async-trait` (if no longer needed)
 - [ ] Evaluate removing: `axum` (if hoosh embeds the server)
-- [ ] Add: `hoosh`, `majra`
+- [ ] Add: `hoosh`, `majra` (features: queue, pubsub, heartbeat, ratelimit, barrier, fleet, dag, namespace, prometheus, ws, postgres, redis-backend)
 
 ## Performance & Memory
 
