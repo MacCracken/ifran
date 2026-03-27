@@ -296,7 +296,7 @@ impl ExperimentStore {
                     Box::new(e),
                 )
             })?;
-            let status: ExperimentStatus = serde_json::from_str(&format!("\"{status_str}\""))
+            let status: ExperimentStatus = crate::storage::deserialize_quoted(&status_str)
                 .map_err(|e| {
                     rusqlite::Error::FromSqlConversionFailure(
                         3,
@@ -351,14 +351,14 @@ impl ExperimentStore {
                         Box::new(e),
                     )
                 })?;
-                let status: ExperimentStatus = serde_json::from_str(&format!("\"{status_str}\""))
+                let status: ExperimentStatus = crate::storage::deserialize_quoted(&status_str)
                     .map_err(|e| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        2,
-                        rusqlite::types::Type::Text,
-                        Box::new(e),
-                    )
-                })?;
+                        rusqlite::Error::FromSqlConversionFailure(
+                            2,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    })?;
 
                 Ok((id, name, status, best_score))
             })
@@ -535,7 +535,7 @@ fn row_to_trial(row: &rusqlite::Row) -> rusqlite::Result<TrialResult> {
     let hyperparams = serde_json::from_str(&hp_json).map_err(|e| {
         rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e))
     })?;
-    let status: TrialStatus = serde_json::from_str(&format!("\"{status_str}\"")).map_err(|e| {
+    let status: TrialStatus = crate::storage::deserialize_quoted(&status_str).map_err(|e| {
         rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(e))
     })?;
     let started_at = started_str.and_then(|s| {

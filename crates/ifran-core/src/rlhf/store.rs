@@ -141,14 +141,14 @@ impl AnnotationStore {
                         Box::new(e),
                     )
                 })?;
-            let status: AnnotationSessionStatus =
-                serde_json::from_str(&format!("\"{status_str}\"")).map_err(|e| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        4,
-                        rusqlite::types::Type::Text,
-                        Box::new(e),
-                    )
-                })?;
+            let status: AnnotationSessionStatus = crate::storage::deserialize_quoted(&status_str)
+                .map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    4,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })?;
 
             Ok(AnnotationSession {
                 id,
@@ -209,7 +209,7 @@ impl AnnotationStore {
                         )
                     })?;
                 let status: AnnotationSessionStatus =
-                    serde_json::from_str(&format!("\"{status_str}\"")).map_err(|e| {
+                    crate::storage::deserialize_quoted(&status_str).map_err(|e| {
                         rusqlite::Error::FromSqlConversionFailure(
                             4,
                             rusqlite::types::Type::Text,

@@ -39,7 +39,8 @@ Current: **1,406 tests** across 7 crates. CI threshold: 65%.
 ## Performance & Memory
 
 - [x] **SQL-level pagination on all list endpoints** — marketplace, RLHF, RAG, experiment, tenant, lineage, version, model list endpoints now push `LIMIT`/`OFFSET` + `COUNT(*)` to SQL; handlers use `PaginatedResponse::pre_sliced()`
-- [ ] **Fleet list pagination** — `GET /fleet/nodes` still uses in-memory pagination (FleetManager is not DB-backed)
+- [x] **Fleet list pagination** — `GET /fleet/nodes` uses in-memory pagination via `from_slice()` (appropriate for in-memory FleetManager)
+- [x] **Hot-path optimizations** — `#[inline]` on cache/cosine/memory/scoring functions; zero-alloc `score_contains_match` (11x speedup); `deserialize_quoted` helper eliminates `format!` in DB row parsing; `Vec::with_capacity` in RAG chunker
 - [x] **SQLite connection pooling** — all stores use `r2d2_sqlite` connection pools (max 4 conns); `tokio::Mutex` removed from `AppState` — concurrent requests use separate pool connections
 - [x] **Swappable DB backend** — store traits defined in `ifran_core::storage::traits`; SQLite implementations can be swapped for Postgres or other backends
 - [ ] **Rate limiter IP eviction** — solved by majra migration (stale-key eviction built in)

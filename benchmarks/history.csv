@@ -19,3 +19,13 @@ timestamp,label,benchmark,time_ns,time_unit
 2026-03-27T15:41:58Z,post-perf-memory,score_exact_match_1000,22359,ns
 2026-03-27T15:41:58Z,post-perf-memory,score_contains_match_1000,57841,ns
 2026-03-27T15:41:58Z,post-perf-memory,score_mmlu_500,159714,ns
+2026-03-27T15:57:42Z,post-perf-opt,cosine_similarity_768d,1983,ns
+2026-03-27T15:57:42Z,post-perf-opt,cosine_similarity_1536d,4007,ns
+2026-03-27T15:57:42Z,post-perf-opt,estimate_gguf_7b,5,ns
+2026-03-27T15:57:42Z,post-perf-opt,estimate_gguf_70b,5,ns
+2026-03-27T15:57:42Z,post-perf-opt,cache_insert_100,32198,ns
+2026-03-27T15:57:42Z,post-perf-opt,cache_insert_with_eviction,46159,ns
+2026-03-27T15:57:42Z,post-perf-opt,cache_touch_hit,60,ns
+2026-03-27T15:57:42Z,post-perf-opt,score_exact_match_1000,11508,ns
+2026-03-27T15:57:42Z,post-perf-opt,score_contains_match_1000,5208,ns
+2026-03-27T15:57:42Z,post-perf-opt,score_mmlu_500,87891,ns

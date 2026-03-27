@@ -29,6 +29,7 @@ pub struct BenchmarkScore {
 ///
 /// Compares model outputs to expected outputs, returning the fraction
 /// of exact matches (case-insensitive, trimmed).
+#[inline]
 pub fn score_exact_match(predictions: &[(String, String)]) -> f64 {
     if predictions.is_empty() {
         return 0.0;
@@ -40,22 +41,38 @@ pub fn score_exact_match(predictions: &[(String, String)]) -> f64 {
     correct as f64 / predictions.len() as f64
 }
 
+#[inline]
+fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if needle.len() > haystack.len() {
+        return false;
+    }
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
 /// Score a custom benchmark: contains-match accuracy.
 ///
 /// Checks if the model output contains the expected answer.
+#[inline]
 pub fn score_contains_match(predictions: &[(String, String)]) -> f64 {
     if predictions.is_empty() {
         return 0.0;
     }
     let correct = predictions
         .iter()
-        .filter(|(pred, expected)| pred.to_lowercase().contains(&expected.to_lowercase()))
+        .filter(|(pred, expected)| contains_ignore_ascii_case(pred, expected))
         .count();
     correct as f64 / predictions.len() as f64
 }
 
 /// Score MMLU-style multiple-choice: extract first letter (A/B/C/D) from
 /// model output and compare to expected answer letter.
+#[inline]
 pub fn score_mmlu(predictions: &[(String, String)]) -> f64 {
     if predictions.is_empty() {
         return 0.0;
@@ -76,6 +93,7 @@ pub fn score_mmlu(predictions: &[(String, String)]) -> f64 {
 /// Looks for patterns like "A", "A)", "(A)", "A.", or standalone letter
 /// at the beginning. Falls back to scanning for the first isolated
 /// A/B/C/D in the text.
+#[inline]
 fn extract_answer_letter(text: &str) -> Option<char> {
     let trimmed = text.trim();
 

@@ -8,7 +8,12 @@ pub fn chunk_text(text: &str, chunk_size: usize, overlap: usize) -> Vec<String> 
         return vec![text.to_string()];
     }
 
-    let mut chunks = Vec::new();
+    let step = if chunk_size > overlap {
+        chunk_size - overlap
+    } else {
+        1
+    };
+    let mut chunks = Vec::with_capacity((text.len() / step) + 1);
     let mut start = 0;
     let bytes = text.as_bytes();
 

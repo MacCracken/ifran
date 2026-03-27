@@ -334,10 +334,10 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<MarketplaceEntry> {
     let published_str: String = row.get(11)?;
     let eval_str: Option<String> = row.get(12)?;
 
-    let format: ModelFormat = serde_json::from_str(&format!("\"{format_str}\"")).map_err(|e| {
+    let format: ModelFormat = crate::storage::deserialize_quoted(&format_str).map_err(|e| {
         rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, Box::new(e))
     })?;
-    let quant: QuantLevel = serde_json::from_str(&format!("\"{quant_str}\"")).map_err(|e| {
+    let quant: QuantLevel = crate::storage::deserialize_quoted(&quant_str).map_err(|e| {
         rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e))
     })?;
     let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();

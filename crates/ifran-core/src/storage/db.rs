@@ -316,11 +316,11 @@ fn row_to_model(row: &rusqlite::Row) -> rusqlite::Result<ModelInfo> {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     })?;
 
-    let format: ModelFormat = serde_json::from_str(&format!("\"{format_str}\"")).map_err(|e| {
+    let format: ModelFormat = crate::storage::deserialize_quoted(&format_str).map_err(|e| {
         rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e))
     })?;
 
-    let quant: QuantLevel = serde_json::from_str(&format!("\"{quant_str}\"")).map_err(|e| {
+    let quant: QuantLevel = crate::storage::deserialize_quoted(&quant_str).map_err(|e| {
         rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, Box::new(e))
     })?;
 

@@ -248,7 +248,7 @@ fn row_to_job_state(row: &rusqlite::Row) -> rusqlite::Result<JobState> {
     })?;
 
     let status: TrainingStatus =
-        serde_json::from_str(&format!("\"{status_str}\"")).map_err(|e| {
+        ifran_core::storage::deserialize_quoted(&status_str).map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e))
         })?;
 

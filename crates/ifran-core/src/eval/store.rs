@@ -140,7 +140,7 @@ fn row_to_eval_result(row: &rusqlite::Row) -> rusqlite::Result<EvalResult> {
     })?;
 
     let benchmark: BenchmarkKind =
-        serde_json::from_str(&format!("\"{benchmark_str}\"")).map_err(|e| {
+        crate::storage::deserialize_quoted(&benchmark_str).map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, Box::new(e))
         })?;
 

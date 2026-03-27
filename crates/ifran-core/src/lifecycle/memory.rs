@@ -21,6 +21,7 @@ pub struct MemoryEstimate {
 /// Rough heuristic: file size on disk is close to the VRAM needed,
 /// plus ~20% overhead for KV cache and runtime buffers.
 #[must_use]
+#[inline]
 pub fn estimate_gguf(
     file_size_bytes: u64,
     gpu_layers: Option<u32>,

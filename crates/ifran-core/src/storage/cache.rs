@@ -36,16 +36,19 @@ impl ModelCache {
     }
 
     /// Total bytes currently used by cached entries.
+    #[inline]
     pub fn total_bytes(&self) -> u64 {
         self.entries.values().map(|e| e.size_bytes).sum()
     }
 
     /// Number of cached entries.
+    #[inline]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
     /// Whether the cache is empty.
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
@@ -53,6 +56,7 @@ impl ModelCache {
     /// Record a cache hit (updates last-accessed time).
     ///
     /// Returns `true` if the key was found.
+    #[inline]
     pub fn touch(&mut self, key: &str) -> bool {
         if let Some(entry) = self.entries.get_mut(key) {
             entry.last_accessed = Instant::now();
@@ -63,6 +67,7 @@ impl ModelCache {
     }
 
     /// Check if a key exists in the cache.
+    #[inline]
     pub fn contains(&self, key: &str) -> bool {
         self.entries.contains_key(key)
     }
@@ -100,11 +105,13 @@ impl ModelCache {
     }
 
     /// Remove an entry by key.
+    #[inline]
     pub fn remove(&mut self, key: &str) -> Option<CacheEntry> {
         self.entries.remove(key)
     }
 
     /// Find the least-recently-used key.
+    #[inline]
     fn find_lru(&self) -> Option<String> {
         self.entries
             .values()

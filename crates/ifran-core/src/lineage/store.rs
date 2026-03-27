@@ -146,8 +146,7 @@ impl LineageStore {
 
         Ok(LineageNode {
             id: Uuid::parse_str(&node.0).unwrap_or_default(),
-            stage: serde_json::from_str(&format!("\"{}\"", node.1))
-                .unwrap_or(PipelineStage::Dataset),
+            stage: crate::storage::deserialize_quoted(&node.1).unwrap_or(PipelineStage::Dataset),
             name: node.2,
             artifact_ref: node.3,
             parent_ids,
