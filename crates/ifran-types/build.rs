@@ -7,7 +7,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for file in proto_files {
         if std::path::Path::new(file).exists() {
-            tonic_build::compile_protos(file)?;
+            tonic_prost_build::compile_protos(file)?;
         }
     }
 

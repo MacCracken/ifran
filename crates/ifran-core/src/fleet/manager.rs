@@ -30,6 +30,7 @@ impl From<Status> for NodeHealth {
             Status::Online => NodeHealth::Online,
             Status::Suspect => NodeHealth::Suspect,
             Status::Offline => NodeHealth::Offline,
+            _ => NodeHealth::Offline,
         }
     }
 }
