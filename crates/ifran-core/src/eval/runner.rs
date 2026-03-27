@@ -173,6 +173,9 @@ impl EvalRunner {
                 })
                 .await
             }
+            _ => Err(ifran_types::IfranError::ConfigError(format!(
+                "Unsupported benchmark kind: {kind:?}"
+            ))),
         }
     }
 

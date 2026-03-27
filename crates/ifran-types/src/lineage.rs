@@ -21,6 +21,7 @@ pub struct LineageNode {
 }
 
 /// Pipeline stage types.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PipelineStage {

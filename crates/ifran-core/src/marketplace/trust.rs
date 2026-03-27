@@ -12,6 +12,7 @@ use ifran_types::marketplace::MarketplaceEntry;
 
 /// Trust level assigned to a marketplace model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[non_exhaustive]
 pub enum TrustLevel {
     /// No verification performed or possible.
     Untrusted,

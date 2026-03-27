@@ -83,6 +83,7 @@ pub async fn run(program_path: &str) -> Result<()> {
                         eprintln!("\nExperiment failed.");
                         return Ok(());
                     }
+                    _ => {}
                 }
             }
             Err(_) => break,

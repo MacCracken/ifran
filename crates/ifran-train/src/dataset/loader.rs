@@ -62,6 +62,7 @@ fn count_samples(path: &Path, format: DatasetFormat) -> Result<usize> {
             // HuggingFace datasets are loaded by the training script
             Ok(0) // count determined at runtime by the script
         }
+        _ => Ok(0),
     }
 }
 

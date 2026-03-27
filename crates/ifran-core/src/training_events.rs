@@ -11,6 +11,7 @@ use tokio::sync::broadcast;
 /// A training lifecycle event.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum TrainingEvent {
     /// Job has started running.
     JobStarted {

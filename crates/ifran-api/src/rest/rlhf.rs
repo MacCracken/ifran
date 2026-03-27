@@ -293,6 +293,7 @@ pub async fn export_session(
                     Preference::ResponseA => (&p.response_a, &p.response_b),
                     Preference::ResponseB => (&p.response_b, &p.response_a),
                     Preference::Tie | Preference::BothBad => (&p.response_a, &p.response_b),
+                    _ => (&p.response_a, &p.response_b),
                 };
                 serde_json::json!({
                     "prompt": p.prompt,

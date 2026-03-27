@@ -1,0 +1,11 @@
+timestamp,label,benchmark,time_ns,time_unit
+2026-03-27T14:56:31Z,baseline,cosine_similarity_768d,1843,ns
+2026-03-27T14:56:31Z,baseline,cosine_similarity_1536d,3993,ns
+2026-03-27T14:56:31Z,baseline,estimate_gguf_7b,5,ns
+2026-03-27T14:56:31Z,baseline,estimate_gguf_70b,5,ns
+2026-03-27T14:56:31Z,baseline,cache_insert_100,29155,ns
+2026-03-27T14:56:31Z,baseline,cache_insert_with_eviction,41334,ns
+2026-03-27T14:56:31Z,baseline,cache_touch_hit,50,ns
+2026-03-27T14:56:31Z,baseline,score_exact_match_1000,13027,ns
+2026-03-27T14:56:31Z,baseline,score_contains_match_1000,61276,ns
+2026-03-27T14:56:31Z,baseline,score_mmlu_500,144556,ns

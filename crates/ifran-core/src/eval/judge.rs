@@ -36,6 +36,7 @@ impl JudgeResult {
 /// A single judge verdict for one prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum Verdict {
     WinA,
     WinB,

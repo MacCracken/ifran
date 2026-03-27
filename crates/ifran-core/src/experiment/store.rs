@@ -363,6 +363,7 @@ impl ExperimentStore {
         let order = match direction {
             Direction::Minimize => "ASC",
             Direction::Maximize => "DESC",
+            _ => "ASC",
         };
         let sql = format!(
             "SELECT trial_id, experiment_id, trial_number, hyperparams_json, train_loss,

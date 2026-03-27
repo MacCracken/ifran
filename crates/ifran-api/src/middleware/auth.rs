@@ -86,6 +86,7 @@ fn extract_bearer_token(req: &Request) -> Option<&str> {
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
+        .map(|t| t.trim())
         .filter(|t| !t.is_empty())
 }
 
@@ -142,16 +143,11 @@ mod tests {
 
     #[test]
     fn extract_bearer_whitespace_only() {
-        // "Bearer   " — token is all spaces, should be filtered by strip_prefix + filter empty
         let req = axum::http::Request::builder()
             .header("authorization", "Bearer    ")
             .body(axum::body::Body::empty())
             .unwrap();
-        // strip_prefix("Bearer ") gives "   " which is non-empty, so it passes filter
-        // This tests the actual behavior: whitespace-only tokens are returned as-is
-        let result = extract_bearer_token(&req);
-        // "   " is not empty, so it will be Some("   ")
-        assert_eq!(result, Some("   "));
+        assert_eq!(extract_bearer_token(&req), None);
     }
 
     #[test]

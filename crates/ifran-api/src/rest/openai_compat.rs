@@ -155,6 +155,7 @@ pub async fn chat_completions(
                 ifran_types::inference::FinishReason::Stop => "stop",
                 ifran_types::inference::FinishReason::MaxTokens => "length",
                 ifran_types::inference::FinishReason::StopSequence => "stop",
+                _ => "stop",
             },
         }],
         "usage": {

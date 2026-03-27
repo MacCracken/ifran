@@ -235,6 +235,7 @@ pub fn policy_from_kind(
         PlacementPolicyKind::GpuAffinity => Box::new(GpuAffinityPolicy),
         PlacementPolicyKind::Balanced => Box::new(BalancedPolicy),
         PlacementPolicyKind::CostAware => Box::new(CostAwarePolicy),
+        _ => Box::new(BalancedPolicy),
     }
 }
 

@@ -33,6 +33,11 @@ tempfile = "3"
 mockito = "1"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 proptest = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "core_benchmarks"
+harness = false
 
 [lints]
 workspace = true

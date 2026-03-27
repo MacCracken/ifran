@@ -26,7 +26,7 @@ pub fn validate(path: &Path, format: DatasetFormat) -> Result<ValidationResult> 
     match format {
         DatasetFormat::Jsonl => validate_jsonl(path),
         DatasetFormat::Csv => validate_csv(path),
-        DatasetFormat::Parquet | DatasetFormat::HuggingFace => {
+        DatasetFormat::Parquet | DatasetFormat::HuggingFace | _ => {
             // These formats are validated by their respective loaders
             Ok(ValidationResult {
                 valid: true,

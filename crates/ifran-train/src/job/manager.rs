@@ -377,7 +377,7 @@ fn estimate_total_steps(config: &TrainingJobConfig) -> u64 {
     let batch = config.hyperparams.batch_size.max(1) as u64;
     let epochs = config.hyperparams.epochs.max(1) as u64;
     let assumed_samples = config.dataset.max_samples.unwrap_or(10000) as u64;
-    (assumed_samples / batch) * epochs
+    (assumed_samples / batch).saturating_mul(epochs)
 }
 
 #[cfg(test)]

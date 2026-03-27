@@ -202,7 +202,7 @@ impl AnnotationStore {
                     pair.response_a,
                     pair.response_b,
                     pair.preference.map(|p| {
-                        serde_json::to_string(&p).unwrap().trim_matches('"').to_string()
+                        serde_json::to_string(&p).unwrap_or_default().trim_matches('"').to_string()
                     }),
                     pair.annotated_at.map(|t| t.to_rfc3339()),
                 ],
@@ -259,7 +259,7 @@ impl AnnotationStore {
 
     pub fn annotate_pair(&self, pair_id: Uuid, preference: Preference) -> Result<()> {
         let pref_str = serde_json::to_string(&preference)
-            .unwrap()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?
             .trim_matches('"')
             .to_string();
         let now = chrono::Utc::now().to_rfc3339();

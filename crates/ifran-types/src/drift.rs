@@ -29,6 +29,7 @@ pub struct DriftResult {
 }
 
 /// Drift severity levels based on z-score thresholds.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DriftSeverity {
@@ -40,6 +41,7 @@ pub enum DriftSeverity {
 }
 
 impl DriftSeverity {
+    #[must_use]
     pub fn from_z_score(z: f64) -> Self {
         let abs_z = z.abs();
         if abs_z > 4.0 {

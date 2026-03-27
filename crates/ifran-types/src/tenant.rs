@@ -13,6 +13,7 @@ impl TenantId {
     }
 
     /// Whether this is the default (single-tenant) tenant.
+    #[must_use]
     pub fn is_default(&self) -> bool {
         self.0 == "default"
     }

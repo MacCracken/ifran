@@ -7,6 +7,7 @@ use uuid::Uuid;
 pub type EvalRunId = Uuid;
 
 /// Available benchmark types.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BenchmarkKind {
@@ -49,6 +50,7 @@ pub struct EvalResult {
 }
 
 /// Status of an eval run.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EvalStatus {

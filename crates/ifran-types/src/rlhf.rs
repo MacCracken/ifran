@@ -3,6 +3,7 @@ use uuid::Uuid;
 
 pub type AnnotationId = Uuid;
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AnnotationSessionStatus {
@@ -19,6 +20,7 @@ pub struct AnnotationSession {
     pub status: AnnotationSessionStatus,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Preference {

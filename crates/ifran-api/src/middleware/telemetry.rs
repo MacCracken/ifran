@@ -32,11 +32,13 @@ pub fn init_tracing() {
                 .with_tonic()
                 .build()
             {
-                let tracer_provider = opentelemetry_sdk::trace::TracerProvider::builder()
-                    .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
-                    .with_resource(opentelemetry_sdk::Resource::new(vec![
-                        opentelemetry::KeyValue::new("service.name", "ifran"),
-                    ]))
+                let tracer_provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+                    .with_batch_exporter(exporter)
+                    .with_resource(
+                        opentelemetry_sdk::Resource::builder()
+                            .with_service_name("ifran")
+                            .build(),
+                    )
                     .build();
 
                 use opentelemetry::trace::TracerProvider as _;

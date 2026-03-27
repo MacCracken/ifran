@@ -11,6 +11,16 @@ use serde::{Deserialize, Serialize};
 use super::pagination::{PaginatedResponse, PaginationQuery};
 use crate::state::AppState;
 
+fn validate_path(path: &str) -> Result<(), (StatusCode, String)> {
+    if path.contains("..") {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "path must not contain '..' components".into(),
+        ));
+    }
+    Ok(())
+}
+
 // --- Auto-labeling ---
 
 /// Request to create an auto-labeling job.
@@ -51,6 +61,11 @@ pub async fn create_auto_label(
     State(state): State<AppState>,
     Json(req): Json<CreateAutoLabelRequest>,
 ) -> Result<(StatusCode, Json<AutoLabelJobResponse>), (StatusCode, String)> {
+    validate_path(&req.source_path)?;
+    if let Some(ref p) = req.output_path {
+        validate_path(p)?;
+    }
+
     let output_path = req.output_path.unwrap_or_else(|| {
         format!(
             "{}.labeled.jsonl",
@@ -235,6 +250,11 @@ pub async fn augment_dataset(
     State(_state): State<AppState>,
     Json(req): Json<AugmentRequest>,
 ) -> Result<Json<AugmentResponse>, (StatusCode, String)> {
+    validate_path(&req.input_path)?;
+    if let Some(ref p) = req.output_path {
+        validate_path(p)?;
+    }
+
     if req.augment_factor < 1 || req.augment_factor > 100 {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -308,6 +328,8 @@ pub async fn validate_dataset(
     State(_state): State<AppState>,
     Json(req): Json<ValidateDatasetRequest>,
 ) -> Result<Json<ValidateDatasetResponse>, (StatusCode, String)> {
+    validate_path(&req.path)?;
+
     let path = req.path.clone();
     let format = req.format;
 
@@ -357,6 +379,8 @@ pub async fn preview_dataset(
     State(_state): State<AppState>,
     Json(req): Json<PreviewDatasetRequest>,
 ) -> Result<Json<PreviewDatasetResponse>, (StatusCode, String)> {
+    validate_path(&req.path)?;
+
     let path = req.path.clone();
     let format = req.format;
     let limit = req.limit.clamp(1, 50);

@@ -10,6 +10,7 @@ use std::path::Path;
 
 /// Encryption status of a storage path.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum EncryptionStatus {
     /// Path is on an encrypted volume (LUKS/dm-crypt).
     Encrypted { device: String },

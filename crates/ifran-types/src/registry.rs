@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Source from which a model can be pulled.
+#[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RegistrySource {
     HuggingFace {
@@ -33,6 +34,7 @@ pub struct DownloadStatus {
 }
 
 /// Download state machine.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DownloadState {
     Queued,

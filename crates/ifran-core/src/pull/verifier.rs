@@ -10,6 +10,7 @@ use std::path::Path;
 
 /// Hash algorithm used for verification.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub enum HashAlgorithm {
     Sha256,
     Blake3,

@@ -26,6 +26,7 @@ impl SearchSpace {
         match &self.strategy {
             SearchStrategy::Grid => self.generate_grid(),
             SearchStrategy::Random { n_trials } => self.generate_random(*n_trials),
+            _ => self.generate_grid(),
         }
     }
 

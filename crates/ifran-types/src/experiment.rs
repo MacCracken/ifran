@@ -10,6 +10,7 @@ pub type ExperimentId = Uuid;
 pub type TrialId = Uuid;
 
 /// Whether the objective should be minimized or maximized.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Direction {
@@ -19,6 +20,7 @@ pub enum Direction {
 
 impl Direction {
     /// Returns true if `a` is better than `b` according to this direction.
+    #[must_use]
     pub fn is_better(&self, a: f64, b: f64) -> bool {
         match self {
             Direction::Minimize => a < b,
@@ -28,6 +30,7 @@ impl Direction {
 }
 
 /// Search strategy for exploring the hyperparameter space.
+#[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "strategy")]
 pub enum SearchStrategy {
@@ -44,6 +47,7 @@ pub struct ParamRange {
 }
 
 /// Possible value specifications for a search parameter.
+#[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ParamValues {
@@ -53,14 +57,24 @@ pub enum ParamValues {
 
 impl ParamValues {
     /// Expand this parameter specification into concrete values.
+    #[must_use]
     pub fn expand(&self) -> Vec<f64> {
         match self {
             ParamValues::Discrete { values } => values.clone(),
             ParamValues::Range { min, max, step } => {
+                if *step <= 0.0 {
+                    if *min <= *max {
+                        return vec![*min];
+                    }
+                    return Vec::new();
+                }
                 let mut vals = Vec::new();
                 let mut v = *min;
                 while v <= *max + f64::EPSILON {
                     vals.push(v);
+                    if vals.len() >= 100_000 {
+                        break;
+                    }
                     v += step;
                 }
                 vals
@@ -104,6 +118,7 @@ fn default_dataset_format() -> String {
 }
 
 /// Status of an experiment.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExperimentStatus {
@@ -114,6 +129,7 @@ pub enum ExperimentStatus {
 }
 
 /// Status of a single trial within an experiment.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrialStatus {

@@ -86,6 +86,7 @@ fn strategy_flag(strategy: DistributedStrategy) -> String {
         DistributedStrategy::DataParallel => "data_parallel".into(),
         DistributedStrategy::ModelParallel => "model_parallel".into(),
         DistributedStrategy::PipelineParallel => "pipeline_parallel".into(),
+        _ => "data_parallel".into(),
     }
 }
 

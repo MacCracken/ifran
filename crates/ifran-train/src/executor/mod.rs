@@ -21,6 +21,7 @@ pub fn script_for_method(method: TrainingMethod) -> &'static str {
         TrainingMethod::Dpo => "scripts/train_dpo.py",
         TrainingMethod::Rlhf => "scripts/train_rlhf.py",
         TrainingMethod::Distillation => "scripts/train_distill.py",
+        _ => "scripts/train_sft.py",
     }
 }
 

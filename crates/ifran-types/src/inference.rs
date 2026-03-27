@@ -14,6 +14,7 @@ pub struct InferenceRequest {
 }
 
 /// Data sensitivity level for privacy-aware routing.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DataSensitivity {
@@ -40,6 +41,7 @@ pub struct TokenUsage {
 }
 
 /// Why generation stopped.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FinishReason {

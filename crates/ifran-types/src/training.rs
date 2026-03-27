@@ -4,6 +4,7 @@ use uuid::Uuid;
 pub type TrainingJobId = Uuid;
 
 /// Training method.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrainingMethod {
@@ -42,6 +43,7 @@ pub struct DatasetConfig {
 }
 
 /// Supported dataset formats.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DatasetFormat {
@@ -100,6 +102,7 @@ pub struct LoraConfig {
 }
 
 /// Training job status.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrainingStatus {

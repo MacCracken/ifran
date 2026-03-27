@@ -20,6 +20,7 @@ pub struct MemoryEstimate {
 ///
 /// Rough heuristic: file size on disk is close to the VRAM needed,
 /// plus ~20% overhead for KV cache and runtime buffers.
+#[must_use]
 pub fn estimate_gguf(
     file_size_bytes: u64,
     gpu_layers: Option<u32>,
@@ -27,6 +28,7 @@ pub fn estimate_gguf(
 ) -> MemoryEstimate {
     let file_mb = file_size_bytes.saturating_add(1024 * 1024 - 1) / (1024 * 1024);
     let overhead = file_mb / 5; // ~20% for KV cache + buffers
+    let total_mb = file_mb.saturating_add(overhead);
 
     let gpu_fraction = match gpu_layers {
         Some(layers) => {
@@ -39,8 +41,8 @@ pub fn estimate_gguf(
         None => 1.0, // Default: offload everything to GPU
     };
 
-    let vram_mb = ((file_mb + overhead) as f64 * gpu_fraction) as u64;
-    let ram_mb = ((file_mb + overhead) as f64 * (1.0 - gpu_fraction)) as u64;
+    let vram_mb = (total_mb as f64 * gpu_fraction) as u64;
+    let ram_mb = (total_mb as f64 * (1.0 - gpu_fraction)) as u64;
 
     MemoryEstimate { vram_mb, ram_mb }
 }
@@ -57,7 +59,7 @@ pub fn check_budget(
     if estimate.vram_mb > 0 {
         if !hardware.has_gpu() {
             // No GPU — everything goes to RAM
-            let total_ram_needed = estimate.vram_mb + estimate.ram_mb;
+            let total_ram_needed = estimate.vram_mb.saturating_add(estimate.ram_mb);
             if total_ram_needed > hardware.cpu.available_memory_mb {
                 return Err(IfranError::InsufficientMemory {
                     required_mb: total_ram_needed,

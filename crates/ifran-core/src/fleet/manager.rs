@@ -18,6 +18,7 @@ pub type NodeId = String;
 /// Health state of a fleet node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum NodeHealth {
     Online,
     Suspect,

@@ -12,6 +12,7 @@ impl fmt::Display for BackendId {
 }
 
 /// Hardware accelerator type.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AcceleratorType {
     Cuda,
@@ -39,6 +40,7 @@ pub struct BackendCapabilities {
 }
 
 /// Whether a backend runs locally or calls a remote API.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BackendLocality {

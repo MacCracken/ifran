@@ -5,6 +5,7 @@ use uuid::Uuid;
 pub type ModelId = Uuid;
 
 /// Supported model file formats.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ModelFormat {
@@ -17,6 +18,7 @@ pub enum ModelFormat {
 }
 
 /// Quantization level for GGUF models.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QuantLevel {
