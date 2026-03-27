@@ -18,6 +18,7 @@ fn test_config(tmp: &tempfile::TempDir) -> IfranConfig {
         server: ServerConfig {
             bind: "127.0.0.1:0".into(),
             grpc_bind: "127.0.0.1:0".into(),
+            ws_bind: None,
         },
         storage: StorageConfig {
             models_dir: tmp.path().join("models"),

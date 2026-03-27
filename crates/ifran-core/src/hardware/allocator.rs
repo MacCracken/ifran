@@ -488,8 +488,8 @@ mod tests {
         let mut rx = bus.subscribe();
 
         let a = alloc.allocate(4000, 1, "test-job", None).await.unwrap();
-        let event = rx.try_recv().unwrap();
-        match event {
+        let msg = rx.try_recv().unwrap();
+        match msg.payload {
             crate::hardware::events::GpuEvent::Allocated { job_label, .. } => {
                 assert_eq!(job_label, "test-job");
             }
@@ -497,8 +497,8 @@ mod tests {
         }
 
         alloc.deallocate(a.id).await.unwrap();
-        let event = rx.try_recv().unwrap();
-        match event {
+        let msg = rx.try_recv().unwrap();
+        match msg.payload {
             crate::hardware::events::GpuEvent::Released { .. } => {}
             _ => panic!("Expected Released event"),
         }

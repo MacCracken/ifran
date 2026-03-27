@@ -22,6 +22,8 @@ pub struct IfranConfig {
 pub struct ServerConfig {
     pub bind: String,
     pub grpc_bind: String,
+    #[serde(default)]
+    pub ws_bind: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -209,6 +211,7 @@ impl Default for IfranConfig {
             server: ServerConfig {
                 bind: "0.0.0.0:8420".into(),
                 grpc_bind: "0.0.0.0:8421".into(),
+                ws_bind: None,
             },
             storage: StorageConfig {
                 models_dir: ifran_dir.join("models"),

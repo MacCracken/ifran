@@ -38,6 +38,7 @@ pub fn build(state: AppState) -> Router {
         .route("/health", get(system::health))
         .route("/ready", get(system::ready))
         .route("/system/status", get(system::status))
+        .route("/metrics", get(system::metrics))
         // Models
         .route("/models", get(models::list_models))
         .route(

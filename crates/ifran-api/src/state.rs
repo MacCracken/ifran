@@ -24,6 +24,8 @@ use ifran_train::experiment::runner::ExperimentHandle;
 use ifran_train::job::manager::JobManager;
 use ifran_train::job::store::JobStore;
 use ifran_types::experiment::ExperimentId;
+use majra::pubsub::PubSub;
+use majra::ws::{WsBridge, WsBridgeConfig};
 /// Shared application state accessible across all API handlers.
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -52,10 +54,12 @@ pub struct AppState {
     pub version_store: Option<Arc<VersionStore>>,
     pub bridge_client: Option<Arc<BridgeClient>>,
     pub bridge_server: Option<Arc<BridgeServer>>,
+    pub event_hub: Arc<PubSub>,
     pub training_event_bus: Arc<TrainingEventBus>,
     pub gpu_event_bus: Arc<GpuEventBus>,
     pub telemetry: Option<Arc<TelemetryLoop>>,
     pub fleet_manager: Arc<FleetManager>,
+    pub prometheus_registry: Arc<prometheus::Registry>,
 }
 
 impl AppState {
@@ -118,11 +122,11 @@ impl AppState {
             None
         };
 
-        // Training event bus
-        let training_event_bus = Arc::new(TrainingEventBus::new(256));
+        let event_hub = Arc::new(PubSub::with_capacity(512));
 
-        // GPU event bus
-        let gpu_event_bus = Arc::new(GpuEventBus::new(256));
+        let training_event_bus = Arc::new(TrainingEventBus::with_hub(256, event_hub.clone()));
+
+        let gpu_event_bus = Arc::new(GpuEventBus::with_hub(256, event_hub.clone()));
 
         // GPU telemetry loop
         let telemetry = if config.hardware.telemetry_interval_secs > 0 {
@@ -133,6 +137,8 @@ impl AppState {
         } else {
             None
         };
+
+        let prometheus_registry = Arc::new(prometheus::Registry::new());
 
         // Fleet manager
         let fleet_manager = FleetManager::new(
@@ -167,6 +173,13 @@ impl AppState {
             (None, None)
         };
 
+        if let Some(ws_addr) = &config.server.ws_bind {
+            if let Ok(addr) = ws_addr.parse() {
+                let bridge = Arc::new(WsBridge::new(event_hub.clone(), WsBridgeConfig::default()));
+                bridge.spawn(addr);
+            }
+        }
+
         Ok(Self {
             config: Arc::new(config),
             db: Arc::new(db),
@@ -186,10 +199,12 @@ impl AppState {
             version_store: version_store.map(Arc::new),
             bridge_client,
             bridge_server,
+            event_hub,
             training_event_bus,
             gpu_event_bus,
             telemetry,
             fleet_manager: Arc::new(fleet_manager),
+            prometheus_registry,
         })
     }
 }
@@ -204,6 +219,7 @@ mod tests {
             server: ServerConfig {
                 bind: "127.0.0.1:0".into(),
                 grpc_bind: "127.0.0.1:0".into(),
+                ws_bind: None,
             },
             storage: StorageConfig {
                 models_dir: tmp.path().join("models"),

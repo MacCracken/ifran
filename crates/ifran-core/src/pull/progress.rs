@@ -3,11 +3,15 @@
 //! Uses a tokio broadcast channel so multiple consumers (CLI progress bar,
 //! API SSE stream, desktop UI) can subscribe to download progress.
 
+use std::sync::Arc;
+
 use ifran_types::registry::DownloadState;
+use majra::pubsub::{PubSub, TypedMessage, TypedPubSub, TypedPubSubConfig};
+use serde::Serialize;
 use tokio::sync::broadcast;
 
 /// A single progress event emitted during a download.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ProgressEvent {
     pub model_name: String,
     pub state: DownloadState,
@@ -32,24 +36,47 @@ impl ProgressEvent {
 
 /// Sender/receiver pair for progress events.
 pub struct ProgressTracker {
-    tx: broadcast::Sender<ProgressEvent>,
+    pubsub: TypedPubSub<ProgressEvent>,
+    event_hub: Option<Arc<PubSub>>,
 }
 
 impl ProgressTracker {
     /// Create a new tracker with the given channel capacity.
     pub fn new(capacity: usize) -> Self {
-        let (tx, _) = broadcast::channel(capacity);
-        Self { tx }
+        let pubsub = TypedPubSub::with_config(TypedPubSubConfig {
+            channel_capacity: capacity,
+            ..Default::default()
+        });
+        Self {
+            pubsub,
+            event_hub: None,
+        }
+    }
+
+    pub fn with_hub(capacity: usize, hub: Arc<PubSub>) -> Self {
+        let pubsub = TypedPubSub::with_config(TypedPubSubConfig {
+            channel_capacity: capacity,
+            ..Default::default()
+        });
+        Self {
+            pubsub,
+            event_hub: Some(hub),
+        }
     }
 
     /// Subscribe to progress events.
-    pub fn subscribe(&self) -> broadcast::Receiver<ProgressEvent> {
-        self.tx.subscribe()
+    pub fn subscribe(&self) -> broadcast::Receiver<TypedMessage<ProgressEvent>> {
+        self.pubsub.subscribe("download/#")
     }
 
     /// Send a progress event. Returns Ok even if no receivers are listening.
     pub fn send(&self, event: ProgressEvent) {
-        let _ = self.tx.send(event);
+        if let Some(hub) = &self.event_hub {
+            if let Ok(json) = serde_json::to_value(&event) {
+                hub.publish("download/progress", json);
+            }
+        }
+        self.pubsub.publish("download/progress", event);
     }
 
     /// Convenience: send a state-change event with a message.
@@ -106,8 +133,8 @@ mod tests {
         let tracker = ProgressTracker::new(16);
         let mut rx = tracker.subscribe();
         tracker.emit("model", DownloadState::Queued, "starting");
-        let event = rx.recv().await.unwrap();
-        assert_eq!(event.model_name, "model");
-        assert_eq!(event.state, DownloadState::Queued);
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.payload.model_name, "model");
+        assert_eq!(msg.payload.state, DownloadState::Queued);
     }
 }

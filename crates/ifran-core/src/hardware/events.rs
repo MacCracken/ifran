@@ -3,7 +3,11 @@
 //! Broadcasts GPU allocation and release events via a tokio broadcast channel,
 //! enabling observability and integration with external orchestrators.
 
+use std::sync::Arc;
+
 use chrono::{DateTime, Utc};
+use majra::namespace::Namespace;
+use majra::pubsub::{PubSub, TypedMessage, TypedPubSub, TypedPubSubConfig};
 use serde::Serialize;
 use tokio::sync::broadcast;
 
@@ -31,24 +35,71 @@ pub enum GpuEvent {
 
 /// Broadcast bus for GPU lifecycle events.
 pub struct GpuEventBus {
-    sender: broadcast::Sender<GpuEvent>,
+    pubsub: TypedPubSub<GpuEvent>,
+    event_hub: Option<Arc<PubSub>>,
 }
 
 impl GpuEventBus {
     /// Create a new event bus with the given channel capacity.
     pub fn new(capacity: usize) -> Self {
-        let (sender, _) = broadcast::channel(capacity);
-        Self { sender }
+        let pubsub = TypedPubSub::with_config(TypedPubSubConfig {
+            channel_capacity: capacity,
+            ..Default::default()
+        });
+        Self {
+            pubsub,
+            event_hub: None,
+        }
+    }
+
+    pub fn with_hub(capacity: usize, hub: Arc<PubSub>) -> Self {
+        let pubsub = TypedPubSub::with_config(TypedPubSubConfig {
+            channel_capacity: capacity,
+            ..Default::default()
+        });
+        Self {
+            pubsub,
+            event_hub: Some(hub),
+        }
     }
 
     /// Subscribe to GPU events.
-    pub fn subscribe(&self) -> broadcast::Receiver<GpuEvent> {
-        self.sender.subscribe()
+    pub fn subscribe(&self) -> broadcast::Receiver<TypedMessage<GpuEvent>> {
+        self.pubsub.subscribe("gpu/#")
     }
 
     /// Emit a GPU event. Returns the number of receivers that got it.
     pub fn emit(&self, event: GpuEvent) -> usize {
-        self.sender.send(event).unwrap_or(0)
+        let topic = match &event {
+            GpuEvent::Allocated { .. } => "gpu/allocated",
+            GpuEvent::Released { .. } => "gpu/released",
+        };
+        if let Some(hub) = &self.event_hub {
+            if let Ok(json) = serde_json::to_value(&event) {
+                hub.publish(topic, json);
+            }
+        }
+        self.pubsub.publish(topic, event)
+    }
+
+    pub fn subscribe_namespaced(
+        &self,
+        namespace: &Namespace,
+    ) -> broadcast::Receiver<TypedMessage<GpuEvent>> {
+        self.pubsub.subscribe(&namespace.pattern("gpu/#"))
+    }
+
+    pub fn emit_namespaced(&self, event: GpuEvent, namespace: &Namespace) -> usize {
+        let topic = match &event {
+            GpuEvent::Allocated { .. } => namespace.topic("gpu/allocated"),
+            GpuEvent::Released { .. } => namespace.topic("gpu/released"),
+        };
+        if let Some(hub) = &self.event_hub {
+            if let Ok(json) = serde_json::to_value(&event) {
+                hub.publish(&topic, json);
+            }
+        }
+        self.pubsub.publish(&topic, event)
     }
 
     /// Emit an allocation event.
@@ -100,8 +151,8 @@ mod tests {
 
         bus.emit_allocated(uuid::Uuid::new_v4(), vec![0, 1], 8192, "test-job");
 
-        let event = rx.try_recv().unwrap();
-        match event {
+        let msg = rx.try_recv().unwrap();
+        match msg.payload {
             GpuEvent::Allocated {
                 device_ids,
                 memory_mb,
@@ -126,6 +177,47 @@ mod tests {
 
         assert!(rx1.try_recv().is_ok());
         assert!(rx2.try_recv().is_ok());
+    }
+
+    #[test]
+    fn namespaced_subscribe_isolates_tenants() {
+        let bus = GpuEventBus::new(16);
+        let ns_a = Namespace::new("tenant-a");
+        let ns_b = Namespace::new("tenant-b");
+
+        let mut rx_a = bus.subscribe_namespaced(&ns_a);
+        let mut rx_b = bus.subscribe_namespaced(&ns_b);
+
+        bus.emit_namespaced(
+            GpuEvent::Allocated {
+                allocation_id: "alloc-1".into(),
+                device_ids: vec![0],
+                memory_mb: 8192,
+                job_label: "train".into(),
+                timestamp: Utc::now(),
+            },
+            &ns_a,
+        );
+
+        assert!(rx_a.try_recv().is_ok());
+        assert!(rx_b.try_recv().is_err());
+    }
+
+    #[test]
+    fn namespaced_emit_returns_receiver_count() {
+        let bus = GpuEventBus::new(16);
+        let ns = Namespace::new("org-1");
+        let _rx = bus.subscribe_namespaced(&ns);
+
+        let count = bus.emit_namespaced(
+            GpuEvent::Released {
+                allocation_id: "alloc-1".into(),
+                device_ids: vec![0],
+                timestamp: Utc::now(),
+            },
+            &ns,
+        );
+        assert_eq!(count, 1);
     }
 
     #[test]

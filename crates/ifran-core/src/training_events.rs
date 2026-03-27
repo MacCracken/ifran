@@ -4,7 +4,11 @@
 //! SecureYeoman. Events are broadcast via tokio channels to any local
 //! subscriber (dashboards, monitoring, fleet peers, etc.).
 
+use std::sync::Arc;
+
 use chrono::{DateTime, Utc};
+use majra::namespace::Namespace;
+use majra::pubsub::{PubSub, TypedMessage, TypedPubSub, TypedPubSubConfig};
 use serde::Serialize;
 use tokio::sync::broadcast;
 
@@ -62,24 +66,85 @@ pub enum TrainingEvent {
 
 /// Broadcast bus for training lifecycle events.
 pub struct TrainingEventBus {
-    sender: broadcast::Sender<TrainingEvent>,
+    pubsub: TypedPubSub<TrainingEvent>,
+    event_hub: Option<Arc<PubSub>>,
 }
 
 impl TrainingEventBus {
     /// Create a new training event bus.
     pub fn new(capacity: usize) -> Self {
-        let (sender, _) = broadcast::channel(capacity);
-        Self { sender }
+        let pubsub = TypedPubSub::with_config(TypedPubSubConfig {
+            channel_capacity: capacity,
+            ..Default::default()
+        });
+        Self {
+            pubsub,
+            event_hub: None,
+        }
+    }
+
+    pub fn with_hub(capacity: usize, hub: Arc<PubSub>) -> Self {
+        let pubsub = TypedPubSub::with_config(TypedPubSubConfig {
+            channel_capacity: capacity,
+            ..Default::default()
+        });
+        Self {
+            pubsub,
+            event_hub: Some(hub),
+        }
     }
 
     /// Subscribe to training events.
-    pub fn subscribe(&self) -> broadcast::Receiver<TrainingEvent> {
-        self.sender.subscribe()
+    pub fn subscribe(&self) -> broadcast::Receiver<TypedMessage<TrainingEvent>> {
+        self.pubsub.subscribe("training/#")
     }
 
     /// Emit a training event.
     pub fn emit(&self, event: TrainingEvent) {
-        let _ = self.sender.send(event);
+        #[allow(unreachable_patterns)]
+        let topic = match &event {
+            TrainingEvent::JobStarted { .. } => "training/started",
+            TrainingEvent::Progress { .. } => "training/progress",
+            TrainingEvent::JobCompleted { .. } => "training/completed",
+            TrainingEvent::JobFailed { .. } => "training/failed",
+            TrainingEvent::JobCancelled { .. } => "training/cancelled",
+            TrainingEvent::WorkerAssigned { .. } => "training/worker_assigned",
+            TrainingEvent::CheckpointReady { .. } => "training/checkpoint",
+            _ => "training/other",
+        };
+        if let Some(hub) = &self.event_hub {
+            if let Ok(json) = serde_json::to_value(&event) {
+                hub.publish(topic, json);
+            }
+        }
+        self.pubsub.publish(topic, event);
+    }
+
+    pub fn subscribe_namespaced(
+        &self,
+        namespace: &Namespace,
+    ) -> broadcast::Receiver<TypedMessage<TrainingEvent>> {
+        self.pubsub.subscribe(&namespace.pattern("training/#"))
+    }
+
+    #[allow(unreachable_patterns)]
+    pub fn emit_namespaced(&self, event: TrainingEvent, namespace: &Namespace) {
+        let topic = match &event {
+            TrainingEvent::JobStarted { .. } => namespace.topic("training/started"),
+            TrainingEvent::Progress { .. } => namespace.topic("training/progress"),
+            TrainingEvent::JobCompleted { .. } => namespace.topic("training/completed"),
+            TrainingEvent::JobFailed { .. } => namespace.topic("training/failed"),
+            TrainingEvent::JobCancelled { .. } => namespace.topic("training/cancelled"),
+            TrainingEvent::WorkerAssigned { .. } => namespace.topic("training/worker_assigned"),
+            TrainingEvent::CheckpointReady { .. } => namespace.topic("training/checkpoint"),
+            _ => namespace.topic("training/other"),
+        };
+        if let Some(hub) = &self.event_hub {
+            if let Ok(json) = serde_json::to_value(&event) {
+                hub.publish(&topic, json);
+            }
+        }
+        self.pubsub.publish(&topic, event);
     }
 
     /// Convenience: emit a progress event.
@@ -116,8 +181,8 @@ mod tests {
             timestamp: Utc::now(),
         });
 
-        let event = rx.try_recv().unwrap();
-        match event {
+        let msg = rx.try_recv().unwrap();
+        match msg.payload {
             TrainingEvent::JobStarted { job_id, model, .. } => {
                 assert_eq!(job_id, "job-1");
                 assert_eq!(model, "llama-7b");
@@ -147,6 +212,49 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("job_completed"));
         assert!(json.contains("abc"));
+    }
+
+    #[test]
+    fn namespaced_subscribe_isolates_tenants() {
+        let bus = TrainingEventBus::new(16);
+        let ns_a = Namespace::new("tenant-a");
+        let ns_b = Namespace::new("tenant-b");
+
+        let mut rx_a = bus.subscribe_namespaced(&ns_a);
+        let mut rx_b = bus.subscribe_namespaced(&ns_b);
+
+        bus.emit_namespaced(
+            TrainingEvent::JobStarted {
+                job_id: "job-1".into(),
+                model: "llama-7b".into(),
+                timestamp: Utc::now(),
+            },
+            &ns_a,
+        );
+
+        assert!(rx_a.try_recv().is_ok());
+        assert!(rx_b.try_recv().is_err());
+    }
+
+    #[test]
+    fn namespaced_emit_all_variants() {
+        let bus = TrainingEventBus::new(16);
+        let ns = Namespace::new("org-1");
+        let mut rx = bus.subscribe_namespaced(&ns);
+
+        bus.emit_namespaced(
+            TrainingEvent::Progress {
+                job_id: "j".into(),
+                status: "running".into(),
+                step: 1,
+                loss: 0.5,
+                timestamp: Utc::now(),
+            },
+            &ns,
+        );
+
+        let msg = rx.try_recv().unwrap();
+        assert!(msg.topic.starts_with("org-1/"));
     }
 
     #[test]

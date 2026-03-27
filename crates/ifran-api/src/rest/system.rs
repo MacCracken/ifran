@@ -11,6 +11,32 @@ pub async fn health() -> &'static str {
     "ok"
 }
 
+pub async fn metrics(
+    State(state): State<AppState>,
+) -> Result<
+    (
+        StatusCode,
+        [(axum::http::header::HeaderName, &'static str); 1],
+        String,
+    ),
+    (StatusCode, String),
+> {
+    let encoder = prometheus::TextEncoder::new();
+    let metric_families = state.prometheus_registry.gather();
+    let mut buffer = String::new();
+    encoder
+        .encode_utf8(&metric_families, &mut buffer)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok((
+        StatusCode::OK,
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
+        buffer,
+    ))
+}
+
 /// GET /ready — readiness probe checking database and backend availability.
 pub async fn ready(State(state): State<AppState>) -> (StatusCode, Json<serde_json::Value>) {
     // Check database accessibility via a lightweight query
@@ -103,8 +129,8 @@ pub async fn training_events(
     let mut rx = state.training_event_bus.subscribe();
 
     let stream = async_stream::stream! {
-        while let Ok(event) = rx.recv().await {
-            if let Ok(data) = serde_json::to_string(&event) {
+        while let Ok(msg) = rx.recv().await {
+            if let Ok(data) = serde_json::to_string(&msg.payload) {
                 yield Ok(Event::default().data(data));
             }
         }
@@ -136,6 +162,7 @@ mod tests {
             server: ifran_core::config::ServerConfig {
                 bind: "127.0.0.1:0".into(),
                 grpc_bind: "127.0.0.1:0".into(),
+                ws_bind: None,
             },
             storage: ifran_core::config::StorageConfig {
                 models_dir: tmp.path().join("models"),

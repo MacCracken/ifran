@@ -5,16 +5,16 @@
 //! user preference.
 
 use crate::traits::InferenceBackend;
-use dashmap::DashMap;
 use ifran_types::backend::{BackendId, BackendLocality};
 use ifran_types::inference::DataSensitivity;
 use ifran_types::model::ModelFormat;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 /// Registry that holds all available backends and routes requests to the most
 /// appropriate one.
 pub struct BackendRouter {
-    backends: DashMap<BackendId, Arc<dyn InferenceBackend>>,
+    backends: RwLock<HashMap<BackendId, Arc<dyn InferenceBackend>>>,
     /// User-configured default backend (from config).
     default_backend: Option<BackendId>,
 }
@@ -23,7 +23,7 @@ impl BackendRouter {
     /// Create a new empty router.
     pub fn new() -> Self {
         Self {
-            backends: DashMap::new(),
+            backends: RwLock::new(HashMap::new()),
             default_backend: None,
         }
     }
@@ -31,7 +31,7 @@ impl BackendRouter {
     /// Create a router with a preferred default backend.
     pub fn with_default(default: &str) -> Self {
         Self {
-            backends: DashMap::new(),
+            backends: RwLock::new(HashMap::new()),
             default_backend: Some(BackendId(default.to_string())),
         }
     }
@@ -39,24 +39,36 @@ impl BackendRouter {
     /// Register a backend with the router.
     pub fn register(&self, backend: Arc<dyn InferenceBackend>) {
         let id = backend.id();
-        self.backends.insert(id, backend);
+        self.backends
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, backend);
     }
 
     /// Remove a backend from the router.
     pub fn unregister(&self, id: &BackendId) {
-        self.backends.remove(id);
+        self.backends
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(id);
     }
 
     /// Get a specific backend by its identifier.
     pub fn get(&self, id: &BackendId) -> Option<Arc<dyn InferenceBackend>> {
-        self.backends.get(id).map(|entry| entry.value().clone())
+        self.backends
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+            .cloned()
     }
 
     /// List all registered backend identifiers.
     pub fn list_backends(&self) -> Vec<BackendId> {
         self.backends
-            .iter()
-            .map(|entry| entry.key().clone())
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .keys()
+            .cloned()
             .collect()
     }
 
@@ -91,11 +103,13 @@ impl BackendRouter {
         }
 
         // 3. First backend that supports the format
-        for entry in self.backends.iter() {
-            if entry.value().supported_formats().contains(&format) {
-                return Some(entry.value().clone());
+        let guard = self.backends.read().unwrap_or_else(|e| e.into_inner());
+        for backend in guard.values() {
+            if backend.supported_formats().contains(&format) {
+                return Some(Arc::clone(backend));
             }
         }
+        drop(guard);
 
         // 4. No matching backend found
         tracing::warn!(?format, "No backend supports the requested model format");
@@ -157,13 +171,15 @@ impl BackendRouter {
         }
 
         // 3. First local backend that supports the format
-        for entry in self.backends.iter() {
-            if entry.value().capabilities().locality == BackendLocality::Local
-                && entry.value().supported_formats().contains(&format)
+        let guard = self.backends.read().unwrap_or_else(|e| e.into_inner());
+        for backend in guard.values() {
+            if backend.capabilities().locality == BackendLocality::Local
+                && backend.supported_formats().contains(&format)
             {
-                return Some(entry.value().clone());
+                return Some(Arc::clone(backend));
             }
         }
+        drop(guard);
 
         tracing::warn!(
             ?format,
@@ -176,13 +192,18 @@ impl BackendRouter {
     /// Check if any backend supports a given format.
     pub fn supports_format(&self, format: ModelFormat) -> bool {
         self.backends
-            .iter()
-            .any(|entry| entry.value().supported_formats().contains(&format))
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .any(|backend| backend.supported_formats().contains(&format))
     }
 
     /// Number of registered backends.
     pub fn count(&self) -> usize {
-        self.backends.len()
+        self.backends
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .len()
     }
 }
 

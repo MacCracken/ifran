@@ -1,6 +1,6 @@
 //! Distributed training coordinator — manages worker lifecycle and job state.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -8,6 +8,7 @@ use ifran_types::IfranError;
 use ifran_types::distributed::*;
 use ifran_types::error::Result;
 use ifran_types::training::TrainingStatus;
+use majra::barrier::{AsyncBarrierSet, BarrierResult};
 
 /// Coordinates a distributed training job across multiple Ifran instances.
 ///
@@ -15,12 +16,14 @@ use ifran_types::training::TrainingStatus;
 /// Future: Handles checkpoint synchronization and gradient averaging via gRPC.
 pub struct DistributedCoordinator {
     jobs: Arc<RwLock<HashMap<DistributedJobId, DistributedJobState>>>,
+    barriers: AsyncBarrierSet,
 }
 
 impl DistributedCoordinator {
     pub fn new() -> Self {
         Self {
             jobs: Arc::new(RwLock::new(HashMap::new())),
+            barriers: AsyncBarrierSet::new(),
         }
     }
 
@@ -109,6 +112,13 @@ impl DistributedCoordinator {
             )));
         }
 
+        let participants: HashSet<String> = state
+            .workers
+            .iter()
+            .map(|w| format!("worker-{}", w.rank))
+            .collect();
+        self.barriers.create(job_id.to_string(), participants);
+
         state.status = TrainingStatus::Running;
         Ok(())
     }
@@ -120,22 +130,39 @@ impl DistributedCoordinator {
     pub async fn worker_completed(
         &self,
         job_id: DistributedJobId,
-        _rank: u32,
+        rank: u32,
         tenant_id: &str,
     ) -> Result<()> {
+        let barrier_key = job_id.to_string();
+        let participant = format!("worker-{rank}");
+
+        let released = match self.barriers.arrive(&barrier_key, &participant) {
+            BarrierResult::Released => true,
+            BarrierResult::Waiting { .. } => false,
+            BarrierResult::Unknown => {
+                let jobs = self.jobs.read().await;
+                let state = lookup_ref(&jobs, job_id, tenant_id)?;
+                if state.completed_workers >= state.config.world_size {
+                    return Ok(());
+                }
+                return Err(IfranError::DistributedError(format!(
+                    "No barrier found for job {job_id}"
+                )));
+            }
+            _ => false,
+        };
+
         let mut jobs = self.jobs.write().await;
         let state = lookup_mut(&mut jobs, job_id, tenant_id)?;
 
-        // Guard against duplicate completions pushing count past world_size
-        if state.completed_workers >= state.config.world_size {
-            return Ok(());
+        if state.completed_workers < state.config.world_size {
+            state.completed_workers += 1;
         }
 
-        state.completed_workers += 1;
-
-        // All workers done → job complete
-        if state.completed_workers >= state.config.world_size {
+        if released {
             state.status = TrainingStatus::Completed;
+            drop(jobs);
+            self.barriers.complete(&barrier_key);
         }
 
         Ok(())
@@ -212,9 +239,24 @@ impl DistributedCoordinator {
 
     /// Fail a distributed job.
     pub async fn fail_job(&self, job_id: DistributedJobId, tenant_id: &str) -> Result<()> {
+        let barrier_key = job_id.to_string();
+
         let mut jobs = self.jobs.write().await;
         let state = lookup_mut(&mut jobs, job_id, tenant_id)?;
         state.status = TrainingStatus::Failed;
+
+        let worker_ids: Vec<String> = state
+            .workers
+            .iter()
+            .map(|w| format!("worker-{}", w.rank))
+            .collect();
+        drop(jobs);
+
+        for wid in &worker_ids {
+            let _ = self.barriers.force(&barrier_key, wid);
+        }
+        self.barriers.complete(&barrier_key);
+
         Ok(())
     }
 }

@@ -29,7 +29,6 @@ ifran-core = { path = "../ifran-core" }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 tracing = { workspace = true }
-dashmap = { workspace = true }
 thiserror = { workspace = true }
 reqwest = { workspace = true }
 serde_json = { workspace = true }

@@ -67,7 +67,6 @@ owo-colors = "4"
 # Async utilities
 async-trait = "0.1"
 futures = "0.3"
-dashmap = "6"
 
 # Crypto / hashing
 sha2 = "0.10"
@@ -98,6 +97,7 @@ ai-hwaccel = "0.23"
 # Ecosystem crates
 hoosh = { path = "../hoosh" }
 majra = { version = "1.0.1", features = ["full"] }
+prometheus = "0.14"
 
 [profile.release]
 opt-level = 3

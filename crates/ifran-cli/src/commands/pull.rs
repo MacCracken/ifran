@@ -74,13 +74,13 @@ pub async fn execute(model: &str, quant: Option<&str>) -> Result<()> {
     // Spawn progress bar updater
     let pb_clone = pb.clone();
     let progress_task = tokio::spawn(async move {
-        while let Ok(event) = rx.recv().await {
-            match event.state {
+        while let Ok(msg) = rx.recv().await {
+            match msg.payload.state {
                 DownloadState::Downloading => {
-                    if let Some(total) = event.total_bytes {
+                    if let Some(total) = msg.payload.total_bytes {
                         pb_clone.set_length(total);
                     }
-                    pb_clone.set_position(event.downloaded_bytes);
+                    pb_clone.set_position(msg.payload.downloaded_bytes);
                 }
                 DownloadState::Verifying => {
                     pb_clone.set_message("Verifying...");

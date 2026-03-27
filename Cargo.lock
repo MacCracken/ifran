@@ -1304,6 +1304,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "prometheus",
  "rusqlite",
  "serde",
  "serde_json",
@@ -1326,7 +1327,6 @@ version = "2026.3.26"
 dependencies = [
  "async-trait",
  "chrono",
- "dashmap",
  "futures",
  "ifran-core",
  "ifran-types",

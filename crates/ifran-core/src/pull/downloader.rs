@@ -374,15 +374,15 @@ mod tests {
 
         // Should receive at least the initial and completion events
         let first = rx.recv().await.unwrap();
-        assert_eq!(first.model_name, "progress-test");
-        assert_eq!(first.state, DownloadState::Downloading);
+        assert_eq!(first.payload.model_name, "progress-test");
+        assert_eq!(first.payload.state, DownloadState::Downloading);
 
         // Drain to find completion event
         let mut found_complete = false;
-        while let Ok(event) = rx.try_recv() {
-            if event.state == DownloadState::Complete {
+        while let Ok(msg) = rx.try_recv() {
+            if msg.payload.state == DownloadState::Complete {
                 found_complete = true;
-                assert_eq!(event.message, Some("Download complete".into()));
+                assert_eq!(msg.payload.message, Some("Download complete".into()));
             }
         }
         assert!(found_complete);

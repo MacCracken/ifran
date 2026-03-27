@@ -30,6 +30,7 @@ futures = { workspace = true }
 async-stream = "0.3"
 tokio-stream = { workspace = true }
 majra = { workspace = true }
+prometheus = { workspace = true }
 tokio-util = { workspace = true }
 opentelemetry = { workspace = true, optional = true }
 opentelemetry_sdk = { workspace = true, optional = true }

@@ -7,6 +7,7 @@ use axum::extract::{ConnectInfo, Request};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::Response;
+use majra::namespace::Namespace;
 use majra::ratelimit::RateLimiter;
 use std::net::{IpAddr, SocketAddr};
 
@@ -33,6 +34,14 @@ impl SharedLimiter {
         } else {
             Err(())
         }
+    }
+
+    pub fn check_namespaced(&self, key: &str, namespace: Option<&Namespace>) -> bool {
+        let namespaced_key = match namespace {
+            Some(ns) => ns.key(key),
+            None => key.to_string(),
+        };
+        self.inner.check(&namespaced_key)
     }
 }
 
@@ -106,5 +115,26 @@ mod tests {
 
         // IP B should still be allowed
         assert!(limiter.check_ip(ip_b).is_ok());
+    }
+
+    #[test]
+    fn check_namespaced_without_namespace() {
+        let limiter = build_limiter(1, 1);
+        assert!(limiter.check_namespaced("10.0.0.1", None));
+        assert!(!limiter.check_namespaced("10.0.0.1", None));
+    }
+
+    #[test]
+    fn check_namespaced_isolates_tenants() {
+        let limiter = build_limiter(1, 1);
+        let ns_a = Namespace::new("tenant-a");
+        let ns_b = Namespace::new("tenant-b");
+
+        // Exhaust tenant-a's bucket for this IP
+        assert!(limiter.check_namespaced("10.0.0.1", Some(&ns_a)));
+        assert!(!limiter.check_namespaced("10.0.0.1", Some(&ns_a)));
+
+        // tenant-b with same IP should still pass
+        assert!(limiter.check_namespaced("10.0.0.1", Some(&ns_b)));
     }
 }
