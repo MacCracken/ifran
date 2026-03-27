@@ -64,9 +64,7 @@ pub async fn execute(
             })?;
 
             body["text"].as_str().map(String::from).ok_or_else(|| {
-                ifran_types::IfranError::EvalError(
-                    "No 'text' field in inference response".into(),
-                )
+                ifran_types::IfranError::EvalError("No 'text' field in inference response".into())
             })
         }
     };

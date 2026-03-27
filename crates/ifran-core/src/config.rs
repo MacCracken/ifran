@@ -269,8 +269,7 @@ impl IfranConfig {
     pub fn load(path: &std::path::Path) -> ifran_types::error::Result<Self> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| ifran_types::IfranError::ConfigError(e.to_string()))?;
-        toml::from_str(&content)
-            .map_err(|e| ifran_types::IfranError::ConfigError(e.to_string()))
+        toml::from_str(&content).map_err(|e| ifran_types::IfranError::ConfigError(e.to_string()))
     }
 
     /// Discover and load config using the standard resolution chain:

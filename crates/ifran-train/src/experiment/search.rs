@@ -1,9 +1,9 @@
 //! Search space engine for experiment hyperparameter exploration.
 
-use rand::RngExt;
-use rand_core::UnwrapErr;
 use ifran_types::experiment::{ParamRange, SearchStrategy};
 use ifran_types::training::HyperParams;
+use rand::RngExt;
+use rand_core::UnwrapErr;
 
 /// Generates trial hyperparameter configurations from a search space.
 pub struct SearchSpace {

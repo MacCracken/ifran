@@ -48,9 +48,7 @@ print("Merge complete")
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(IfranError::TrainingError(format!(
-            "Merge failed: {stderr}"
-        )));
+        return Err(IfranError::TrainingError(format!("Merge failed: {stderr}")));
     }
 
     info!("LoRA merge complete: {output_path}");

@@ -3,11 +3,11 @@
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
-use serde::{Deserialize, Serialize};
 use ifran_core::training_events::TrainingEvent;
 use ifran_types::TenantId;
 use ifran_types::distributed::*;
 use ifran_types::training::{TrainingJobConfig, TrainingStatus};
+use serde::{Deserialize, Serialize};
 
 use super::pagination::{PaginatedResponse, PaginationQuery};
 use crate::state::AppState;

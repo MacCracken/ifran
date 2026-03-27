@@ -3,8 +3,8 @@
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
-use serde::{Deserialize, Serialize};
 use ifran_types::experiment::{ExperimentId, ExperimentProgram, ExperimentStatus, TrialResult};
+use serde::{Deserialize, Serialize};
 
 use super::pagination::{PaginatedResponse, PaginationQuery};
 

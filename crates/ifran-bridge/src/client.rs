@@ -5,11 +5,11 @@
 //! progress, and register completed models with SY.
 
 use crate::protocol::{Capabilities, ConnectionState, ProtocolConfig};
-use std::sync::Arc;
 use ifran_types::bridge::{
     GpuRequest, ModelRegistration, ProgressUpdate, ScaleRequest, ScaleResponse,
     yeoman_bridge_client::YeomanBridgeClient,
 };
+use std::sync::Arc;
 use tokio::sync::RwLock;
 use tonic::transport::Channel;
 use tracing::{info, warn};
@@ -91,9 +91,7 @@ impl BridgeClient {
     }
 
     /// Get a clone of the gRPC client, if connected.
-    async fn get_client(
-        &self,
-    ) -> ifran_types::error::Result<Option<YeomanBridgeClient<Channel>>> {
+    async fn get_client(&self) -> ifran_types::error::Result<Option<YeomanBridgeClient<Channel>>> {
         Ok(self.grpc_client.read().await.clone())
     }
 
@@ -179,9 +177,7 @@ impl BridgeClient {
                 .report_progress(tonic::Request::new(stream))
                 .await
                 .map_err(|e| {
-                    ifran_types::IfranError::BridgeError(format!(
-                        "ReportProgress RPC failed: {e}"
-                    ))
+                    ifran_types::IfranError::BridgeError(format!("ReportProgress RPC failed: {e}"))
                 })?;
         } else {
             tracing::debug!("No gRPC connection — progress report skipped (degraded mode)");

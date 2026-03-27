@@ -1,10 +1,10 @@
 //! Dataset curation with deduplication and version tracking.
 
-use rusqlite::{Connection, params};
 use ifran_types::IfranError;
 use ifran_types::TenantId;
 use ifran_types::dataset::{CuratedDataset, DatasetId};
 use ifran_types::error::Result;
+use rusqlite::{Connection, params};
 use uuid::Uuid;
 
 pub struct DatasetCurator {

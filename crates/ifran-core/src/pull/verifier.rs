@@ -3,10 +3,10 @@
 //! Hashes a file on disk and compares against an expected digest.
 //! Supports both SHA-256 (standard for HuggingFace) and BLAKE3 (faster).
 
-use sha2::{Digest, Sha256};
-use std::path::Path;
 use ifran_types::IfranError;
 use ifran_types::error::Result;
+use sha2::{Digest, Sha256};
+use std::path::Path;
 
 /// Hash algorithm used for verification.
 #[derive(Debug, Clone, Copy)]

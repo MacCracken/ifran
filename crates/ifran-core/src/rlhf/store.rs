@@ -1,8 +1,8 @@
-use rusqlite::{Connection, params};
 use ifran_types::IfranError;
 use ifran_types::TenantId;
 use ifran_types::error::Result;
 use ifran_types::rlhf::*;
+use rusqlite::{Connection, params};
 use uuid::Uuid;
 
 pub struct AnnotationStore {

@@ -11,9 +11,9 @@ use axum::extract::{Extension, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::response::sse::{Event, Sse};
-use serde::Deserialize;
 use ifran_types::TenantId;
 use ifran_types::inference::InferenceRequest;
+use serde::Deserialize;
 
 /// OpenAI-style message.
 #[derive(Debug, Deserialize)]

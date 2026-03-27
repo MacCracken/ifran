@@ -5,10 +5,10 @@
 //! - Filtering by format (GGUF) and quantization level
 //! - Resolving the best file to download for a given quant preference
 
-use reqwest::Client;
-use serde::Deserialize;
 use ifran_types::IfranError;
 use ifran_types::error::Result;
+use reqwest::Client;
+use serde::Deserialize;
 
 const HF_API_BASE: &str = "https://huggingface.co/api";
 

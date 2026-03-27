@@ -4,10 +4,10 @@
 //! Tracks per-device memory usage and supports fair allocation when multiple
 //! jobs compete for the same devices.
 
-use std::collections::HashMap;
-use std::sync::Arc;
 use ifran_types::IfranError;
 use ifran_types::error::Result;
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Unique identifier for an allocation.

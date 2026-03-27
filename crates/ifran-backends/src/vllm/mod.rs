@@ -5,8 +5,6 @@
 //! OpenAI-compatible API that this backend wraps.
 
 use async_trait::async_trait;
-use std::collections::HashMap;
-use std::sync::Arc;
 use ifran_types::IfranError;
 use ifran_types::backend::{
     AcceleratorType, BackendCapabilities, BackendId, BackendLocality, DeviceConfig,
@@ -16,6 +14,8 @@ use ifran_types::inference::{
     FinishReason, InferenceRequest, InferenceResponse, StreamChunk, TokenUsage,
 };
 use ifran_types::model::{ModelFormat, ModelManifest};
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 use tracing::{info, warn};
 
@@ -79,10 +79,12 @@ impl InferenceBackend for VllmBackend {
             .unwrap_or(&manifest.info.name);
 
         let url = format!("{}/v1/models", self.base_url);
-        let resp =
-            self.client.get(&url).send().await.map_err(|e| {
-                IfranError::BackendError(format!("Cannot reach vLLM server: {e}"))
-            })?;
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| IfranError::BackendError(format!("Cannot reach vLLM server: {e}")))?;
 
         if !resp.status().is_success() {
             return Err(IfranError::BackendError(

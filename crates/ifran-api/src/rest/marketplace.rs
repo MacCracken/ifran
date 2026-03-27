@@ -4,10 +4,10 @@ use axum::body::Body;
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
-use serde::{Deserialize, Serialize};
 use ifran_types::TenantId;
 use ifran_types::marketplace::{MarketplaceEntry, MarketplaceQuery};
 use ifran_types::model::ModelFormat;
+use serde::{Deserialize, Serialize};
 
 use super::pagination::{PaginatedResponse, PaginationQuery};
 use crate::state::AppState;

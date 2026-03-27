@@ -1,10 +1,10 @@
 //! Standalone preference pair store for DPO/RLHF training data.
 
-use rusqlite::{Connection, params};
-use serde::{Deserialize, Serialize};
 use ifran_types::IfranError;
 use ifran_types::TenantId;
 use ifran_types::error::Result;
+use rusqlite::{Connection, params};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// A preference pair for DPO training.

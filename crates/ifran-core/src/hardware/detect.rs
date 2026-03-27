@@ -10,9 +10,9 @@
 //! The results are converted back into ifran's [`SystemHardware`] types so
 //! the rest of the codebase is unaffected.
 
+use ifran_types::error::Result;
 #[cfg(not(feature = "ai-hwaccel"))]
 use std::path::Path;
-use ifran_types::error::Result;
 
 /// Re-export the full `ai-hwaccel` registry when the feature is enabled.
 /// Callers that want the richer API (quantization suggestions, sharding plans,

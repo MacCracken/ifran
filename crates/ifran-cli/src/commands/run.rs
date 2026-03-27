@@ -1,5 +1,3 @@
-/// Run interactive inference on a specified model.
-use std::io::{self, BufRead, Write};
 use ifran_backends::InferenceBackend;
 use ifran_backends::llamacpp::LlamaCppBackend;
 use ifran_core::config::IfranConfig;
@@ -9,6 +7,8 @@ use ifran_types::IfranError;
 use ifran_types::error::Result;
 use ifran_types::inference::InferenceRequest;
 use ifran_types::model::ModelManifest;
+/// Run interactive inference on a specified model.
+use std::io::{self, BufRead, Write};
 
 pub async fn execute(model: &str) -> Result<()> {
     let config = IfranConfig::discover();

@@ -7,10 +7,10 @@ use axum::http::StatusCode;
 use axum::response::Json;
 use axum::response::sse::{Event, Sse};
 use futures::Stream;
-use serde::{Deserialize, Serialize};
 use ifran_core::training_events::TrainingEvent;
 use ifran_types::TenantId;
 use ifran_types::training::{TrainingJobConfig, TrainingJobId, TrainingStatus};
+use serde::{Deserialize, Serialize};
 
 use super::pagination::{PaginatedResponse, PaginationQuery};
 

@@ -147,10 +147,7 @@ mod tests {
             ram_mb: 0,
         };
         let result = check_budget(&hw, &est, 512);
-        assert!(matches!(
-            result,
-            Err(IfranError::InsufficientMemory { .. })
-        ));
+        assert!(matches!(result, Err(IfranError::InsufficientMemory { .. })));
     }
 
     #[test]
@@ -171,9 +168,6 @@ mod tests {
             ram_mb: 0,
         };
         let result = check_budget(&hw, &est, 512);
-        assert!(matches!(
-            result,
-            Err(IfranError::InsufficientMemory { .. })
-        ));
+        assert!(matches!(result, Err(IfranError::InsufficientMemory { .. })));
     }
 }

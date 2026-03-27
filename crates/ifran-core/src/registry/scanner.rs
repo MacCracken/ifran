@@ -4,9 +4,9 @@
 //! and returns metadata about each discovered model. Used to import
 //! models that were manually placed on disk.
 
-use std::path::{Path, PathBuf};
 use ifran_types::error::Result;
 use ifran_types::model::ModelFormat;
+use std::path::{Path, PathBuf};
 
 /// A model file discovered on the filesystem.
 #[derive(Debug, Clone)]

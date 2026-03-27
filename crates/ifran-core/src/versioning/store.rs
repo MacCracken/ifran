@@ -1,9 +1,9 @@
 //! SQLite storage for model versions.
 
-use rusqlite::{Connection, params};
 use ifran_types::error::Result;
 use ifran_types::versioning::{ModelVersion, ModelVersionId};
 use ifran_types::{IfranError, TenantId};
+use rusqlite::{Connection, params};
 use uuid::Uuid;
 
 pub struct VersionStore {

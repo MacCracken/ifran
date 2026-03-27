@@ -3,9 +3,9 @@
 //! Resolves a direct URL to a downloadable resource, performing HEAD requests
 //! to determine file size and content type before downloading.
 
-use reqwest::Client;
 use ifran_types::IfranError;
 use ifran_types::error::Result;
+use reqwest::Client;
 
 /// Metadata about a direct download URL.
 #[derive(Debug, Clone)]

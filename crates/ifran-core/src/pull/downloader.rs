@@ -6,11 +6,11 @@
 //! - Configurable timeouts
 
 use crate::pull::progress::{ProgressEvent, ProgressTracker};
-use reqwest::Client;
-use std::path::PathBuf;
 use ifran_types::IfranError;
 use ifran_types::error::Result;
 use ifran_types::registry::DownloadState;
+use reqwest::Client;
+use std::path::PathBuf;
 use tokio::io::AsyncWriteExt;
 
 /// Configuration for a download.

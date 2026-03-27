@@ -1,9 +1,9 @@
 //! SQLite storage for pipeline lineage graphs.
 
-use rusqlite::{Connection, params};
 use ifran_types::error::Result;
 use ifran_types::lineage::{LineageId, LineageNode, PipelineStage};
 use ifran_types::{IfranError, TenantId};
+use rusqlite::{Connection, params};
 use uuid::Uuid;
 
 pub struct LineageStore {

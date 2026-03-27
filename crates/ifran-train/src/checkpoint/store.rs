@@ -1,8 +1,8 @@
 //! Checkpoint store for persisting and retrieving model training checkpoints.
 
-use std::path::{Path, PathBuf};
 use ifran_types::error::Result;
 use ifran_types::training::{CheckpointInfo, TrainingJobId};
+use std::path::{Path, PathBuf};
 
 /// Manages checkpoint storage on disk.
 pub struct CheckpointStore {

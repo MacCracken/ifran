@@ -5,9 +5,9 @@ use std::sync::Arc;
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
-use serde::Deserialize;
 use ifran_backends::{InferenceBackend, ModelHandle, hash_text_to_embedding};
 use ifran_types::rag::{RagPipelineConfig, RagPipelineId, RagQuery, RagSource};
+use serde::Deserialize;
 
 use ifran_types::TenantId;
 

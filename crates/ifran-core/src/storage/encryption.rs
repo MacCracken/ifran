@@ -4,9 +4,9 @@
 //! filesystem (LUKS/dm-crypt). Optionally integrates with a key management
 //! service (e.g., daimon on Agnosticos) to unlock volumes at startup.
 
-use std::path::Path;
 use ifran_types::IfranError;
 use ifran_types::error::Result;
+use std::path::Path;
 
 /// Encryption status of a storage path.
 #[derive(Debug, Clone, PartialEq, Eq)]

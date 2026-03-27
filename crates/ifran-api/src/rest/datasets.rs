@@ -3,10 +3,10 @@
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
-use serde::{Deserialize, Serialize};
 use ifran_train::dataset::labeler::{AutoLabelJobId, AutoLabelStatus};
 use ifran_train::dataset::processor::AugmentationStrategy;
 use ifran_types::inference::InferenceRequest;
+use serde::{Deserialize, Serialize};
 
 use super::pagination::{PaginatedResponse, PaginationQuery};
 use crate::state::AppState;

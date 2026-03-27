@@ -1,6 +1,3 @@
-/// Shared application state accessible across all API handlers.
-use std::collections::HashMap;
-use std::sync::Arc;
 use ifran_backends::BackendRouter;
 use ifran_bridge::client::BridgeClient;
 use ifran_bridge::protocol::ProtocolConfig;
@@ -27,6 +24,9 @@ use ifran_train::experiment::runner::ExperimentHandle;
 use ifran_train::job::manager::JobManager;
 use ifran_train::job::store::JobStore;
 use ifran_types::experiment::ExperimentId;
+/// Shared application state accessible across all API handlers.
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// Application state shared across all handlers via Axum's State extractor.
@@ -113,9 +113,7 @@ impl AppState {
         let tenant_store = if config.security.multi_tenant {
             let tenant_store_path = config.storage.database.with_file_name("tenants.db");
             Some(TenantStore::open(&tenant_store_path).map_err(|e| {
-                ifran_types::IfranError::StorageError(format!(
-                    "Failed to open tenant store: {e}"
-                ))
+                ifran_types::IfranError::StorageError(format!("Failed to open tenant store: {e}"))
             })?)
         } else {
             None
@@ -150,8 +148,7 @@ impl AppState {
 
         // Initialize bridge if enabled
         let (bridge_client, bridge_server) = if config.bridge.enabled {
-            let endpoint =
-                ifran_bridge::discovery::discover(config.bridge.sy_endpoint.as_deref())?;
+            let endpoint = ifran_bridge::discovery::discover(config.bridge.sy_endpoint.as_deref())?;
 
             let protocol_config = ProtocolConfig {
                 heartbeat_interval: std::time::Duration::from_secs(

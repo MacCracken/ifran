@@ -2,12 +2,12 @@
 
 use crate::job::status::JobState;
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, params};
-use std::path::Path;
 use ifran_types::IfranError;
 use ifran_types::TenantId;
 use ifran_types::error::Result;
 use ifran_types::training::{TrainingJobConfig, TrainingJobId, TrainingStatus};
+use rusqlite::{Connection, params};
+use std::path::Path;
 use uuid::Uuid;
 
 /// Persists training job state to SQLite for crash recovery.

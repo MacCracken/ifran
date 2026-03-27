@@ -16,9 +16,9 @@
 //!         └── metadata.json
 //! ```
 
-use std::path::{Path, PathBuf};
 use ifran_types::IfranError;
 use ifran_types::error::Result;
+use std::path::{Path, PathBuf};
 
 /// Manages the Ifran directory layout on the filesystem.
 pub struct StorageLayout {

@@ -3,9 +3,9 @@
 //! The pool keeps track of loaded models and supports hot-swapping:
 //! replacing a running model with a new version without dropping requests.
 
+use ifran_types::model::ModelId;
 use std::collections::HashMap;
 use std::sync::Arc;
-use ifran_types::model::ModelId;
 use tokio::sync::RwLock;
 
 /// A slot in the model pool.

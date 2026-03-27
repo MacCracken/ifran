@@ -3,8 +3,8 @@
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
-use serde::Deserialize;
 use ifran_types::rlhf::{AnnotationPair, Preference};
+use serde::Deserialize;
 use uuid::Uuid;
 
 use ifran_types::TenantId;

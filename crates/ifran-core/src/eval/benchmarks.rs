@@ -3,8 +3,8 @@
 //! Each benchmark takes inference results and computes a score.
 //! Supports: perplexity, MMLU, HellaSwag, HumanEval, and custom benchmarks.
 
-use serde::Deserialize;
 use ifran_types::eval::BenchmarkKind;
+use serde::Deserialize;
 
 /// A single evaluation sample.
 #[derive(Debug, Clone, Deserialize)]
@@ -194,9 +194,8 @@ pub fn load_samples(
         if line.trim().is_empty() {
             continue;
         }
-        let sample: EvalSample = serde_json::from_str(line).map_err(|e| {
-            ifran_types::IfranError::EvalError(format!("Invalid eval sample: {e}"))
-        })?;
+        let sample: EvalSample = serde_json::from_str(line)
+            .map_err(|e| ifran_types::IfranError::EvalError(format!("Invalid eval sample: {e}")))?;
         samples.push(sample);
         if let Some(max) = limit {
             if samples.len() >= max {

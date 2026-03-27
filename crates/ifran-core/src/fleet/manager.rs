@@ -4,12 +4,12 @@
 //! using majra's HeartbeatTracker for the Online/Suspect/Offline FSM.
 
 use chrono::{DateTime, Utc};
+use ifran_types::IfranError;
 use majra::heartbeat::{HeartbeatConfig, HeartbeatTracker, Status};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use ifran_types::IfranError;
 use tokio::sync::{RwLock, watch};
 
 /// Unique node identifier.

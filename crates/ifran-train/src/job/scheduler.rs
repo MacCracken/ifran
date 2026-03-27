@@ -3,8 +3,8 @@
 //! Uses majra's multi-tier priority queue under the hood. Jobs are dequeued
 //! highest-priority-first, FIFO within each priority tier.
 
-use std::collections::HashSet;
 use ifran_types::training::TrainingJobId;
+use std::collections::HashSet;
 
 pub use majra::queue::Priority;
 use majra::queue::{PriorityQueue, QueueItem};

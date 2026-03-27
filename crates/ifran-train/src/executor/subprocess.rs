@@ -2,11 +2,11 @@
 //! as child processes.
 
 use async_trait::async_trait;
-use std::collections::HashMap;
-use std::sync::Arc;
 use ifran_types::IfranError;
 use ifran_types::error::Result;
 use ifran_types::training::{TrainingJobConfig, TrainingJobId};
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::process::{Child, Command};
 use tokio::sync::RwLock;
 use tracing::info;
@@ -29,8 +29,8 @@ impl TrainingExecutor for SubprocessExecutor {
     async fn run(&self, config: &TrainingJobConfig, job_id: TrainingJobId) -> Result<()> {
         let script = super::script_for_method(config.method);
 
-        let config_json = serde_json::to_string(config)
-            .map_err(|e| IfranError::TrainingError(e.to_string()))?;
+        let config_json =
+            serde_json::to_string(config).map_err(|e| IfranError::TrainingError(e.to_string()))?;
 
         info!(job_id = %job_id, script = %script, "Starting training subprocess");
 

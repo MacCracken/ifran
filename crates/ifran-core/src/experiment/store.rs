@@ -1,12 +1,12 @@
 //! SQLite storage for experiment and trial results.
 
-use rusqlite::{Connection, params};
 use ifran_types::IfranError;
 use ifran_types::TenantId;
 use ifran_types::error::Result;
 use ifran_types::experiment::{
     Direction, ExperimentId, ExperimentProgram, ExperimentStatus, TrialId, TrialResult, TrialStatus,
 };
+use rusqlite::{Connection, params};
 use uuid::Uuid;
 
 /// Full experiment record returned by `get_experiment`.
@@ -105,8 +105,8 @@ impl ExperimentStore {
         program: &ExperimentProgram,
         tenant_id: &TenantId,
     ) -> Result<()> {
-        let program_json = serde_json::to_string(program)
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let program_json =
+            serde_json::to_string(program).map_err(|e| IfranError::StorageError(e.to_string()))?;
         let now = chrono::Utc::now().to_rfc3339();
         self.conn
             .execute(

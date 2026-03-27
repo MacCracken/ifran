@@ -19,7 +19,10 @@ pub struct SharedLimiter {
 /// Build a per-IP rate limiter from config values.
 pub fn build_limiter(per_second: u64, burst: u64) -> SharedLimiter {
     SharedLimiter {
-        inner: std::sync::Arc::new(RateLimiter::new(per_second.max(1) as f64, burst.max(1) as usize)),
+        inner: std::sync::Arc::new(RateLimiter::new(
+            per_second.max(1) as f64,
+            burst.max(1) as usize,
+        )),
     }
 }
 

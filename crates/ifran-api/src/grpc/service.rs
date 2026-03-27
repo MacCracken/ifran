@@ -4,7 +4,6 @@
 //! Mirrors the REST API logic but over gRPC for lower-latency programmatic access.
 
 use crate::state::AppState;
-use std::pin::Pin;
 use ifran_types::ifran_proto::ifran_service_server::IfranService;
 use ifran_types::ifran_proto::{
     GpuInfo, InferenceRequest, InferenceResponse, ListModelsRequest, ListModelsResponse,
@@ -12,6 +11,7 @@ use ifran_types::ifran_proto::{
     PullProgress, StatusRequest, StatusResponse, StreamChunk, UnloadModelRequest,
     UnloadModelResponse,
 };
+use std::pin::Pin;
 use tokio_stream::Stream;
 use tonic::{Request, Response, Status};
 use tracing::info;

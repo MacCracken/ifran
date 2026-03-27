@@ -3,8 +3,8 @@
 use axum::extract::{Extension, State};
 use axum::http::StatusCode;
 use axum::response::Json;
-use serde::Serialize;
 use ifran_types::TenantId;
+use serde::Serialize;
 
 use crate::state::AppState;
 

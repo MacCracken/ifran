@@ -1,9 +1,9 @@
 //! Dataset validator for verifying data integrity and format compliance.
 
-use std::path::Path;
 use ifran_types::IfranError;
 use ifran_types::error::Result;
 use ifran_types::training::DatasetFormat;
+use std::path::Path;
 
 /// Validation result.
 #[derive(Debug, serde::Serialize)]

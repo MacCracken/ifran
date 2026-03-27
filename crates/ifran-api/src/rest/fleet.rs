@@ -4,8 +4,8 @@ use crate::state::AppState;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use serde::Deserialize;
 use ifran_core::fleet::manager::{FleetNode, NodeHealth, RegisterNodeRequest};
+use serde::Deserialize;
 
 use super::pagination::{PaginatedResponse, PaginationQuery};
 

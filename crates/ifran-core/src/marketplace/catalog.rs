@@ -1,10 +1,10 @@
 //! Marketplace catalog — SQLite-backed index of published models.
 
-use rusqlite::{Connection, params};
 use ifran_types::IfranError;
 use ifran_types::TenantId;
 use ifran_types::error::Result;
 use ifran_types::marketplace::{MarketplaceEntry, MarketplaceQuery};
+use rusqlite::{Connection, params};
 
 /// Local marketplace catalog backed by SQLite.
 pub struct MarketplaceCatalog {

@@ -4,13 +4,13 @@ use crate::executor::{ExecutorKind, TrainingExecutor};
 use crate::job::status::JobState;
 use crate::job::store::JobStore;
 use chrono::Utc;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
 use ifran_types::IfranError;
 use ifran_types::TenantId;
 use ifran_types::error::Result;
 use ifran_types::training::{TrainingJobConfig, TrainingJobId, TrainingStatus};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
@@ -90,9 +90,9 @@ impl JobManager {
         };
 
         let mut recovered = {
-            let store = store.lock().map_err(|e| {
-                IfranError::StorageError(format!("Failed to lock job store: {e}"))
-            })?;
+            let store = store
+                .lock()
+                .map_err(|e| IfranError::StorageError(format!("Failed to lock job store: {e}")))?;
             store.recover_jobs()?
         };
 

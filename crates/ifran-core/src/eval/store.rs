@@ -1,10 +1,10 @@
 //! SQLite storage for evaluation results.
 
-use rusqlite::{Connection, params};
 use ifran_types::IfranError;
 use ifran_types::TenantId;
 use ifran_types::error::Result;
 use ifran_types::eval::{BenchmarkKind, EvalResult, EvalRunId};
+use rusqlite::{Connection, params};
 use uuid::Uuid;
 
 /// Manages eval result storage in SQLite.

@@ -4,12 +4,12 @@
 //! maps to a [`ModelInfo`] and tracks where the model files live on disk.
 
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, params};
-use std::path::Path;
 use ifran_types::IfranError;
 use ifran_types::TenantId;
 use ifran_types::error::Result;
 use ifran_types::model::{ModelFormat, ModelId, ModelInfo, QuantLevel};
+use rusqlite::{Connection, params};
+use std::path::Path;
 use uuid::Uuid;
 
 /// Handle to the SQLite model catalog.
@@ -129,9 +129,7 @@ impl ModelDatabase {
                 row_to_model,
             )
             .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => {
-                    IfranError::ModelNotFound(name.to_string())
-                }
+                rusqlite::Error::QueryReturnedNoRows => IfranError::ModelNotFound(name.to_string()),
                 other => IfranError::StorageError(other.to_string()),
             })
     }

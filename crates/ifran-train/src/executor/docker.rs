@@ -4,11 +4,11 @@
 //! and checkpoint directories, and passes the training config as JSON.
 
 use async_trait::async_trait;
-use std::collections::HashMap;
-use std::sync::Arc;
 use ifran_types::IfranError;
 use ifran_types::error::Result;
 use ifran_types::training::{TrainingJobConfig, TrainingJobId};
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::process::Command;
 use tokio::sync::RwLock;
 use tracing::info;
@@ -33,8 +33,8 @@ impl DockerExecutor {
 #[async_trait]
 impl TrainingExecutor for DockerExecutor {
     async fn run(&self, config: &TrainingJobConfig, job_id: TrainingJobId) -> Result<()> {
-        let config_json = serde_json::to_string(config)
-            .map_err(|e| IfranError::TrainingError(e.to_string()))?;
+        let config_json =
+            serde_json::to_string(config).map_err(|e| IfranError::TrainingError(e.to_string()))?;
 
         let container_name = format!("ifran-train-{}", job_id);
         let script = super::script_for_method(config.method);

@@ -9,9 +9,9 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use ifran_types::IfranError;
 use ifran_types::error::Result;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub type AutoLabelJobId = Uuid;
@@ -101,9 +101,12 @@ impl AutoLabeler {
 
     /// Get the state of an auto-labeling job.
     pub async fn get_job(&self, job_id: AutoLabelJobId) -> Result<AutoLabelJobState> {
-        self.jobs.read().await.get(&job_id).cloned().ok_or_else(|| {
-            IfranError::TrainingError(format!("Auto-label job {job_id} not found"))
-        })
+        self.jobs
+            .read()
+            .await
+            .get(&job_id)
+            .cloned()
+            .ok_or_else(|| IfranError::TrainingError(format!("Auto-label job {job_id} not found")))
     }
 
     /// List all auto-labeling jobs.

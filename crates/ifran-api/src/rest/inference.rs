@@ -6,9 +6,9 @@ use crate::state::AppState;
 use axum::Json;
 use axum::extract::{Extension, State};
 use axum::response::sse::{Event, Sse};
-use serde::Deserialize;
 use ifran_types::TenantId;
 use ifran_types::inference::InferenceRequest;
+use serde::Deserialize;
 
 /// POST /inference request body.
 #[derive(Debug, Deserialize)]

@@ -5,8 +5,6 @@
 //! fusion, FP16/INT8 precision, and in-flight batching.
 
 use async_trait::async_trait;
-use std::collections::HashMap;
-use std::sync::Arc;
 use ifran_types::IfranError;
 use ifran_types::backend::{
     AcceleratorType, BackendCapabilities, BackendId, BackendLocality, DeviceConfig,
@@ -16,6 +14,8 @@ use ifran_types::inference::{
     FinishReason, InferenceRequest, InferenceResponse, StreamChunk, TokenUsage,
 };
 use ifran_types::model::{ModelFormat, ModelManifest};
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 use tracing::{info, warn};
 
@@ -128,9 +128,7 @@ impl InferenceBackend for TensorRtBackend {
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(IfranError::BackendError(format!(
-                "TensorRT error: {text}"
-            )));
+            return Err(IfranError::BackendError(format!("TensorRT error: {text}")));
         }
 
         let json: serde_json::Value = resp

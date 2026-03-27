@@ -6,10 +6,10 @@
 
 use crate::traits::InferenceBackend;
 use dashmap::DashMap;
-use std::sync::Arc;
 use ifran_types::backend::{BackendId, BackendLocality};
 use ifran_types::inference::DataSensitivity;
 use ifran_types::model::ModelFormat;
+use std::sync::Arc;
 
 /// Registry that holds all available backends and routes requests to the most
 /// appropriate one.

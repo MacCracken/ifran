@@ -1,9 +1,9 @@
 //! Training job status tracking and state transitions.
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use ifran_types::TenantId;
 use ifran_types::training::{CheckpointInfo, TrainingJobConfig, TrainingJobId, TrainingStatus};
+use serde::{Deserialize, Serialize};
 
 /// Full state of a training job.
 #[derive(Debug, Clone, Serialize, Deserialize)]

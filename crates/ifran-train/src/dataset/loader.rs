@@ -1,9 +1,9 @@
 //! Dataset loader for reading training data from various sources and formats.
 
-use std::path::Path;
 use ifran_types::IfranError;
 use ifran_types::error::Result;
 use ifran_types::training::{DatasetConfig, DatasetFormat};
+use std::path::Path;
 
 /// A loaded dataset ready for training.
 #[derive(Debug)]

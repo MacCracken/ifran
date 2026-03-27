@@ -3,10 +3,10 @@
 //! Maps API keys (hashed with BLAKE3) to tenant IDs. In single-tenant mode
 //! this store is not used — the auth middleware falls back to `IFRAN_API_KEY`.
 
-use rusqlite::{Connection, params};
 use ifran_types::IfranError;
 use ifran_types::TenantId;
 use ifran_types::error::Result;
+use rusqlite::{Connection, params};
 use uuid::Uuid;
 
 /// A tenant record from the database.

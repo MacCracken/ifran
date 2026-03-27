@@ -1,8 +1,8 @@
-use rusqlite::{Connection, params};
 use ifran_types::IfranError;
 use ifran_types::TenantId;
 use ifran_types::error::Result;
 use ifran_types::rag::{ChunkInfo, DocumentId, DocumentInfo, RagPipelineConfig, RagPipelineId};
+use rusqlite::{Connection, params};
 use uuid::Uuid;
 
 pub struct RagStore {
@@ -162,9 +162,7 @@ impl RagStore {
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
         if !exists {
-            return Err(IfranError::StorageError(format!(
-                "Pipeline {id} not found"
-            )));
+            return Err(IfranError::StorageError(format!("Pipeline {id} not found")));
         }
 
         // Delete chunks for all documents in this pipeline

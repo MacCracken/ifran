@@ -3,10 +3,10 @@
 //! Pulls model manifests from Docker Registry API v2 endpoints.
 //! Supports both Docker Hub and custom registries.
 
-use reqwest::Client;
-use serde::Deserialize;
 use ifran_types::IfranError;
 use ifran_types::error::Result;
+use reqwest::Client;
+use serde::Deserialize;
 
 const DEFAULT_REGISTRY: &str = "https://registry.ollama.ai";
 

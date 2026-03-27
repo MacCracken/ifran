@@ -4,9 +4,9 @@ use crate::state::AppState;
 use axum::Json;
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
-use serde::Deserialize;
 use ifran_types::TenantId;
 use ifran_types::versioning::ModelVersion;
+use serde::Deserialize;
 
 use super::pagination::{PaginatedResponse, PaginationQuery};
 

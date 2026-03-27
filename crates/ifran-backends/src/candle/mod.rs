@@ -7,8 +7,6 @@
 //! see the `gguf` backend module.
 
 use async_trait::async_trait;
-use std::collections::HashMap;
-use std::sync::Arc;
 use ifran_types::IfranError;
 use ifran_types::backend::{
     AcceleratorType, BackendCapabilities, BackendId, BackendLocality, DeviceConfig,
@@ -16,6 +14,8 @@ use ifran_types::backend::{
 use ifran_types::error::Result;
 use ifran_types::inference::{InferenceRequest, InferenceResponse, StreamChunk};
 use ifran_types::model::{ModelFormat, ModelManifest};
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 use tracing::info;
 

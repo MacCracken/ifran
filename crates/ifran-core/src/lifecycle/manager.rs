@@ -7,13 +7,13 @@
 
 use crate::hardware::detect;
 use crate::lifecycle::memory;
-use std::collections::HashMap;
-use std::sync::Arc;
 use ifran_types::IfranError;
 use ifran_types::TenantId;
 use ifran_types::backend::{AcceleratorType, DeviceConfig};
 use ifran_types::error::Result;
 use ifran_types::model::{ModelId, ModelManifest};
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Tracks a loaded model and its backend handle.

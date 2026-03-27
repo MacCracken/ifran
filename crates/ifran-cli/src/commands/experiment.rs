@@ -1,7 +1,7 @@
-/// Autonomous experiment commands — run hyperparameter sweeps, view leaderboards.
-use std::sync::Arc;
 use ifran_types::error::Result;
 use ifran_types::experiment::ExperimentId;
+/// Autonomous experiment commands — run hyperparameter sweeps, view leaderboards.
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// Run an experiment from a TOML program file.

@@ -1,10 +1,10 @@
 //! Z-score-based inference quality drift detection.
 
-use rusqlite::{Connection, params};
 use ifran_types::IfranError;
 use ifran_types::TenantId;
 use ifran_types::drift::{BaselineSnapshot, DriftResult, DriftSeverity};
 use ifran_types::error::Result;
+use rusqlite::{Connection, params};
 use uuid::Uuid;
 
 pub struct DriftDetector {

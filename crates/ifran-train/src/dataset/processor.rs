@@ -8,13 +8,13 @@
 use std::io::{BufRead, Write};
 use std::path::Path;
 
+use ifran_types::IfranError;
+use ifran_types::error::Result;
 use rand::RngExt;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 use rand_core::UnwrapErr;
 use serde::{Deserialize, Serialize};
-use ifran_types::IfranError;
-use ifran_types::error::Result;
 
 /// Available augmentation strategies for text data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

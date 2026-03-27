@@ -1,5 +1,3 @@
-/// Pull a model from a remote registry to local storage.
-use indicatif::{ProgressBar, ProgressStyle};
 use ifran_core::config::IfranConfig;
 use ifran_core::pull::downloader::{self, DownloadRequest};
 use ifran_core::pull::progress::ProgressTracker;
@@ -9,6 +7,8 @@ use ifran_core::storage::layout::StorageLayout;
 use ifran_types::error::Result;
 use ifran_types::model::{ModelFormat, ModelInfo, QuantLevel};
 use ifran_types::registry::DownloadState;
+/// Pull a model from a remote registry to local storage.
+use indicatif::{ProgressBar, ProgressStyle};
 
 pub async fn execute(model: &str, quant: Option<&str>) -> Result<()> {
     let config = IfranConfig::discover();

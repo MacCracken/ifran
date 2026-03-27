@@ -5,8 +5,6 @@
 //! run inference on this Ifran instance.
 
 use crate::protocol::{ConnectionState, Heartbeat, ProtocolConfig};
-use std::pin::Pin;
-use std::sync::Arc;
 use ifran_backends::BackendRouter;
 use ifran_core::lifecycle::manager::ModelManager;
 use ifran_train::job::manager::JobManager;
@@ -17,6 +15,8 @@ use ifran_types::bridge::{
     PullProgress, StreamChunk, TrainingJobRequest, TrainingJobResponse,
 };
 use ifran_types::training::TrainingJobConfig;
+use std::pin::Pin;
+use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_stream::Stream;
 use tonic::{Request, Response, Status};
@@ -55,9 +55,9 @@ impl BridgeServer {
         info!(addr = %bind_addr, "Starting bridge server");
         *self.state.write().await = ConnectionState::Connecting;
 
-        let addr = bind_addr.parse().map_err(|e| {
-            ifran_types::IfranError::BridgeError(format!("Invalid address: {e}"))
-        })?;
+        let addr = bind_addr
+            .parse()
+            .map_err(|e| ifran_types::IfranError::BridgeError(format!("Invalid address: {e}")))?;
 
         let state = self.state.clone();
 
