@@ -44,12 +44,13 @@ pub async fn list_models(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let db = state.db.lock().await;
-    let models = db
-        .list(&tenant_id)
+    let paged = state
+        .db
+        .list(&tenant_id, 1000, 0)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let data: Vec<serde_json::Value> = models
+    let data: Vec<serde_json::Value> = paged
+        .items
         .iter()
         .map(|m| {
             serde_json::json!({

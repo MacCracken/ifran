@@ -2,12 +2,14 @@
 
 use ifran_types::error::Result;
 use ifran_types::versioning::{ModelVersion, ModelVersionId};
-use ifran_types::{IfranError, TenantId};
-use rusqlite::{Connection, params};
+use ifran_types::{IfranError, PagedResult, TenantId};
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
+use rusqlite::params;
 use uuid::Uuid;
 
 pub struct VersionStore {
-    conn: Connection,
+    pool: Pool<SqliteConnectionManager>,
 }
 
 impl VersionStore {
@@ -15,27 +17,41 @@ impl VersionStore {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let conn = Connection::open(path).map_err(|e| IfranError::StorageError(e.to_string()))?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")
+        let manager = SqliteConnectionManager::file(path).with_init(|conn| {
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            Ok(())
+        });
+        let pool = Pool::builder()
+            .max_size(4)
+            .build(manager)
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
-        let store = Self { conn };
+        let store = Self { pool };
         store.migrate()?;
         Ok(store)
     }
 
     #[cfg(test)]
     pub fn open_in_memory() -> Result<Self> {
-        let conn =
-            Connection::open_in_memory().map_err(|e| IfranError::StorageError(e.to_string()))?;
-        let store = Self { conn };
+        let manager = SqliteConnectionManager::memory().with_init(|conn| {
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            Ok(())
+        });
+        let pool = Pool::builder()
+            .max_size(1)
+            .build(manager)
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let store = Self { pool };
         store.migrate()?;
         Ok(store)
     }
 
     fn migrate(&self) -> Result<()> {
-        self.conn
-            .execute_batch(
-                "CREATE TABLE IF NOT EXISTS model_versions (
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS model_versions (
                 id                TEXT PRIMARY KEY,
                 tenant_id         TEXT NOT NULL DEFAULT 'default',
                 model_family      TEXT NOT NULL,
@@ -51,49 +67,55 @@ impl VersionStore {
             CREATE INDEX IF NOT EXISTS idx_versions_family ON model_versions(model_family);
             CREATE INDEX IF NOT EXISTS idx_versions_consumer ON model_versions(consumer);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_versions_family_tag ON model_versions(tenant_id, model_family, version_tag);",
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         Ok(())
     }
 
     /// Create a new model version.
     pub fn create(&self, version: &ModelVersion, tenant_id: &TenantId) -> Result<()> {
-        self.conn
-            .execute(
-                "INSERT INTO model_versions (id, tenant_id, model_family, version_tag, model_id,
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute(
+            "INSERT INTO model_versions (id, tenant_id, model_family, version_tag, model_id,
              training_job_id, parent_version_id, consumer, notes, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                params![
-                    version.id.to_string(),
-                    tenant_id.0,
-                    version.model_family,
-                    version.version_tag,
-                    version.model_id.map(|id| id.to_string()),
-                    version.training_job_id.map(|id| id.to_string()),
-                    version.parent_version_id.map(|id| id.to_string()),
-                    version.consumer,
-                    version.notes,
-                    version.created_at.to_rfc3339(),
-                ],
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+            params![
+                version.id.to_string(),
+                tenant_id.0,
+                version.model_family,
+                version.version_tag,
+                version.model_id.map(|id| id.to_string()),
+                version.training_job_id.map(|id| id.to_string()),
+                version.parent_version_id.map(|id| id.to_string()),
+                version.consumer,
+                version.notes,
+                version.created_at.to_rfc3339(),
+            ],
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         Ok(())
     }
 
     /// Get a version by ID.
     pub fn get(&self, id: ModelVersionId, tenant_id: &TenantId) -> Result<ModelVersion> {
-        self.conn
-            .query_row(
-                "SELECT id, model_family, version_tag, model_id, training_job_id,
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.query_row(
+            "SELECT id, model_family, version_tag, model_id, training_job_id,
              parent_version_id, consumer, notes, created_at
              FROM model_versions WHERE id = ?1 AND tenant_id = ?2",
-                params![id.to_string(), tenant_id.0],
-                row_to_version,
-            )
-            .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => IfranError::ModelNotFound(id.to_string()),
-                other => IfranError::StorageError(other.to_string()),
-            })
+            params![id.to_string(), tenant_id.0],
+            row_to_version,
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => IfranError::ModelNotFound(id.to_string()),
+            other => IfranError::StorageError(other.to_string()),
+        })
     }
 
     /// List versions for a model family.
@@ -103,9 +125,22 @@ impl VersionStore {
         tenant_id: &TenantId,
         limit: u32,
         offset: u32,
-    ) -> Result<Vec<ModelVersion>> {
-        let mut stmt = self
-            .conn
+    ) -> Result<PagedResult<ModelVersion>> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+
+        let total: usize = conn
+            .query_row(
+                "SELECT COUNT(*) FROM model_versions WHERE model_family = ?1 AND tenant_id = ?2",
+                params![family, tenant_id.0],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|c| c as usize)
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+
+        let mut stmt = conn
             .prepare(
                 "SELECT id, model_family, version_tag, model_id, training_job_id,
              parent_version_id, consumer, notes, created_at
@@ -114,18 +149,36 @@ impl VersionStore {
             )
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
-        let versions = stmt
+        let items = stmt
             .query_map(params![family, tenant_id.0, limit, offset], row_to_version)
             .map_err(|e| IfranError::StorageError(e.to_string()))?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
-        Ok(versions)
+        Ok(PagedResult { items, total })
     }
 
     /// List all versions for a tenant.
-    pub fn list(&self, tenant_id: &TenantId, limit: u32, offset: u32) -> Result<Vec<ModelVersion>> {
-        let mut stmt = self
-            .conn
+    pub fn list(
+        &self,
+        tenant_id: &TenantId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<PagedResult<ModelVersion>> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+
+        let total: usize = conn
+            .query_row(
+                "SELECT COUNT(*) FROM model_versions WHERE tenant_id = ?1",
+                params![tenant_id.0],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|c| c as usize)
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+
+        let mut stmt = conn
             .prepare(
                 "SELECT id, model_family, version_tag, model_id, training_job_id,
              parent_version_id, consumer, notes, created_at
@@ -134,31 +187,34 @@ impl VersionStore {
             )
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
-        let versions = stmt
+        let items = stmt
             .query_map(params![tenant_id.0, limit, offset], row_to_version)
             .map_err(|e| IfranError::StorageError(e.to_string()))?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
-        Ok(versions)
+        Ok(PagedResult { items, total })
     }
 
     /// Get the latest version for a model family.
     pub fn latest(&self, family: &str, tenant_id: &TenantId) -> Result<ModelVersion> {
-        self.conn
-            .query_row(
-                "SELECT id, model_family, version_tag, model_id, training_job_id,
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.query_row(
+            "SELECT id, model_family, version_tag, model_id, training_job_id,
              parent_version_id, consumer, notes, created_at
              FROM model_versions WHERE model_family = ?1 AND tenant_id = ?2
              ORDER BY created_at DESC LIMIT 1",
-                params![family, tenant_id.0],
-                row_to_version,
-            )
-            .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => {
-                    IfranError::ModelNotFound(format!("No versions for {family}"))
-                }
-                other => IfranError::StorageError(other.to_string()),
-            })
+            params![family, tenant_id.0],
+            row_to_version,
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                IfranError::ModelNotFound(format!("No versions for {family}"))
+            }
+            other => IfranError::StorageError(other.to_string()),
+        })
     }
 
     /// Get the version lineage (chain of parent versions).
@@ -179,6 +235,43 @@ impl VersionStore {
             }
         }
         Ok(chain)
+    }
+}
+
+impl crate::storage::traits::VersionStore for VersionStore {
+    fn create(&self, version: &ModelVersion, tenant_id: &TenantId) -> Result<()> {
+        self.create(version, tenant_id)
+    }
+
+    fn get(&self, id: ModelVersionId, tenant_id: &TenantId) -> Result<ModelVersion> {
+        self.get(id, tenant_id)
+    }
+
+    fn list_by_family(
+        &self,
+        family: &str,
+        tenant_id: &TenantId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<PagedResult<ModelVersion>> {
+        self.list_by_family(family, tenant_id, limit, offset)
+    }
+
+    fn list(
+        &self,
+        tenant_id: &TenantId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<PagedResult<ModelVersion>> {
+        self.list(tenant_id, limit, offset)
+    }
+
+    fn latest(&self, family: &str, tenant_id: &TenantId) -> Result<ModelVersion> {
+        self.latest(family, tenant_id)
+    }
+
+    fn get_lineage(&self, id: ModelVersionId, tenant_id: &TenantId) -> Result<Vec<ModelVersion>> {
+        self.get_lineage(id, tenant_id)
     }
 }
 
@@ -246,7 +339,8 @@ mod tests {
             .unwrap();
 
         let llama = store.list_by_family("llama-8b", &t(), 100, 0).unwrap();
-        assert_eq!(llama.len(), 2);
+        assert_eq!(llama.items.len(), 2);
+        assert_eq!(llama.total, 2);
     }
 
     #[test]
@@ -292,8 +386,8 @@ mod tests {
         store.create(&make_version("m", "v1"), &t1).unwrap();
         store.create(&make_version("m", "v1"), &t2).unwrap();
 
-        assert_eq!(store.list(&t1, 100, 0).unwrap().len(), 1);
-        assert_eq!(store.list(&t2, 100, 0).unwrap().len(), 1);
+        assert_eq!(store.list(&t1, 100, 0).unwrap().items.len(), 1);
+        assert_eq!(store.list(&t2, 100, 0).unwrap().items.len(), 1);
     }
 
     #[test]
@@ -342,8 +436,8 @@ mod tests {
         // list returns only the tenant's data
         let t1_versions = store.list(&t1, 100, 0).unwrap();
         let t2_versions = store.list(&t2, 100, 0).unwrap();
-        assert_eq!(t1_versions.len(), 2);
-        assert_eq!(t2_versions.len(), 1);
+        assert_eq!(t1_versions.items.len(), 2);
+        assert_eq!(t2_versions.items.len(), 1);
     }
 
     #[test]

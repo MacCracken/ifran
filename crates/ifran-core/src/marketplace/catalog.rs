@@ -1,14 +1,17 @@
 //! Marketplace catalog — SQLite-backed index of published models.
 
 use ifran_types::IfranError;
+use ifran_types::PagedResult;
 use ifran_types::TenantId;
 use ifran_types::error::Result;
 use ifran_types::marketplace::{MarketplaceEntry, MarketplaceQuery};
-use rusqlite::{Connection, params};
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
+use rusqlite::params;
 
 /// Local marketplace catalog backed by SQLite.
 pub struct MarketplaceCatalog {
-    conn: Connection,
+    pool: Pool<SqliteConnectionManager>,
 }
 
 impl MarketplaceCatalog {
@@ -17,18 +20,41 @@ impl MarketplaceCatalog {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let conn = Connection::open(path).map_err(|e| IfranError::StorageError(e.to_string()))?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")
+        let manager = SqliteConnectionManager::file(path).with_init(|conn| {
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            Ok(())
+        });
+        let pool = Pool::builder()
+            .max_size(4)
+            .build(manager)
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
-        let catalog = Self { conn };
+        let catalog = Self { pool };
+        catalog.migrate()?;
+        Ok(catalog)
+    }
+
+    #[cfg(test)]
+    pub fn open_memory() -> Result<Self> {
+        let manager = SqliteConnectionManager::memory().with_init(|conn| {
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            Ok(())
+        });
+        let pool = Pool::builder()
+            .max_size(1)
+            .build(manager)
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let catalog = Self { pool };
         catalog.migrate()?;
         Ok(catalog)
     }
 
     fn migrate(&self) -> Result<()> {
-        self.conn
-            .execute_batch(
-                "CREATE TABLE IF NOT EXISTS marketplace_entries (
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS marketplace_entries (
                     model_name          TEXT PRIMARY KEY,
                     description         TEXT,
                     format              TEXT NOT NULL,
@@ -45,24 +71,27 @@ impl MarketplaceCatalog {
                 );
                 CREATE INDEX IF NOT EXISTS idx_marketplace_publisher
                     ON marketplace_entries(publisher_instance);",
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
         // Add tenant_id column (idempotent — ignore if already exists)
-        let _ = self.conn.execute_batch(
+        let _ = conn.execute_batch(
             "ALTER TABLE marketplace_entries ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';",
         );
-        self.conn
-            .execute_batch(
-                "CREATE INDEX IF NOT EXISTS idx_marketplace_tenant ON marketplace_entries(tenant_id);",
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_marketplace_tenant ON marketplace_entries(tenant_id);",
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
         Ok(())
     }
 
     /// Publish a model to the marketplace.
     pub fn publish(&self, entry: &MarketplaceEntry, tenant_id: &TenantId) -> Result<()> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
         let format_str = serde_json::to_string(&entry.format)
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
         let quant_str = serde_json::to_string(&entry.quant)
@@ -76,56 +105,65 @@ impl MarketplaceCatalog {
             .transpose()
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
-        self.conn
-            .execute(
-                "INSERT OR REPLACE INTO marketplace_entries
+        conn.execute(
+            "INSERT OR REPLACE INTO marketplace_entries
                     (model_name, description, format, quant, size_bytes, parameter_count,
                      architecture, publisher_instance, download_url, sha256, tags,
                      published_at, eval_scores, tenant_id)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-                params![
-                    entry.model_name,
-                    entry.description,
-                    format_str.trim_matches('"'),
-                    quant_str.trim_matches('"'),
-                    entry.size_bytes as i64,
-                    entry.parameter_count.map(|v| v as i64),
-                    entry.architecture,
-                    entry.publisher_instance,
-                    entry.download_url,
-                    entry.sha256,
-                    tags_str,
-                    entry.published_at.to_rfc3339(),
-                    eval_str,
-                    tenant_id.0,
-                ],
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+            params![
+                entry.model_name,
+                entry.description,
+                format_str.trim_matches('"'),
+                quant_str.trim_matches('"'),
+                entry.size_bytes as i64,
+                entry.parameter_count.map(|v| v as i64),
+                entry.architecture,
+                entry.publisher_instance,
+                entry.download_url,
+                entry.sha256,
+                tags_str,
+                entry.published_at.to_rfc3339(),
+                eval_str,
+                tenant_id.0,
+            ],
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         Ok(())
     }
 
     /// Get a marketplace entry by model name.
     pub fn get(&self, model_name: &str, tenant_id: &TenantId) -> Result<MarketplaceEntry> {
-        self.conn
-            .query_row(
-                "SELECT * FROM marketplace_entries WHERE model_name = ?1 AND tenant_id = ?2",
-                params![model_name, tenant_id.0],
-                row_to_entry,
-            )
-            .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => IfranError::MarketplaceError(format!(
-                    "Model '{model_name}' not found in marketplace"
-                )),
-                other => IfranError::StorageError(other.to_string()),
-            })
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.query_row(
+            "SELECT * FROM marketplace_entries WHERE model_name = ?1 AND tenant_id = ?2",
+            params![model_name, tenant_id.0],
+            row_to_entry,
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => IfranError::MarketplaceError(format!(
+                "Model '{model_name}' not found in marketplace"
+            )),
+            other => IfranError::StorageError(other.to_string()),
+        })
     }
 
-    /// Search the marketplace catalog.
+    /// Search the marketplace catalog with pagination.
     pub fn search(
         &self,
         query: &MarketplaceQuery,
         tenant_id: &TenantId,
-    ) -> Result<Vec<MarketplaceEntry>> {
+        limit: u32,
+        offset: u32,
+    ) -> Result<PagedResult<MarketplaceEntry>> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+
         // Build parameterized WHERE clause to prevent SQL injection
         let mut conditions = Vec::new();
         let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -160,41 +198,66 @@ impl MarketplaceCatalog {
             param_idx += 1;
         }
 
-        let _ = param_idx; // suppress unused warning
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {}", conditions.join(" AND "))
+        };
 
-        let mut sql = String::from("SELECT * FROM marketplace_entries");
-        if !conditions.is_empty() {
-            sql.push_str(" WHERE ");
-            sql.push_str(&conditions.join(" AND "));
-        }
-        sql.push_str(" ORDER BY published_at DESC");
-
-        let mut stmt = self
-            .conn
-            .prepare(&sql)
+        // COUNT query
+        let count_sql = format!("SELECT COUNT(*) FROM marketplace_entries{where_clause}");
+        let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+            param_values.iter().map(|p| p.as_ref()).collect();
+        let total: usize = conn
+            .query_row(&count_sql, params_ref.as_slice(), |row| {
+                row.get::<_, i64>(0)
+            })
+            .map(|c| c as usize)
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
-        let params: Vec<&dyn rusqlite::types::ToSql> =
+        // Data query with LIMIT/OFFSET
+        let limit_idx = param_idx;
+        let offset_idx = param_idx + 1;
+        param_values.push(Box::new(limit));
+        param_values.push(Box::new(offset));
+
+        let data_sql = format!(
+            "SELECT * FROM marketplace_entries{where_clause} ORDER BY published_at DESC LIMIT ?{limit_idx} OFFSET ?{offset_idx}"
+        );
+
+        let mut stmt = conn
+            .prepare(&data_sql)
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+
+        let params_ref2: Vec<&dyn rusqlite::types::ToSql> =
             param_values.iter().map(|p| p.as_ref()).collect();
 
-        let entries = stmt
-            .query_map(params.as_slice(), row_to_entry)
+        let items = stmt
+            .query_map(params_ref2.as_slice(), row_to_entry)
             .map_err(|e| IfranError::StorageError(e.to_string()))?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
-        Ok(entries)
+        Ok(PagedResult { items, total })
     }
 
-    /// List all marketplace entries.
-    pub fn list(&self, tenant_id: &TenantId) -> Result<Vec<MarketplaceEntry>> {
-        self.search(&MarketplaceQuery::default(), tenant_id)
+    /// List all marketplace entries with pagination.
+    pub fn list(
+        &self,
+        tenant_id: &TenantId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<PagedResult<MarketplaceEntry>> {
+        self.search(&MarketplaceQuery::default(), tenant_id, limit, offset)
     }
 
     /// Unpublish a model.
     pub fn unpublish(&self, model_name: &str, tenant_id: &TenantId) -> Result<()> {
-        let rows = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let rows = conn
             .execute(
                 "DELETE FROM marketplace_entries WHERE model_name = ?1 AND tenant_id = ?2",
                 params![model_name, tenant_id.0],
@@ -211,14 +274,54 @@ impl MarketplaceCatalog {
 
     /// Count entries.
     pub fn count(&self, tenant_id: &TenantId) -> Result<usize> {
-        self.conn
-            .query_row(
-                "SELECT COUNT(*) FROM marketplace_entries WHERE tenant_id = ?1",
-                params![tenant_id.0],
-                |row| row.get::<_, i64>(0),
-            )
-            .map(|c| c as usize)
-            .map_err(|e| IfranError::StorageError(e.to_string()))
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.query_row(
+            "SELECT COUNT(*) FROM marketplace_entries WHERE tenant_id = ?1",
+            params![tenant_id.0],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|c| c as usize)
+        .map_err(|e| IfranError::StorageError(e.to_string()))
+    }
+}
+
+impl crate::storage::traits::MarketplaceStore for MarketplaceCatalog {
+    fn publish(&self, entry: &MarketplaceEntry, tenant_id: &TenantId) -> Result<()> {
+        self.publish(entry, tenant_id)
+    }
+
+    fn get(&self, model_name: &str, tenant_id: &TenantId) -> Result<MarketplaceEntry> {
+        self.get(model_name, tenant_id)
+    }
+
+    fn search(
+        &self,
+        query: &MarketplaceQuery,
+        tenant_id: &TenantId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<PagedResult<MarketplaceEntry>> {
+        self.search(query, tenant_id, limit, offset)
+    }
+
+    fn list(
+        &self,
+        tenant_id: &TenantId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<PagedResult<MarketplaceEntry>> {
+        self.list(tenant_id, limit, offset)
+    }
+
+    fn unpublish(&self, model_name: &str, tenant_id: &TenantId) -> Result<()> {
+        self.unpublish(model_name, tenant_id)
+    }
+
+    fn count(&self, tenant_id: &TenantId) -> Result<usize> {
+        self.count(tenant_id)
     }
 }
 
@@ -269,10 +372,7 @@ mod tests {
     use ifran_types::model::{ModelFormat, QuantLevel};
 
     fn test_catalog() -> MarketplaceCatalog {
-        let conn = Connection::open_in_memory().unwrap();
-        let catalog = MarketplaceCatalog { conn };
-        catalog.migrate().unwrap();
-        catalog
+        MarketplaceCatalog::open_memory().unwrap()
     }
 
     fn sample_entry() -> MarketplaceEntry {
@@ -316,9 +416,11 @@ mod tests {
                     ..Default::default()
                 },
                 &tenant,
+                100,
+                0,
             )
             .unwrap();
-        assert_eq!(results.len(), 1);
+        assert_eq!(results.items.len(), 1);
     }
 
     #[test]
@@ -335,6 +437,6 @@ mod tests {
     fn list_empty() {
         let catalog = test_catalog();
         let tenant = TenantId::default_tenant();
-        assert!(catalog.list(&tenant).unwrap().is_empty());
+        assert!(catalog.list(&tenant, 100, 0).unwrap().items.is_empty());
     }
 }

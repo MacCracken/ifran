@@ -8,16 +8,16 @@ pub async fn execute() -> Result<()> {
     let config = IfranConfig::discover();
     let db = ModelDatabase::open(&config.storage.database)?;
     let tenant = ifran_types::TenantId::default_tenant();
-    let models = db.list(&tenant)?;
+    let paged = db.list(&tenant, 1000, 0)?;
 
-    if models.is_empty() {
+    if paged.items.is_empty() {
         output::warn("No models found. Use 'ifran pull <model>' to download one.");
         return Ok(());
     }
 
     let mut table = Table::new(vec!["NAME", "FORMAT", "QUANT", "SIZE", "PULLED"]);
 
-    for model in &models {
+    for model in &paged.items {
         let size = output::format_size(model.size_bytes);
         let format = serde_json::to_string(&model.format)
             .unwrap_or_else(|_| "unknown".into())
@@ -39,7 +39,7 @@ pub async fn execute() -> Result<()> {
     }
 
     table.print();
-    output::info(&format!("\n{} model(s)", models.len()));
+    output::info(&format!("\n{} model(s)", paged.items.len()));
     Ok(())
 }
 

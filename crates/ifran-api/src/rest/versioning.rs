@@ -51,7 +51,6 @@ pub async fn create_version(
         created_at: chrono::Utc::now(),
     };
 
-    let store = store.lock().await;
     store.create(&version, &tenant_id).map_err(|e| {
         tracing::error!(error = %e, "internal error");
         (
@@ -83,8 +82,7 @@ pub async fn list_versions(
 
     let page = &query.page;
     let safe_limit = page.safe_limit();
-    let store = store.lock().await;
-    let versions = match query.family {
+    let paged = match query.family {
         Some(ref f) => store.list_by_family(f, &tenant_id, safe_limit, page.offset),
         None => store.list(&tenant_id, safe_limit, page.offset),
     }
@@ -96,11 +94,10 @@ pub async fn list_versions(
         )
     })?;
 
-    let data: Vec<serde_json::Value> = versions.iter().map(version_to_json).collect();
-    let total = data.len();
+    let data: Vec<serde_json::Value> = paged.items.iter().map(version_to_json).collect();
     Ok(Json(PaginatedResponse::pre_sliced(
         data,
-        total,
+        paged.total,
         safe_limit,
         page.offset,
     )))
@@ -117,7 +114,6 @@ pub async fn get_version(
         "Version store not initialized".into(),
     ))?;
 
-    let store = store.lock().await;
     let version = store
         .get(id, &tenant_id)
         .map_err(|_| (StatusCode::NOT_FOUND, "Not found".into()))?;
@@ -136,7 +132,6 @@ pub async fn get_lineage(
         "Version store not initialized".into(),
     ))?;
 
-    let store = store.lock().await;
     let chain = store.get_lineage(id, &tenant_id).map_err(|e| {
         tracing::error!(error = %e, "internal error");
         (

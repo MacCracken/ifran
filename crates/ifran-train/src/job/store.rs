@@ -3,16 +3,19 @@
 use crate::job::status::JobState;
 use chrono::{DateTime, Utc};
 use ifran_types::IfranError;
+use ifran_types::PagedResult;
 use ifran_types::TenantId;
 use ifran_types::error::Result;
 use ifran_types::training::{TrainingJobConfig, TrainingJobId, TrainingStatus};
-use rusqlite::{Connection, params};
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
+use rusqlite::params;
 use std::path::Path;
 use uuid::Uuid;
 
 /// Persists training job state to SQLite for crash recovery.
 pub struct JobStore {
-    conn: Connection,
+    pool: Pool<SqliteConnectionManager>,
 }
 
 impl JobStore {
@@ -21,18 +24,26 @@ impl JobStore {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let conn = Connection::open(path).map_err(|e| IfranError::StorageError(e.to_string()))?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")
+        let manager = SqliteConnectionManager::file(path).with_init(|conn| {
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            Ok(())
+        });
+        let pool = Pool::builder()
+            .max_size(4)
+            .build(manager)
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
-        let store = Self { conn };
+        let store = Self { pool };
         store.migrate()?;
         Ok(store)
     }
 
     fn migrate(&self) -> Result<()> {
-        self.conn
-            .execute_batch(
-                "CREATE TABLE IF NOT EXISTS training_jobs (
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS training_jobs (
                     id              TEXT PRIMARY KEY,
                     tenant_id       TEXT NOT NULL DEFAULT 'default',
                     config_json     TEXT NOT NULL,
@@ -46,13 +57,17 @@ impl JobStore {
                     completed_at    TEXT,
                     error           TEXT
                 );",
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         Ok(())
     }
 
     /// Upsert a job state (INSERT OR REPLACE).
     pub fn save_job(&self, job: &JobState) -> Result<()> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
         let config_json = serde_json::to_string(&job.config)
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
         let status_str = serde_json::to_string(&job.status)
@@ -60,35 +75,37 @@ impl JobStore {
         // serde_json wraps in quotes for string enums, trim them
         let status_str = status_str.trim_matches('"');
 
-        self.conn
-            .execute(
-                "INSERT OR REPLACE INTO training_jobs
+        conn.execute(
+            "INSERT OR REPLACE INTO training_jobs
                     (id, tenant_id, config_json, status, current_step, total_steps, current_epoch,
                      current_loss, created_at, started_at, completed_at, error)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-                params![
-                    job.id.to_string(),
-                    job.tenant_id.0.as_str(),
-                    config_json,
-                    status_str,
-                    job.current_step as i64,
-                    job.total_steps as i64,
-                    job.current_epoch as f64,
-                    job.current_loss,
-                    job.created_at.to_rfc3339(),
-                    job.started_at.map(|t| t.to_rfc3339()),
-                    job.completed_at.map(|t| t.to_rfc3339()),
-                    job.error,
-                ],
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+            params![
+                job.id.to_string(),
+                job.tenant_id.0.as_str(),
+                config_json,
+                status_str,
+                job.current_step as i64,
+                job.total_steps as i64,
+                job.current_epoch as f64,
+                job.current_loss,
+                job.created_at.to_rfc3339(),
+                job.started_at.map(|t| t.to_rfc3339()),
+                job.completed_at.map(|t| t.to_rfc3339()),
+                job.error,
+            ],
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         Ok(())
     }
 
     /// Look up a single job by ID.
     pub fn get_job(&self, id: TrainingJobId) -> Result<Option<JobState>> {
-        let mut stmt = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let mut stmt = conn
             .prepare("SELECT * FROM training_jobs WHERE id = ?1")
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
@@ -104,54 +121,94 @@ impl JobStore {
         }
     }
 
-    /// List jobs, optionally filtered by status.
-    pub fn list_jobs(&self, status_filter: Option<TrainingStatus>) -> Result<Vec<JobState>> {
-        let results = match status_filter {
+    /// List jobs, optionally filtered by status, with pagination.
+    pub fn list_jobs(
+        &self,
+        status_filter: Option<TrainingStatus>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<PagedResult<JobState>> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+
+        let (total, items) = match status_filter {
             Some(status) => {
                 let status_str = serde_json::to_string(&status)
                     .map_err(|e| IfranError::StorageError(e.to_string()))?;
                 let status_str = status_str.trim_matches('"').to_string();
-                let mut stmt = self
-                    .conn
+
+                let total: usize = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM training_jobs WHERE status = ?1",
+                        params![status_str],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .map(|c| c as usize)
+                    .map_err(|e| IfranError::StorageError(e.to_string()))?;
+
+                let mut stmt = conn
                     .prepare(
-                        "SELECT * FROM training_jobs WHERE status = ?1 ORDER BY created_at DESC",
+                        "SELECT * FROM training_jobs WHERE status = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
                     )
                     .map_err(|e| IfranError::StorageError(e.to_string()))?;
-                stmt.query_map(params![status_str], row_to_job_state)
+                let items = stmt
+                    .query_map(params![status_str, limit, offset], row_to_job_state)
                     .map_err(|e| IfranError::StorageError(e.to_string()))?
                     .collect::<std::result::Result<Vec<_>, _>>()
-                    .map_err(|e| IfranError::StorageError(e.to_string()))?
+                    .map_err(|e| IfranError::StorageError(e.to_string()))?;
+
+                (total, items)
             }
             None => {
-                let mut stmt = self
-                    .conn
-                    .prepare("SELECT * FROM training_jobs ORDER BY created_at DESC")
+                let total: usize = conn
+                    .query_row("SELECT COUNT(*) FROM training_jobs", [], |row| {
+                        row.get::<_, i64>(0)
+                    })
+                    .map(|c| c as usize)
                     .map_err(|e| IfranError::StorageError(e.to_string()))?;
-                stmt.query_map([], row_to_job_state)
+
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT * FROM training_jobs ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
+                    )
+                    .map_err(|e| IfranError::StorageError(e.to_string()))?;
+                let items = stmt
+                    .query_map(params![limit, offset], row_to_job_state)
                     .map_err(|e| IfranError::StorageError(e.to_string()))?
                     .collect::<std::result::Result<Vec<_>, _>>()
-                    .map_err(|e| IfranError::StorageError(e.to_string()))?
+                    .map_err(|e| IfranError::StorageError(e.to_string()))?;
+
+                (total, items)
             }
         };
-        Ok(results)
+
+        Ok(PagedResult { items, total })
     }
 
     /// Delete a job from the store.
     pub fn delete_job(&self, id: TrainingJobId) -> Result<()> {
-        self.conn
-            .execute(
-                "DELETE FROM training_jobs WHERE id = ?1",
-                params![id.to_string()],
-            )
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute(
+            "DELETE FROM training_jobs WHERE id = ?1",
+            params![id.to_string()],
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         Ok(())
     }
 
     /// Load all non-terminal jobs for crash recovery.
     /// Terminal statuses: completed, failed, cancelled.
     pub fn recover_jobs(&self) -> Result<Vec<JobState>> {
-        let mut stmt = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let mut stmt = conn
             .prepare(
                 "SELECT * FROM training_jobs WHERE status NOT IN ('completed', 'failed', 'cancelled')
                  ORDER BY created_at ASC",
@@ -236,8 +293,12 @@ mod tests {
     use ifran_types::training::*;
 
     fn test_store() -> JobStore {
-        let conn = Connection::open_in_memory().unwrap();
-        let store = JobStore { conn };
+        let manager = SqliteConnectionManager::memory().with_init(|conn| {
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            Ok(())
+        });
+        let pool = Pool::builder().max_size(4).build(manager).unwrap();
+        let store = JobStore { pool };
         store.migrate().unwrap();
         store
     }
@@ -322,8 +383,9 @@ mod tests {
         let store = test_store();
         store.save_job(&test_job_state()).unwrap();
         store.save_job(&test_job_state()).unwrap();
-        let all = store.list_jobs(None).unwrap();
-        assert_eq!(all.len(), 2);
+        let all = store.list_jobs(None, 100, 0).unwrap();
+        assert_eq!(all.items.len(), 2);
+        assert_eq!(all.total, 2);
     }
 
     #[test]
@@ -336,14 +398,23 @@ mod tests {
         store.save_job(&job1).unwrap();
         store.save_job(&job2).unwrap();
 
-        let running = store.list_jobs(Some(TrainingStatus::Running)).unwrap();
-        assert_eq!(running.len(), 1);
+        let running = store
+            .list_jobs(Some(TrainingStatus::Running), 100, 0)
+            .unwrap();
+        assert_eq!(running.items.len(), 1);
+        assert_eq!(running.total, 1);
 
-        let queued = store.list_jobs(Some(TrainingStatus::Queued)).unwrap();
-        assert_eq!(queued.len(), 1);
+        let queued = store
+            .list_jobs(Some(TrainingStatus::Queued), 100, 0)
+            .unwrap();
+        assert_eq!(queued.items.len(), 1);
+        assert_eq!(queued.total, 1);
 
-        let failed = store.list_jobs(Some(TrainingStatus::Failed)).unwrap();
-        assert!(failed.is_empty());
+        let failed = store
+            .list_jobs(Some(TrainingStatus::Failed), 100, 0)
+            .unwrap();
+        assert!(failed.items.is_empty());
+        assert_eq!(failed.total, 0);
     }
 
     #[test]

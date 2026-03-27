@@ -15,25 +15,37 @@ pub async fn list_models(
     Extension(tenant_id): Extension<TenantId>,
     Query(page): Query<PaginationQuery>,
 ) -> Result<Json<PaginatedResponse<serde_json::Value>>, ApiErrorResponse> {
-    let db = state.db.lock().await;
-    let models = db
-        .list(&tenant_id)
+    let safe_limit = page.safe_limit();
+    let paged = state
+        .db
+        .list(&tenant_id, safe_limit, page.offset)
         .map_err(|e| ApiErrorResponse::internal(e.to_string()))?;
 
-    Ok(Json(PaginatedResponse::from_slice(&models, &page, |m| {
-        serde_json::json!({
-            "id": m.id.to_string(),
-            "name": m.name,
-            "repo_id": m.repo_id,
-            "format": serde_json::to_value(m.format).unwrap_or(serde_json::Value::Null),
-            "quant": serde_json::to_value(m.quant).unwrap_or(serde_json::Value::Null),
-            "size_bytes": m.size_bytes,
-            "parameter_count": m.parameter_count,
-            "architecture": m.architecture,
-            "local_path": m.local_path,
-            "pulled_at": m.pulled_at.to_rfc3339(),
+    let data: Vec<serde_json::Value> = paged
+        .items
+        .iter()
+        .map(|m| {
+            serde_json::json!({
+                "id": m.id.to_string(),
+                "name": m.name,
+                "repo_id": m.repo_id,
+                "format": serde_json::to_value(m.format).unwrap_or(serde_json::Value::Null),
+                "quant": serde_json::to_value(m.quant).unwrap_or(serde_json::Value::Null),
+                "size_bytes": m.size_bytes,
+                "parameter_count": m.parameter_count,
+                "architecture": m.architecture,
+                "local_path": m.local_path,
+                "pulled_at": m.pulled_at.to_rfc3339(),
+            })
         })
-    })))
+        .collect();
+
+    Ok(Json(PaginatedResponse::pre_sliced(
+        data,
+        paged.total,
+        safe_limit,
+        page.offset,
+    )))
 }
 
 /// GET /models/:id — get a specific model by ID.
@@ -42,11 +54,10 @@ pub async fn get_model(
     Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiErrorResponse> {
-    let db = state.db.lock().await;
     let model = if let Ok(uuid) = uuid::Uuid::parse_str(&id) {
-        db.get(uuid, &tenant_id)
+        state.db.get(uuid, &tenant_id)
     } else {
-        db.get_by_name(&id, &tenant_id)
+        state.db.get_by_name(&id, &tenant_id)
     };
 
     let model = model.map_err(|_| {
@@ -76,11 +87,10 @@ pub async fn delete_model(
     Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiErrorResponse> {
-    let db = state.db.lock().await;
     let model = if let Ok(uuid) = uuid::Uuid::parse_str(&id) {
-        db.get(uuid, &tenant_id)
+        state.db.get(uuid, &tenant_id)
     } else {
-        db.get_by_name(&id, &tenant_id)
+        state.db.get_by_name(&id, &tenant_id)
     };
 
     let model = model.map_err(|_| {
@@ -92,7 +102,9 @@ pub async fn delete_model(
     // Delete from database first — if this fails, filesystem stays consistent.
     // Reversing the order (FS first, then DB) risks orphaned DB records pointing
     // to deleted files.
-    db.delete(model.id, &tenant_id)
+    state
+        .db
+        .delete(model.id, &tenant_id)
         .map_err(|e| ApiErrorResponse::internal(e.to_string()))?;
 
     // Clean up files from disk (best-effort after successful DB delete)

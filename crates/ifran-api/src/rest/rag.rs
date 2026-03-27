@@ -99,8 +99,8 @@ pub async fn create_pipeline(
     ))?;
 
     let id = uuid::Uuid::new_v4();
-    let s = store.lock().await;
-    s.create_pipeline(id, &config, &tenant_id)
+    store
+        .create_pipeline(id, &config, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok((
@@ -120,12 +120,13 @@ pub async fn list_pipelines(
         "RAG store not initialized. Check storage configuration and database path.".into(),
     ))?;
 
-    let s = store.lock().await;
-    let pipelines = s
-        .list_pipelines(&tenant_id)
+    let safe_limit = page.safe_limit();
+    let paged = store
+        .list_pipelines(&tenant_id, safe_limit, page.offset)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let data: Vec<serde_json::Value> = pipelines
+    let data: Vec<serde_json::Value> = paged
+        .items
         .iter()
         .map(|(id, config)| {
             serde_json::json!({
@@ -137,9 +138,12 @@ pub async fn list_pipelines(
         })
         .collect();
 
-    Ok(Json(PaginatedResponse::from_slice(&data, &page, |item| {
-        item.clone()
-    })))
+    Ok(Json(PaginatedResponse::pre_sliced(
+        data,
+        paged.total,
+        safe_limit,
+        page.offset,
+    )))
 }
 
 /// GET /rag/pipelines/{id}
@@ -153,8 +157,7 @@ pub async fn get_pipeline(
         "RAG store not initialized. Check storage configuration and database path.".into(),
     ))?;
 
-    let s = store.lock().await;
-    let config = s.get_pipeline(id, &tenant_id).map_err(|e| {
+    let config = store.get_pipeline(id, &tenant_id).map_err(|e| {
         (
             StatusCode::NOT_FOUND,
             format!("{}. Use GET /rag/pipelines to list available pipelines.", e),
@@ -182,8 +185,7 @@ pub async fn delete_pipeline(
         "RAG store not initialized. Check storage configuration and database path.".into(),
     ))?;
 
-    let s = store.lock().await;
-    s.delete_pipeline(id, &tenant_id).map_err(|e| {
+    store.delete_pipeline(id, &tenant_id).map_err(|e| {
         (
             StatusCode::NOT_FOUND,
             format!("{}. Use GET /rag/pipelines to list available pipelines.", e),
@@ -207,11 +209,8 @@ pub async fn ingest_document(
         "RAG store not initialized. Check storage configuration and database path.".into(),
     ))?;
 
-    // Peek at the pipeline config to learn the embedding model name *before*
-    // we hold the store lock for the duration of ingestion.
     let embedding_model = {
-        let s = store.lock().await;
-        let config = s.get_pipeline(id, &tenant_id).map_err(|e| {
+        let config = store.get_pipeline(id, &tenant_id).map_err(|e| {
             (
                 StatusCode::NOT_FOUND,
                 format!("{}. Use GET /rag/pipelines to list available pipelines.", e),
@@ -220,20 +219,17 @@ pub async fn ingest_document(
         config.embedding_model.clone()
     };
 
-    // Resolve backend outside the store lock so the async lookup doesn't
-    // block other store operations.
     let backend_info = resolve_embedding_backend(&state, &embedding_model, &tenant_id).await;
     let embed_fn = make_embed_fn(backend_info);
 
-    let s = store.lock().await;
-    let config = s.get_pipeline(id, &tenant_id).map_err(|e| {
+    let config = store.get_pipeline(id, &tenant_id).map_err(|e| {
         (
             StatusCode::NOT_FOUND,
             format!("{}. Use GET /rag/pipelines to list available pipelines.", e),
         )
     })?;
 
-    let pipeline = ifran_core::rag::pipeline::RagPipeline::new(&s, id, config);
+    let pipeline = ifran_core::rag::pipeline::RagPipeline::new(store, id, config);
     let doc = pipeline
         .ingest_document(&req.filename, &req.content, embed_fn.as_ref())
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -258,31 +254,31 @@ pub async fn query(
         "RAG store not initialized. Check storage configuration and database path.".into(),
     ))?;
 
-    // Peek at the pipeline config to learn the embedding model name.
     let embedding_model = {
-        let s = store.lock().await;
-        let config = s.get_pipeline(req.pipeline_id, &tenant_id).map_err(|e| {
+        let config = store
+            .get_pipeline(req.pipeline_id, &tenant_id)
+            .map_err(|e| {
+                (
+                    StatusCode::NOT_FOUND,
+                    format!("{}. Use GET /rag/pipelines to list available pipelines.", e),
+                )
+            })?;
+        config.embedding_model.clone()
+    };
+
+    let backend_info = resolve_embedding_backend(&state, &embedding_model, &tenant_id).await;
+    let embed_fn = make_embed_fn(backend_info);
+
+    let config = store
+        .get_pipeline(req.pipeline_id, &tenant_id)
+        .map_err(|e| {
             (
                 StatusCode::NOT_FOUND,
                 format!("{}. Use GET /rag/pipelines to list available pipelines.", e),
             )
         })?;
-        config.embedding_model.clone()
-    };
 
-    // Resolve backend outside the store lock.
-    let backend_info = resolve_embedding_backend(&state, &embedding_model, &tenant_id).await;
-    let embed_fn = make_embed_fn(backend_info);
-
-    let s = store.lock().await;
-    let config = s.get_pipeline(req.pipeline_id, &tenant_id).map_err(|e| {
-        (
-            StatusCode::NOT_FOUND,
-            format!("{}. Use GET /rag/pipelines to list available pipelines.", e),
-        )
-    })?;
-
-    let pipeline = ifran_core::rag::pipeline::RagPipeline::new(&s, req.pipeline_id, config);
+    let pipeline = ifran_core::rag::pipeline::RagPipeline::new(store, req.pipeline_id, config);
     let sources: Vec<RagSource> = pipeline
         .query(&req.query, req.top_k, embed_fn.as_ref())
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;

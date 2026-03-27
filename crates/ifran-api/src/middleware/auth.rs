@@ -47,8 +47,7 @@ pub async fn require_auth(
 
         let token = extract_bearer_token(&req).ok_or(StatusCode::UNAUTHORIZED)?;
 
-        let store = tenant_store.lock().await;
-        let record = store
+        let record = tenant_store
             .resolve_by_key(token)
             .map_err(|_| StatusCode::UNAUTHORIZED)?;
 

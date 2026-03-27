@@ -5,16 +5,19 @@
 
 use chrono::{DateTime, Utc};
 use ifran_types::IfranError;
+use ifran_types::PagedResult;
 use ifran_types::TenantId;
 use ifran_types::error::Result;
 use ifran_types::model::{ModelFormat, ModelId, ModelInfo, QuantLevel};
-use rusqlite::{Connection, params};
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
+use rusqlite::params;
 use std::path::Path;
 use uuid::Uuid;
 
 /// Handle to the SQLite model catalog.
 pub struct ModelDatabase {
-    conn: Connection,
+    pool: Pool<SqliteConnectionManager>,
 }
 
 impl ModelDatabase {
@@ -23,10 +26,15 @@ impl ModelDatabase {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let conn = Connection::open(path).map_err(|e| IfranError::StorageError(e.to_string()))?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")
+        let manager = SqliteConnectionManager::file(path).with_init(|conn| {
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            Ok(())
+        });
+        let pool = Pool::builder()
+            .max_size(4)
+            .build(manager)
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
-        let db = Self { conn };
+        let db = Self { pool };
         db.migrate()?;
         Ok(db)
     }
@@ -34,18 +42,27 @@ impl ModelDatabase {
     /// Open an in-memory database (useful for tests).
     #[cfg(test)]
     pub fn open_memory() -> Result<Self> {
-        let conn =
-            Connection::open_in_memory().map_err(|e| IfranError::StorageError(e.to_string()))?;
-        let db = Self { conn };
+        let manager = SqliteConnectionManager::memory().with_init(|conn| {
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            Ok(())
+        });
+        let pool = Pool::builder()
+            .max_size(1)
+            .build(manager)
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let db = Self { pool };
         db.migrate()?;
         Ok(db)
     }
 
     /// Run schema migrations.
     fn migrate(&self) -> Result<()> {
-        self.conn
-            .execute_batch(
-                "CREATE TABLE IF NOT EXISTS models (
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS models (
                     id          TEXT PRIMARY KEY,
                     name        TEXT NOT NULL,
                     repo_id     TEXT,
@@ -61,15 +78,14 @@ impl ModelDatabase {
                 );
                 CREATE INDEX IF NOT EXISTS idx_models_name ON models(name);
                 CREATE INDEX IF NOT EXISTS idx_models_repo ON models(repo_id);",
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
         // Add tenant_id column (idempotent — ignore if already exists)
-        let _ = self.conn.execute_batch(
+        let _ = conn.execute_batch(
             "ALTER TABLE models ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';",
         );
-        self.conn
-            .execute_batch("CREATE INDEX IF NOT EXISTS idx_models_tenant ON models(tenant_id);")
+        conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_models_tenant ON models(tenant_id);")
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
         Ok(())
@@ -77,83 +93,115 @@ impl ModelDatabase {
 
     /// Insert a new model into the catalog.
     pub fn insert(&self, model: &ModelInfo, tenant_id: &TenantId) -> Result<()> {
-        self.conn
-            .execute(
-                "INSERT INTO models (id, name, repo_id, format, quant, size_bytes,
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute(
+            "INSERT INTO models (id, name, repo_id, format, quant, size_bytes,
                     parameter_count, architecture, license, local_path, sha256, pulled_at, tenant_id)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-                params![
-                    model.id.to_string(),
-                    model.name,
-                    model.repo_id,
-                    serde_json::to_string(&model.format)
-                        .unwrap()
-                        .trim_matches('"'),
-                    serde_json::to_string(&model.quant)
-                        .unwrap()
-                        .trim_matches('"'),
-                    model.size_bytes as i64,
-                    model.parameter_count.map(|v| v as i64),
-                    model.architecture,
-                    model.license,
-                    model.local_path,
-                    model.sha256,
-                    model.pulled_at.to_rfc3339(),
-                    tenant_id.0,
-                ],
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+            params![
+                model.id.to_string(),
+                model.name,
+                model.repo_id,
+                serde_json::to_string(&model.format)
+                    .unwrap()
+                    .trim_matches('"'),
+                serde_json::to_string(&model.quant)
+                    .unwrap()
+                    .trim_matches('"'),
+                model.size_bytes as i64,
+                model.parameter_count.map(|v| v as i64),
+                model.architecture,
+                model.license,
+                model.local_path,
+                model.sha256,
+                model.pulled_at.to_rfc3339(),
+                tenant_id.0,
+            ],
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         Ok(())
     }
 
     /// Get a model by its UUID.
     pub fn get(&self, id: ModelId, tenant_id: &TenantId) -> Result<ModelInfo> {
-        self.conn
-            .query_row(
-                "SELECT * FROM models WHERE id = ?1 AND tenant_id = ?2",
-                params![id.to_string(), tenant_id.0],
-                row_to_model,
-            )
-            .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => IfranError::ModelNotFound(id.to_string()),
-                other => IfranError::StorageError(other.to_string()),
-            })
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.query_row(
+            "SELECT * FROM models WHERE id = ?1 AND tenant_id = ?2",
+            params![id.to_string(), tenant_id.0],
+            row_to_model,
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => IfranError::ModelNotFound(id.to_string()),
+            other => IfranError::StorageError(other.to_string()),
+        })
     }
 
     /// Find a model by name (exact match).
     pub fn get_by_name(&self, name: &str, tenant_id: &TenantId) -> Result<ModelInfo> {
-        self.conn
-            .query_row(
-                "SELECT * FROM models WHERE name = ?1 AND tenant_id = ?2",
-                params![name, tenant_id.0],
-                row_to_model,
-            )
-            .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => IfranError::ModelNotFound(name.to_string()),
-                other => IfranError::StorageError(other.to_string()),
-            })
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.query_row(
+            "SELECT * FROM models WHERE name = ?1 AND tenant_id = ?2",
+            params![name, tenant_id.0],
+            row_to_model,
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => IfranError::ModelNotFound(name.to_string()),
+            other => IfranError::StorageError(other.to_string()),
+        })
     }
 
-    /// List all models in the catalog.
-    pub fn list(&self, tenant_id: &TenantId) -> Result<Vec<ModelInfo>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT * FROM models WHERE tenant_id = ?1 ORDER BY pulled_at DESC")
+    /// List models with pagination.
+    pub fn list(
+        &self,
+        tenant_id: &TenantId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<PagedResult<ModelInfo>> {
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
-        let models = stmt
-            .query_map(params![tenant_id.0], row_to_model)
+        let total: usize = conn
+            .query_row(
+                "SELECT COUNT(*) FROM models WHERE tenant_id = ?1",
+                params![tenant_id.0],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|c| c as usize)
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT * FROM models WHERE tenant_id = ?1 ORDER BY pulled_at DESC LIMIT ?2 OFFSET ?3",
+            )
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+
+        let items = stmt
+            .query_map(params![tenant_id.0, limit, offset], row_to_model)
             .map_err(|e| IfranError::StorageError(e.to_string()))?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
-        Ok(models)
+        Ok(PagedResult { items, total })
     }
 
     /// Update an existing model entry.
     pub fn update(&self, model: &ModelInfo, tenant_id: &TenantId) -> Result<()> {
-        let rows = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let rows = conn
             .execute(
                 "UPDATE models SET name = ?2, repo_id = ?3, format = ?4, quant = ?5,
                     size_bytes = ?6, parameter_count = ?7, architecture = ?8,
@@ -189,8 +237,11 @@ impl ModelDatabase {
 
     /// Delete a model from the catalog by ID.
     pub fn delete(&self, id: ModelId, tenant_id: &TenantId) -> Result<()> {
-        let rows = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let rows = conn
             .execute(
                 "DELETE FROM models WHERE id = ?1 AND tenant_id = ?2",
                 params![id.to_string(), tenant_id.0],
@@ -205,14 +256,52 @@ impl ModelDatabase {
 
     /// Count total models in the catalog.
     pub fn count(&self, tenant_id: &TenantId) -> Result<usize> {
-        self.conn
-            .query_row(
-                "SELECT COUNT(*) FROM models WHERE tenant_id = ?1",
-                params![tenant_id.0],
-                |row| row.get::<_, i64>(0),
-            )
-            .map(|c| c as usize)
-            .map_err(|e| IfranError::StorageError(e.to_string()))
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.query_row(
+            "SELECT COUNT(*) FROM models WHERE tenant_id = ?1",
+            params![tenant_id.0],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|c| c as usize)
+        .map_err(|e| IfranError::StorageError(e.to_string()))
+    }
+}
+
+impl crate::storage::traits::ModelStore for ModelDatabase {
+    fn insert(&self, model: &ModelInfo, tenant_id: &TenantId) -> Result<()> {
+        self.insert(model, tenant_id)
+    }
+
+    fn get(&self, id: ModelId, tenant_id: &TenantId) -> Result<ModelInfo> {
+        self.get(id, tenant_id)
+    }
+
+    fn get_by_name(&self, name: &str, tenant_id: &TenantId) -> Result<ModelInfo> {
+        self.get_by_name(name, tenant_id)
+    }
+
+    fn list(
+        &self,
+        tenant_id: &TenantId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<PagedResult<ModelInfo>> {
+        self.list(tenant_id, limit, offset)
+    }
+
+    fn update(&self, model: &ModelInfo, tenant_id: &TenantId) -> Result<()> {
+        self.update(model, tenant_id)
+    }
+
+    fn delete(&self, id: ModelId, tenant_id: &TenantId) -> Result<()> {
+        self.delete(id, tenant_id)
+    }
+
+    fn count(&self, tenant_id: &TenantId) -> Result<usize> {
+        self.count(tenant_id)
     }
 }
 
@@ -304,9 +393,9 @@ mod tests {
     fn list_models() {
         let db = ModelDatabase::open_memory().unwrap();
         let tenant = TenantId::default_tenant();
-        assert_eq!(db.list(&tenant).unwrap().len(), 0);
+        assert_eq!(db.list(&tenant, 100, 0).unwrap().items.len(), 0);
         db.insert(&sample_model(), &tenant).unwrap();
-        assert_eq!(db.list(&tenant).unwrap().len(), 1);
+        assert_eq!(db.list(&tenant, 100, 0).unwrap().items.len(), 1);
     }
 
     #[test]

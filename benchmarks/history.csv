@@ -9,3 +9,13 @@ timestamp,label,benchmark,time_ns,time_unit
 2026-03-27T14:56:31Z,baseline,score_exact_match_1000,13027,ns
 2026-03-27T14:56:31Z,baseline,score_contains_match_1000,61276,ns
 2026-03-27T14:56:31Z,baseline,score_mmlu_500,144556,ns
+2026-03-27T15:41:58Z,post-perf-memory,cosine_similarity_768d,1870,ns
+2026-03-27T15:41:58Z,post-perf-memory,cosine_similarity_1536d,3859,ns
+2026-03-27T15:41:58Z,post-perf-memory,estimate_gguf_7b,5,ns
+2026-03-27T15:41:58Z,post-perf-memory,estimate_gguf_70b,5,ns
+2026-03-27T15:41:58Z,post-perf-memory,cache_insert_100,29895,ns
+2026-03-27T15:41:58Z,post-perf-memory,cache_insert_with_eviction,37075,ns
+2026-03-27T15:41:58Z,post-perf-memory,cache_touch_hit,55,ns
+2026-03-27T15:41:58Z,post-perf-memory,score_exact_match_1000,22359,ns
+2026-03-27T15:41:58Z,post-perf-memory,score_contains_match_1000,57841,ns
+2026-03-27T15:41:58Z,post-perf-memory,score_mmlu_500,159714,ns

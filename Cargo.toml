@@ -88,6 +88,10 @@ proptest = "1"
 # Benchmarking
 criterion = { version = "0.5", features = ["html_reports"] }
 
+# Connection pooling
+r2d2 = "0.8"
+r2d2_sqlite = "0.33"
+
 # Hardware acceleration detection
 ai-hwaccel = "0.23"
 

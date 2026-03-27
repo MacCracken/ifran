@@ -64,15 +64,19 @@ pub async fn search(
         max_size_bytes: params.max_size,
     };
 
-    let catalog = state.marketplace_catalog.lock().await;
-    let entries = catalog
-        .search(&query, &tenant_id)
+    let safe_limit = page.safe_limit();
+    let paged = state
+        .marketplace_catalog
+        .search(&query, &tenant_id, safe_limit, page.offset)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let items: Vec<MarketplaceEntryResponse> = entries.iter().map(entry_to_response).collect();
-    Ok(Json(PaginatedResponse::from_slice(&items, &page, |item| {
-        item.clone()
-    })))
+    let items: Vec<MarketplaceEntryResponse> = paged.items.iter().map(entry_to_response).collect();
+    Ok(Json(PaginatedResponse::pre_sliced(
+        items,
+        paged.total,
+        safe_limit,
+        page.offset,
+    )))
 }
 
 /// GET /marketplace/entries — list all marketplace entries.
@@ -81,14 +85,18 @@ pub async fn list_entries(
     Extension(tenant_id): Extension<TenantId>,
     Query(page): Query<PaginationQuery>,
 ) -> Result<Json<PaginatedResponse<MarketplaceEntryResponse>>, (StatusCode, String)> {
-    let catalog = state.marketplace_catalog.lock().await;
-    let entries = catalog
-        .list(&tenant_id)
+    let safe_limit = page.safe_limit();
+    let paged = state
+        .marketplace_catalog
+        .list(&tenant_id, safe_limit, page.offset)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let items: Vec<MarketplaceEntryResponse> = entries.iter().map(entry_to_response).collect();
-    Ok(Json(PaginatedResponse::from_slice(&items, &page, |item| {
-        item.clone()
-    })))
+    let items: Vec<MarketplaceEntryResponse> = paged.items.iter().map(entry_to_response).collect();
+    Ok(Json(PaginatedResponse::pre_sliced(
+        items,
+        paged.total,
+        safe_limit,
+        page.offset,
+    )))
 }
 
 /// POST /marketplace/publish — publish a local model to the marketplace.
@@ -98,8 +106,8 @@ pub async fn publish(
     Json(req): Json<PublishRequest>,
 ) -> Result<(StatusCode, Json<MarketplaceEntryResponse>), (StatusCode, String)> {
     // Look up the model in the local DB
-    let db = state.db.lock().await;
-    let model = db
+    let model = state
+        .db
         .get_by_name(&req.model_name, &tenant_id)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
@@ -110,8 +118,8 @@ pub async fn publish(
     let entry = ifran_core::marketplace::publisher::create_entry(&model, &instance_id, &base_url)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let catalog = state.marketplace_catalog.lock().await;
-    catalog
+    state
+        .marketplace_catalog
         .publish(&entry, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -124,8 +132,8 @@ pub async fn unpublish(
     Extension(tenant_id): Extension<TenantId>,
     Path(name): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let catalog = state.marketplace_catalog.lock().await;
-    catalog
+    state
+        .marketplace_catalog
         .unpublish(&name, &tenant_id)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
     Ok(StatusCode::NO_CONTENT)
@@ -141,8 +149,8 @@ pub async fn download(
     let model_name = name.replace("__", "/");
 
     // Look up the model in the local DB to find the file path
-    let db = state.db.lock().await;
-    let model = db
+    let model = state
+        .db
         .get_by_name(&model_name, &tenant_id)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
@@ -248,8 +256,9 @@ pub async fn pull(
         pulled_at: chrono::Utc::now(),
     };
 
-    let db = state.db.lock().await;
-    db.insert(&model, &tenant_id)
+    state
+        .db
+        .insert(&model, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok((
@@ -449,8 +458,8 @@ mod tests {
 
         // Publish directly via catalog
         {
-            let catalog = state.marketplace_catalog.lock().await;
-            catalog
+            state
+                .marketplace_catalog
                 .publish(&test_entry(), &TenantId::default_tenant())
                 .unwrap();
         }
@@ -472,8 +481,8 @@ mod tests {
         let state = test_state(&tmp);
 
         {
-            let catalog = state.marketplace_catalog.lock().await;
-            catalog
+            state
+                .marketplace_catalog
                 .publish(&test_entry(), &TenantId::default_tenant())
                 .unwrap();
         }
@@ -500,8 +509,8 @@ mod tests {
         let state = test_state(&tmp);
 
         {
-            let catalog = state.marketplace_catalog.lock().await;
-            catalog
+            state
+                .marketplace_catalog
                 .publish(&test_entry(), &TenantId::default_tenant())
                 .unwrap();
         }
@@ -528,8 +537,8 @@ mod tests {
         let state = test_state(&tmp);
 
         {
-            let catalog = state.marketplace_catalog.lock().await;
-            catalog
+            state
+                .marketplace_catalog
                 .publish(&test_entry(), &TenantId::default_tenant())
                 .unwrap();
         }
@@ -556,8 +565,8 @@ mod tests {
         let state = test_state(&tmp);
 
         {
-            let catalog = state.marketplace_catalog.lock().await;
-            catalog
+            state
+                .marketplace_catalog
                 .publish(&test_entry(), &TenantId::default_tenant())
                 .unwrap();
         }

@@ -1,12 +1,15 @@
 use ifran_types::IfranError;
+use ifran_types::PagedResult;
 use ifran_types::TenantId;
 use ifran_types::error::Result;
 use ifran_types::rlhf::*;
-use rusqlite::{Connection, params};
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
+use rusqlite::params;
 use uuid::Uuid;
 
 pub struct AnnotationStore {
-    conn: Connection,
+    pool: Pool<SqliteConnectionManager>,
 }
 
 impl AnnotationStore {
@@ -14,27 +17,41 @@ impl AnnotationStore {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let conn = Connection::open(path).map_err(|e| IfranError::StorageError(e.to_string()))?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")
+        let manager = SqliteConnectionManager::file(path).with_init(|conn| {
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            Ok(())
+        });
+        let pool = Pool::builder()
+            .max_size(4)
+            .build(manager)
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
-        let store = Self { conn };
+        let store = Self { pool };
         store.migrate()?;
         Ok(store)
     }
 
     #[cfg(test)]
     pub fn open_in_memory() -> Result<Self> {
-        let conn =
-            Connection::open_in_memory().map_err(|e| IfranError::StorageError(e.to_string()))?;
-        let store = Self { conn };
+        let manager = SqliteConnectionManager::memory().with_init(|conn| {
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            Ok(())
+        });
+        let pool = Pool::builder()
+            .max_size(1)
+            .build(manager)
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let store = Self { pool };
         store.migrate()?;
         Ok(store)
     }
 
     fn migrate(&self) -> Result<()> {
-        self.conn
-            .execute_batch(
-                "CREATE TABLE IF NOT EXISTS annotation_sessions (
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS annotation_sessions (
                 id          TEXT PRIMARY KEY,
                 name        TEXT NOT NULL,
                 model_name  TEXT NOT NULL,
@@ -52,18 +69,17 @@ impl AnnotationStore {
                 FOREIGN KEY (session_id) REFERENCES annotation_sessions(id)
             );
             CREATE INDEX IF NOT EXISTS idx_pairs_session ON annotation_pairs(session_id);",
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
         // Add tenant_id column to annotation_sessions (idempotent — ignore if already exists)
-        let _ = self.conn.execute_batch(
+        let _ = conn.execute_batch(
             "ALTER TABLE annotation_sessions ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';",
         );
-        self.conn
-            .execute_batch(
-                "CREATE INDEX IF NOT EXISTS idx_annotation_sessions_tenant ON annotation_sessions(tenant_id);",
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_annotation_sessions_tenant ON annotation_sessions(tenant_id);",
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
         Ok(())
     }
@@ -74,9 +90,13 @@ impl AnnotationStore {
         model_name: &str,
         tenant_id: &TenantId,
     ) -> Result<AnnotationSession> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
         let id = Uuid::new_v4();
         let now = chrono::Utc::now();
-        self.conn.execute(
+        conn.execute(
             "INSERT INTO annotation_sessions (id, name, model_name, created_at, status, tenant_id) VALUES (?1, ?2, ?3, ?4, 'active', ?5)",
             params![id.to_string(), name, model_name, now.to_rfc3339(), tenant_id.0],
         ).map_err(|e| IfranError::StorageError(e.to_string()))?;
@@ -90,7 +110,11 @@ impl AnnotationStore {
     }
 
     pub fn get_session(&self, id: Uuid, tenant_id: &TenantId) -> Result<AnnotationSession> {
-        let mut stmt = self.conn.prepare(
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let mut stmt = conn.prepare(
             "SELECT id, name, model_name, created_at, status FROM annotation_sessions WHERE id = ?1 AND tenant_id = ?2"
         ).map_err(|e| IfranError::StorageError(e.to_string()))?;
 
@@ -137,13 +161,31 @@ impl AnnotationStore {
         .map_err(|e| IfranError::StorageError(e.to_string()))
     }
 
-    pub fn list_sessions(&self, tenant_id: &TenantId) -> Result<Vec<AnnotationSession>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, name, model_name, created_at, status FROM annotation_sessions WHERE tenant_id = ?1 ORDER BY created_at DESC"
+    pub fn list_sessions(
+        &self,
+        tenant_id: &TenantId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<PagedResult<AnnotationSession>> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+
+        let total: usize =
+            conn.query_row(
+                "SELECT COUNT(*) FROM annotation_sessions WHERE tenant_id = ?1",
+                params![tenant_id.0],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| IfranError::StorageError(e.to_string()))? as usize;
+
+        let mut stmt = conn.prepare(
+            "SELECT id, name, model_name, created_at, status FROM annotation_sessions WHERE tenant_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3"
         ).map_err(|e| IfranError::StorageError(e.to_string()))?;
 
-        let results = stmt
-            .query_map(params![tenant_id.0], |row| {
+        let items = stmt
+            .query_map(params![tenant_id.0, limit, offset], |row| {
                 let id_str: String = row.get(0)?;
                 let name: String = row.get(1)?;
                 let model_name: String = row.get(2)?;
@@ -187,12 +229,16 @@ impl AnnotationStore {
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
-        Ok(results)
+        Ok(PagedResult { items, total })
     }
 
     pub fn add_pairs(&self, pairs: &[AnnotationPair]) -> Result<()> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
         for pair in pairs {
-            self.conn.execute(
+            conn.execute(
                 "INSERT INTO annotation_pairs (id, session_id, prompt, response_a, response_b, preference, annotated_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
@@ -212,8 +258,11 @@ impl AnnotationStore {
     }
 
     pub fn get_pairs(&self, session_id: Uuid, tenant_id: &TenantId) -> Result<Vec<AnnotationPair>> {
-        let mut stmt = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let mut stmt = conn
             .prepare(
                 "SELECT p.id, p.session_id, p.prompt, p.response_a, p.response_b, p.preference, p.annotated_at
              FROM annotation_pairs p
@@ -236,8 +285,11 @@ impl AnnotationStore {
         session_id: Uuid,
         tenant_id: &TenantId,
     ) -> Result<Option<AnnotationPair>> {
-        let mut stmt = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let mut stmt = conn
             .prepare(
                 "SELECT p.id, p.session_id, p.prompt, p.response_a, p.response_b, p.preference, p.annotated_at
              FROM annotation_pairs p
@@ -258,13 +310,16 @@ impl AnnotationStore {
     }
 
     pub fn annotate_pair(&self, pair_id: Uuid, preference: Preference) -> Result<()> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
         let pref_str = serde_json::to_string(&preference)
             .map_err(|e| IfranError::StorageError(e.to_string()))?
             .trim_matches('"')
             .to_string();
         let now = chrono::Utc::now().to_rfc3339();
-        let affected = self
-            .conn
+        let affected = conn
             .execute(
                 "UPDATE annotation_pairs SET preference = ?1, annotated_at = ?2 WHERE id = ?3",
                 params![pref_str, now, pair_id.to_string()],
@@ -282,8 +337,12 @@ impl AnnotationStore {
         // Verify session belongs to tenant
         let _ = self.get_session(session_id, tenant_id)?;
 
-        let total: i64 = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+
+        let total: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM annotation_pairs WHERE session_id = ?1",
                 params![session_id.to_string()],
@@ -291,7 +350,7 @@ impl AnnotationStore {
             )
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
-        let annotated: i64 = self.conn.query_row(
+        let annotated: i64 = conn.query_row(
             "SELECT COUNT(*) FROM annotation_pairs WHERE session_id = ?1 AND preference IS NOT NULL",
             params![session_id.to_string()],
             |row| row.get(0),
@@ -313,8 +372,11 @@ impl AnnotationStore {
         // Verify session belongs to tenant
         let _ = self.get_session(session_id, tenant_id)?;
 
-        let mut stmt = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let mut stmt = conn
             .prepare(
                 "SELECT id, session_id, prompt, response_a, response_b, preference, annotated_at
              FROM annotation_pairs WHERE session_id = ?1 AND preference IS NOT NULL",
@@ -328,6 +390,62 @@ impl AnnotationStore {
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
         Ok(results)
+    }
+}
+
+impl crate::storage::traits::AnnotationStore for AnnotationStore {
+    fn create_session(
+        &self,
+        name: &str,
+        model_name: &str,
+        tenant_id: &TenantId,
+    ) -> Result<AnnotationSession> {
+        self.create_session(name, model_name, tenant_id)
+    }
+
+    fn get_session(&self, id: Uuid, tenant_id: &TenantId) -> Result<AnnotationSession> {
+        self.get_session(id, tenant_id)
+    }
+
+    fn list_sessions(
+        &self,
+        tenant_id: &TenantId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<PagedResult<AnnotationSession>> {
+        self.list_sessions(tenant_id, limit, offset)
+    }
+
+    fn add_pairs(&self, pairs: &[AnnotationPair]) -> Result<()> {
+        self.add_pairs(pairs)
+    }
+
+    fn get_pairs(&self, session_id: Uuid, tenant_id: &TenantId) -> Result<Vec<AnnotationPair>> {
+        self.get_pairs(session_id, tenant_id)
+    }
+
+    fn get_next_unannotated(
+        &self,
+        session_id: Uuid,
+        tenant_id: &TenantId,
+    ) -> Result<Option<AnnotationPair>> {
+        self.get_next_unannotated(session_id, tenant_id)
+    }
+
+    fn annotate_pair(&self, pair_id: Uuid, preference: Preference) -> Result<()> {
+        self.annotate_pair(pair_id, preference)
+    }
+
+    fn get_stats(&self, session_id: Uuid, tenant_id: &TenantId) -> Result<AnnotationStats> {
+        self.get_stats(session_id, tenant_id)
+    }
+
+    fn export_session(
+        &self,
+        session_id: Uuid,
+        tenant_id: &TenantId,
+    ) -> Result<Vec<AnnotationPair>> {
+        self.export_session(session_id, tenant_id)
     }
 }
 
@@ -387,8 +505,8 @@ mod tests {
     fn list_sessions_empty() {
         let store = AnnotationStore::open_in_memory().unwrap();
         let tenant = TenantId::default_tenant();
-        let sessions = store.list_sessions(&tenant).unwrap();
-        assert!(sessions.is_empty());
+        let sessions = store.list_sessions(&tenant, 100, 0).unwrap();
+        assert!(sessions.items.is_empty());
     }
 
     #[test]
@@ -397,8 +515,9 @@ mod tests {
         let tenant = TenantId::default_tenant();
         store.create_session("s1", "model-a", &tenant).unwrap();
         store.create_session("s2", "model-b", &tenant).unwrap();
-        let sessions = store.list_sessions(&tenant).unwrap();
-        assert_eq!(sessions.len(), 2);
+        let sessions = store.list_sessions(&tenant, 100, 0).unwrap();
+        assert_eq!(sessions.items.len(), 2);
+        assert_eq!(sessions.total, 2);
     }
 
     #[test]

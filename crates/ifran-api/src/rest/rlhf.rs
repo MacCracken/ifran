@@ -66,8 +66,7 @@ pub async fn create_session(
         "Annotation store not initialized".into(),
     ))?;
 
-    let s = store.lock().await;
-    let session = s
+    let session = store
         .create_session(&req.name, &req.model_name, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -93,12 +92,13 @@ pub async fn list_sessions(
         "Annotation store not initialized".into(),
     ))?;
 
-    let s = store.lock().await;
-    let sessions = s
-        .list_sessions(&tenant_id)
+    let safe_limit = page.safe_limit();
+    let paged = store
+        .list_sessions(&tenant_id, safe_limit, page.offset)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let data: Vec<serde_json::Value> = sessions
+    let data: Vec<serde_json::Value> = paged
+        .items
         .iter()
         .map(|sess| {
             serde_json::json!({
@@ -111,9 +111,12 @@ pub async fn list_sessions(
         })
         .collect();
 
-    Ok(Json(PaginatedResponse::from_slice(&data, &page, |item| {
-        item.clone()
-    })))
+    Ok(Json(PaginatedResponse::pre_sliced(
+        data,
+        paged.total,
+        safe_limit,
+        page.offset,
+    )))
 }
 
 /// GET /rlhf/sessions/{id}
@@ -127,12 +130,11 @@ pub async fn get_session(
         "Annotation store not initialized".into(),
     ))?;
 
-    let s = store.lock().await;
-    let session = s
+    let session = store
         .get_session(id, &tenant_id)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
-    let stats = s
+    let stats = store
         .get_stats(id, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -210,8 +212,8 @@ pub async fn add_pairs(
         .collect();
 
     let count = pairs.len();
-    let s = store.lock().await;
-    s.add_pairs(&pairs)
+    store
+        .add_pairs(&pairs)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok((
@@ -231,8 +233,7 @@ pub async fn get_pairs(
         "Annotation store not initialized".into(),
     ))?;
 
-    let s = store.lock().await;
-    let next = s
+    let next = store
         .get_next_unannotated(id, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -259,8 +260,8 @@ pub async fn annotate(
         "Annotation store not initialized".into(),
     ))?;
 
-    let s = store.lock().await;
-    s.annotate_pair(id, req.preference)
+    store
+        .annotate_pair(id, req.preference)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
     Ok(Json(
@@ -279,8 +280,7 @@ pub async fn export_session(
         "Annotation store not initialized".into(),
     ))?;
 
-    let s = store.lock().await;
-    let pairs = s
+    let pairs = store
         .export_session(id, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -324,8 +324,7 @@ pub async fn get_stats(
         "Annotation store not initialized".into(),
     ))?;
 
-    let s = store.lock().await;
-    let stats = s
+    let stats = store
         .get_stats(id, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 

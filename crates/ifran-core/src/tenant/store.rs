@@ -4,9 +4,12 @@
 //! this store is not used — the auth middleware falls back to `IFRAN_API_KEY`.
 
 use ifran_types::IfranError;
+use ifran_types::PagedResult;
 use ifran_types::TenantId;
 use ifran_types::error::Result;
-use rusqlite::{Connection, params};
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
+use rusqlite::params;
 use uuid::Uuid;
 
 /// A tenant record from the database.
@@ -20,7 +23,7 @@ pub struct TenantRecord {
 
 /// Manages tenant storage in SQLite.
 pub struct TenantStore {
-    conn: Connection,
+    pool: Pool<SqliteConnectionManager>,
 }
 
 impl TenantStore {
@@ -29,10 +32,15 @@ impl TenantStore {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let conn = Connection::open(path).map_err(|e| IfranError::StorageError(e.to_string()))?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")
+        let manager = SqliteConnectionManager::file(path).with_init(|conn| {
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            Ok(())
+        });
+        let pool = Pool::builder()
+            .max_size(4)
+            .build(manager)
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
-        let store = Self { conn };
+        let store = Self { pool };
         store.migrate()?;
         Ok(store)
     }
@@ -40,17 +48,26 @@ impl TenantStore {
     /// Open an in-memory database (useful for tests).
     #[cfg(test)]
     pub fn open_in_memory() -> Result<Self> {
-        let conn =
-            Connection::open_in_memory().map_err(|e| IfranError::StorageError(e.to_string()))?;
-        let store = Self { conn };
+        let manager = SqliteConnectionManager::memory().with_init(|conn| {
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            Ok(())
+        });
+        let pool = Pool::builder()
+            .max_size(1)
+            .build(manager)
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let store = Self { pool };
         store.migrate()?;
         Ok(store)
     }
 
     fn migrate(&self) -> Result<()> {
-        self.conn
-            .execute_batch(
-                "CREATE TABLE IF NOT EXISTS tenants (
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS tenants (
                     id           TEXT PRIMARY KEY,
                     name         TEXT NOT NULL,
                     api_key_hash TEXT NOT NULL UNIQUE,
@@ -58,25 +75,28 @@ impl TenantStore {
                     enabled      INTEGER NOT NULL DEFAULT 1
                 );
                 CREATE INDEX IF NOT EXISTS idx_tenants_key ON tenants(api_key_hash);",
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         Ok(())
     }
 
     /// Create a new tenant. Returns the record and the raw API key (shown once).
     pub fn create_tenant(&self, name: &str) -> Result<(TenantRecord, String)> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
         let id = TenantId(Uuid::new_v4().to_string());
         let raw_key = format!("syn_{}", Uuid::new_v4().to_string().replace('-', ""));
         let key_hash = hash_key(&raw_key);
         let now = chrono::Utc::now().to_rfc3339();
 
-        self.conn
-            .execute(
-                "INSERT INTO tenants (id, name, api_key_hash, created_at, enabled)
+        conn.execute(
+            "INSERT INTO tenants (id, name, api_key_hash, created_at, enabled)
                  VALUES (?1, ?2, ?3, ?4, 1)",
-                params![id.0, name, key_hash, now],
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+            params![id.0, name, key_hash, now],
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
         let record = TenantRecord {
             id,
@@ -90,38 +110,54 @@ impl TenantStore {
 
     /// Resolve a tenant by hashing the provided API key and looking it up.
     pub fn resolve_by_key(&self, raw_key: &str) -> Result<TenantRecord> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
         let key_hash = hash_key(raw_key);
-        self.conn
-            .query_row(
-                "SELECT id, name, enabled, created_at FROM tenants WHERE api_key_hash = ?1",
-                params![key_hash],
-                |row| {
-                    let enabled: i64 = row.get(2)?;
-                    Ok(TenantRecord {
-                        id: TenantId(row.get(0)?),
-                        name: row.get(1)?,
-                        enabled: enabled != 0,
-                        created_at: row.get(3)?,
-                    })
-                },
-            )
-            .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => {
-                    IfranError::TenantNotFound("Invalid API key".into())
-                }
-                other => IfranError::StorageError(other.to_string()),
-            })
+        conn.query_row(
+            "SELECT id, name, enabled, created_at FROM tenants WHERE api_key_hash = ?1",
+            params![key_hash],
+            |row| {
+                let enabled: i64 = row.get(2)?;
+                Ok(TenantRecord {
+                    id: TenantId(row.get(0)?),
+                    name: row.get(1)?,
+                    enabled: enabled != 0,
+                    created_at: row.get(3)?,
+                })
+            },
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                IfranError::TenantNotFound("Invalid API key".into())
+            }
+            other => IfranError::StorageError(other.to_string()),
+        })
     }
 
-    /// List all tenants.
-    pub fn list_tenants(&self) -> Result<Vec<TenantRecord>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, name, enabled, created_at FROM tenants ORDER BY created_at DESC")
+    /// List all tenants with pagination.
+    pub fn list_tenants(&self, limit: u32, offset: u32) -> Result<PagedResult<TenantRecord>> {
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
-        let records = stmt
-            .query_map([], |row| {
+        let total: usize = conn
+            .query_row("SELECT COUNT(*) FROM tenants", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .map(|c| c as usize)
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, enabled, created_at FROM tenants ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
+            )
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+
+        let items = stmt
+            .query_map(params![limit, offset], |row| {
                 let enabled: i64 = row.get(2)?;
                 Ok(TenantRecord {
                     id: TenantId(row.get(0)?),
@@ -134,13 +170,16 @@ impl TenantStore {
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
-        Ok(records)
+        Ok(PagedResult { items, total })
     }
 
     /// Disable a tenant (soft delete).
     pub fn disable_tenant(&self, id: &TenantId) -> Result<()> {
-        let rows = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let rows = conn
             .execute(
                 "UPDATE tenants SET enabled = 0 WHERE id = ?1",
                 params![id.0],
@@ -155,8 +194,11 @@ impl TenantStore {
 
     /// Enable a previously disabled tenant.
     pub fn enable_tenant(&self, id: &TenantId) -> Result<()> {
-        let rows = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let rows = conn
             .execute(
                 "UPDATE tenants SET enabled = 1 WHERE id = ?1",
                 params![id.0],
@@ -167,6 +209,28 @@ impl TenantStore {
             return Err(IfranError::TenantNotFound(id.to_string()));
         }
         Ok(())
+    }
+}
+
+impl crate::storage::traits::TenantStore for TenantStore {
+    fn create_tenant(&self, name: &str) -> Result<(TenantRecord, String)> {
+        self.create_tenant(name)
+    }
+
+    fn resolve_by_key(&self, raw_key: &str) -> Result<TenantRecord> {
+        self.resolve_by_key(raw_key)
+    }
+
+    fn list_tenants(&self, limit: u32, offset: u32) -> Result<PagedResult<TenantRecord>> {
+        self.list_tenants(limit, offset)
+    }
+
+    fn disable_tenant(&self, id: &TenantId) -> Result<()> {
+        self.disable_tenant(id)
+    }
+
+    fn enable_tenant(&self, id: &TenantId) -> Result<()> {
+        self.enable_tenant(id)
     }
 }
 
@@ -203,11 +267,13 @@ mod tests {
     #[test]
     fn list_tenants() {
         let store = TenantStore::open_in_memory().unwrap();
-        assert!(store.list_tenants().unwrap().is_empty());
+        assert!(store.list_tenants(100, 0).unwrap().items.is_empty());
 
         store.create_tenant("Tenant A").unwrap();
         store.create_tenant("Tenant B").unwrap();
-        assert_eq!(store.list_tenants().unwrap().len(), 2);
+        let result = store.list_tenants(100, 0).unwrap();
+        assert_eq!(result.items.len(), 2);
+        assert_eq!(result.total, 2);
     }
 
     #[test]
@@ -259,7 +325,9 @@ mod tests {
         assert_ne!(r1.id, r2.id);
         assert_ne!(r2.id, r3.id);
         assert_ne!(r1.id, r3.id);
-        assert_eq!(store.list_tenants().unwrap().len(), 3);
+        let result = store.list_tenants(100, 0).unwrap();
+        assert_eq!(result.items.len(), 3);
+        assert_eq!(result.total, 3);
     }
 
     #[test]

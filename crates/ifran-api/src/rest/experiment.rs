@@ -116,12 +116,13 @@ pub async fn list_experiments(
         "Experiment store not initialized".into(),
     ))?;
 
-    let s = store.lock().await;
-    let experiments = s
-        .list_experiments(&tenant_id)
+    let safe_limit = query.page.safe_limit();
+    let paged = store
+        .list_experiments(&tenant_id, safe_limit, query.page.offset)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let items: Vec<ExperimentListItem> = experiments
+    let items: Vec<ExperimentListItem> = paged
+        .items
         .into_iter()
         .filter(|(_, _, status, _)| query.status.is_none() || Some(*status) == query.status)
         .map(|(id, name, status, best_score)| ExperimentListItem {
@@ -132,10 +133,11 @@ pub async fn list_experiments(
         })
         .collect();
 
-    Ok(Json(PaginatedResponse::from_slice(
-        &items,
-        &query.page,
-        |item| item.clone(),
+    Ok(Json(PaginatedResponse::pre_sliced(
+        items,
+        paged.total,
+        safe_limit,
+        query.page.offset,
     )))
 }
 
@@ -150,12 +152,11 @@ pub async fn get_experiment(
         "Experiment store not initialized".into(),
     ))?;
 
-    let s = store.lock().await;
-    let (exp_id, name, _, status, _, best_score) = s
+    let (exp_id, name, _, status, _, best_score) = store
         .get_experiment(id, &tenant_id)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
-    let trials = s
+    let trials = store
         .get_trials(id, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -179,13 +180,12 @@ pub async fn get_leaderboard(
         "Experiment store not initialized".into(),
     ))?;
 
-    let s = store.lock().await;
-    let (_, _, program, _, _, _) = s
+    let (_, _, program, _, _, _) = store
         .get_experiment(id, &tenant_id)
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
     let direction = program.objective.direction;
-    let trials = s
+    let trials = store
         .get_leaderboard(id, direction, 50, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -208,8 +208,7 @@ pub async fn stop_experiment(
 
     // Also mark in the store
     if let Some(store) = &state.experiment_store {
-        let s = store.lock().await;
-        let _ = s.update_experiment_status(id, ExperimentStatus::Stopped, &tenant_id);
+        let _ = store.update_experiment_status(id, ExperimentStatus::Stopped, &tenant_id);
     }
 
     Ok(Json(

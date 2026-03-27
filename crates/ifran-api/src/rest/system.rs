@@ -13,8 +13,11 @@ pub async fn health() -> &'static str {
 
 /// GET /ready — readiness probe checking database and backend availability.
 pub async fn ready(State(state): State<AppState>) -> (StatusCode, Json<serde_json::Value>) {
-    // Check database accessibility
-    let db_ok = state.db.try_lock().is_ok();
+    // Check database accessibility via a lightweight query
+    let db_ok = state
+        .db
+        .list(&ifran_types::TenantId::default_tenant(), 1, 0)
+        .is_ok();
     if !db_ok {
         return (
             StatusCode::SERVICE_UNAVAILABLE,

@@ -71,12 +71,14 @@ impl IfranService for IfranGrpcService {
         &self,
         _request: Request<ListModelsRequest>,
     ) -> Result<Response<ListModelsResponse>, Status> {
-        let db = self.state.db.lock().await;
-        let models = db
-            .list(&ifran_types::TenantId::default_tenant())
+        let paged = self
+            .state
+            .db
+            .list(&ifran_types::TenantId::default_tenant(), 1000, 0)
             .map_err(|e| Status::internal(format!("Database error: {e}")))?;
 
-        let proto_models = models
+        let proto_models = paged
+            .items
             .into_iter()
             .map(|m| ProtoModelInfo {
                 id: m.id.to_string(),

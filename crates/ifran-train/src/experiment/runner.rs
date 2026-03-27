@@ -11,7 +11,7 @@ use ifran_types::experiment::{
     ExperimentId, ExperimentProgram, ExperimentStatus, TrialResult, TrialStatus,
 };
 use ifran_types::training::{DatasetConfig, DatasetFormat, TrainingJobConfig, TrainingStatus};
-use tokio::sync::{Mutex, watch};
+use tokio::sync::watch;
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -21,7 +21,7 @@ use crate::job::manager::JobManager;
 /// Runs an experiment: generates trials, trains each one, evaluates, compares.
 pub struct ExperimentRunner {
     job_manager: Arc<JobManager>,
-    store: Arc<Mutex<ExperimentStore>>,
+    store: Arc<ExperimentStore>,
     stop_rx: watch::Receiver<bool>,
 }
 
@@ -41,7 +41,7 @@ impl ExperimentHandle {
 impl ExperimentRunner {
     pub fn new(
         job_manager: Arc<JobManager>,
-        store: Arc<Mutex<ExperimentStore>>,
+        store: Arc<ExperimentStore>,
     ) -> (Self, watch::Sender<bool>) {
         let (stop_tx, stop_rx) = watch::channel(false);
         (
@@ -58,16 +58,15 @@ impl ExperimentRunner {
     /// Returns the experiment ID and a handle for stopping.
     pub async fn start(
         job_manager: Arc<JobManager>,
-        store: Arc<Mutex<ExperimentStore>>,
+        store: Arc<ExperimentStore>,
         program: ExperimentProgram,
     ) -> Result<ExperimentHandle> {
         let experiment_id = Uuid::new_v4();
 
         // Register experiment
         {
-            let s = store.lock().await;
             let tenant = TenantId::default_tenant();
-            s.insert_experiment(experiment_id, &program.name, &program, &tenant)?;
+            store.insert_experiment(experiment_id, &program.name, &program, &tenant)?;
         }
 
         let (runner, stop_tx) = Self::new(job_manager, store.clone());
@@ -82,10 +81,12 @@ impl ExperimentRunner {
         tokio::spawn(async move {
             if let Err(e) = runner.run_loop(experiment_id, &prog).await {
                 warn!(experiment_id = %experiment_id, error = %e, "Experiment failed");
-                let s = store_for_error.lock().await;
                 let tenant = TenantId::default_tenant();
-                let _ =
-                    s.update_experiment_status(experiment_id, ExperimentStatus::Failed, &tenant);
+                let _ = store_for_error.update_experiment_status(
+                    experiment_id,
+                    ExperimentStatus::Failed,
+                    &tenant,
+                );
             }
         });
 
@@ -131,8 +132,11 @@ impl ExperimentRunner {
             // Check stop signal
             if *self.stop_rx.borrow() {
                 info!(experiment_id = %experiment_id, "Stop signal received");
-                let s = self.store.lock().await;
-                s.update_experiment_status(experiment_id, ExperimentStatus::Stopped, &tenant)?;
+                self.store.update_experiment_status(
+                    experiment_id,
+                    ExperimentStatus::Stopped,
+                    &tenant,
+                )?;
                 return Ok(());
             }
 
@@ -163,10 +167,7 @@ impl ExperimentRunner {
                 checkpoint_path: None,
                 is_best: false,
             };
-            {
-                let s = self.store.lock().await;
-                s.insert_trial(&trial)?;
-            }
+            self.store.insert_trial(&trial)?;
 
             let start_time = std::time::Instant::now();
 
@@ -223,8 +224,8 @@ impl ExperimentRunner {
                             "New best trial"
                         );
 
-                        let s = self.store.lock().await;
-                        s.update_best_trial(experiment_id, trial_id, score, &tenant)?;
+                        self.store
+                            .update_best_trial(experiment_id, trial_id, score, &tenant)?;
                     }
                 }
                 Err(e) => {
@@ -240,17 +241,12 @@ impl ExperimentRunner {
             }
 
             // Update trial in store
-            {
-                let s = self.store.lock().await;
-                s.update_trial(&trial)?;
-            }
+            self.store.update_trial(&trial)?;
         }
 
         // Mark experiment completed
-        {
-            let s = self.store.lock().await;
-            s.update_experiment_status(experiment_id, ExperimentStatus::Completed, &tenant)?;
-        }
+        self.store
+            .update_experiment_status(experiment_id, ExperimentStatus::Completed, &tenant)?;
 
         if let (Some(id), Some(score)) = (best_trial_id, best_score) {
             info!(

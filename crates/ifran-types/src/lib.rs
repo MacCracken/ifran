@@ -20,6 +20,7 @@ pub mod inference;
 pub mod lineage;
 pub mod marketplace;
 pub mod model;
+pub mod pagination;
 pub mod rag;
 pub mod registry;
 pub mod rlhf;
@@ -30,4 +31,5 @@ pub mod versioning;
 // Re-export core types at crate root
 pub use error::IfranError;
 pub use model::{ModelFormat, ModelId, ModelInfo, QuantLevel};
+pub use pagination::PagedResult;
 pub use tenant::TenantId;

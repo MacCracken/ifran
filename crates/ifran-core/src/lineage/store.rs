@@ -2,12 +2,14 @@
 
 use ifran_types::error::Result;
 use ifran_types::lineage::{LineageId, LineageNode, PipelineStage};
-use ifran_types::{IfranError, TenantId};
-use rusqlite::{Connection, params};
+use ifran_types::{IfranError, PagedResult, TenantId};
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
+use rusqlite::params;
 use uuid::Uuid;
 
 pub struct LineageStore {
-    conn: Connection,
+    pool: Pool<SqliteConnectionManager>,
 }
 
 impl LineageStore {
@@ -15,27 +17,41 @@ impl LineageStore {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let conn = Connection::open(path).map_err(|e| IfranError::StorageError(e.to_string()))?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")
+        let manager = SqliteConnectionManager::file(path).with_init(|conn| {
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            Ok(())
+        });
+        let pool = Pool::builder()
+            .max_size(4)
+            .build(manager)
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
-        let store = Self { conn };
+        let store = Self { pool };
         store.migrate()?;
         Ok(store)
     }
 
     #[cfg(test)]
     pub fn open_in_memory() -> Result<Self> {
-        let conn =
-            Connection::open_in_memory().map_err(|e| IfranError::StorageError(e.to_string()))?;
-        let store = Self { conn };
+        let manager = SqliteConnectionManager::memory().with_init(|conn| {
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            Ok(())
+        });
+        let pool = Pool::builder()
+            .max_size(1)
+            .build(manager)
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let store = Self { pool };
         store.migrate()?;
         Ok(store)
     }
 
     fn migrate(&self) -> Result<()> {
-        self.conn
-            .execute_batch(
-                "CREATE TABLE IF NOT EXISTS lineage_nodes (
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS lineage_nodes (
                 id           TEXT PRIMARY KEY,
                 tenant_id    TEXT NOT NULL DEFAULT 'default',
                 stage        TEXT NOT NULL,
@@ -55,37 +71,39 @@ impl LineageStore {
             CREATE INDEX IF NOT EXISTS idx_lineage_stage ON lineage_nodes(stage);
             CREATE INDEX IF NOT EXISTS idx_lineage_artifact ON lineage_nodes(artifact_ref);
             CREATE INDEX IF NOT EXISTS idx_edges_child ON lineage_edges(child_id);",
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         Ok(())
     }
 
     /// Record a new lineage node with its parent relationships.
     pub fn record(&self, node: &LineageNode, tenant_id: &TenantId) -> Result<()> {
-        let metadata_str = node.metadata.to_string();
-        self.conn
-            .execute(
-                "INSERT INTO lineage_nodes (id, tenant_id, stage, name, artifact_ref, metadata, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    node.id.to_string(),
-                    tenant_id.0,
-                    node.stage.to_string(),
-                    node.name,
-                    node.artifact_ref,
-                    metadata_str,
-                    node.created_at.to_rfc3339(),
-                ],
-            )
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let metadata_str = node.metadata.to_string();
+        conn.execute(
+            "INSERT INTO lineage_nodes (id, tenant_id, stage, name, artifact_ref, metadata, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                node.id.to_string(),
+                tenant_id.0,
+                node.stage.to_string(),
+                node.name,
+                node.artifact_ref,
+                metadata_str,
+                node.created_at.to_rfc3339(),
+            ],
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
         for parent_id in &node.parent_ids {
-            self.conn
-                .execute(
-                    "INSERT INTO lineage_edges (parent_id, child_id) VALUES (?1, ?2)",
-                    params![parent_id.to_string(), node.id.to_string()],
-                )
-                .map_err(|e| IfranError::StorageError(e.to_string()))?;
+            conn.execute(
+                "INSERT INTO lineage_edges (parent_id, child_id) VALUES (?1, ?2)",
+                params![parent_id.to_string(), node.id.to_string()],
+            )
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
         }
 
         Ok(())
@@ -93,8 +111,11 @@ impl LineageStore {
 
     /// Get a lineage node by ID.
     pub fn get(&self, id: LineageId, tenant_id: &TenantId) -> Result<LineageNode> {
-        let node = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let node = conn
             .query_row(
                 "SELECT id, stage, name, artifact_ref, metadata, created_at
              FROM lineage_nodes WHERE id = ?1 AND tenant_id = ?2",
@@ -121,7 +142,7 @@ impl LineageStore {
                 other => IfranError::StorageError(other.to_string()),
             })?;
 
-        let parent_ids = self.get_parent_ids(id)?;
+        let parent_ids = Self::get_parent_ids_with_conn(&conn, id)?;
 
         Ok(LineageNode {
             id: Uuid::parse_str(&node.0).unwrap_or_default(),
@@ -137,10 +158,11 @@ impl LineageStore {
         })
     }
 
-    /// Get parent IDs for a node.
-    fn get_parent_ids(&self, child_id: LineageId) -> Result<Vec<LineageId>> {
-        let mut stmt = self
-            .conn
+    fn get_parent_ids_with_conn(
+        conn: &rusqlite::Connection,
+        child_id: LineageId,
+    ) -> Result<Vec<LineageId>> {
+        let mut stmt = conn
             .prepare("SELECT parent_id FROM lineage_edges WHERE child_id = ?1")
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
@@ -203,8 +225,28 @@ impl LineageStore {
         stage: Option<PipelineStage>,
         limit: u32,
         offset: u32,
-    ) -> Result<Vec<LineageNode>> {
-        let (sql, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match stage {
+    ) -> Result<PagedResult<LineageNode>> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+
+        let total: usize = match stage {
+            Some(ref s) => conn.query_row(
+                "SELECT COUNT(*) FROM lineage_nodes WHERE tenant_id = ?1 AND stage = ?2",
+                params![tenant_id.0, s.to_string()],
+                |row| row.get::<_, i64>(0),
+            ),
+            None => conn.query_row(
+                "SELECT COUNT(*) FROM lineage_nodes WHERE tenant_id = ?1",
+                params![tenant_id.0],
+                |row| row.get::<_, i64>(0),
+            ),
+        }
+        .map(|c| c as usize)
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
+
+        let (sql, query_params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match stage {
             Some(s) => (
                 "SELECT id FROM lineage_nodes WHERE tenant_id = ?1 AND stage = ?2 ORDER BY created_at DESC LIMIT ?3 OFFSET ?4".into(),
                 vec![Box::new(tenant_id.0.clone()), Box::new(s.to_string()), Box::new(limit), Box::new(offset)],
@@ -216,12 +258,11 @@ impl LineageStore {
             ),
         };
 
-        let mut stmt = self
-            .conn
+        let mut stmt = conn
             .prepare(&sql)
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params.iter().map(|p| p.as_ref()).collect();
+            query_params.iter().map(|p| p.as_ref()).collect();
 
         let ids: Vec<LineageId> = stmt
             .query_map(param_refs.as_slice(), |row| {
@@ -233,13 +274,16 @@ impl LineageStore {
             .filter_map(|s| Uuid::parse_str(&s).ok())
             .collect();
 
-        let mut nodes = Vec::new();
+        drop(stmt);
+        drop(conn);
+
+        let mut items = Vec::new();
         for id in ids {
             if let Ok(node) = self.get(id, tenant_id) {
-                nodes.push(node);
+                items.push(node);
             }
         }
-        Ok(nodes)
+        Ok(PagedResult { items, total })
     }
 
     /// Find lineage nodes by artifact reference.
@@ -248,8 +292,11 @@ impl LineageStore {
         artifact_ref: &str,
         tenant_id: &TenantId,
     ) -> Result<Vec<LineageNode>> {
-        let mut stmt = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let mut stmt = conn
             .prepare("SELECT id FROM lineage_nodes WHERE artifact_ref = ?1 AND tenant_id = ?2")
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
@@ -263,6 +310,9 @@ impl LineageStore {
             .filter_map(|s| Uuid::parse_str(&s).ok())
             .collect();
 
+        drop(stmt);
+        drop(conn);
+
         let mut nodes = Vec::new();
         for id in ids {
             if let Ok(node) = self.get(id, tenant_id) {
@@ -270,6 +320,43 @@ impl LineageStore {
             }
         }
         Ok(nodes)
+    }
+}
+
+impl crate::storage::traits::LineageStore for LineageStore {
+    fn record(&self, node: &LineageNode, tenant_id: &TenantId) -> Result<()> {
+        self.record(node, tenant_id)
+    }
+
+    fn get(&self, id: Uuid, tenant_id: &TenantId) -> Result<LineageNode> {
+        self.get(id, tenant_id)
+    }
+
+    fn get_ancestry(
+        &self,
+        id: Uuid,
+        tenant_id: &TenantId,
+        max_depth: Option<u32>,
+    ) -> Result<Vec<LineageNode>> {
+        self.get_ancestry(id, tenant_id, max_depth)
+    }
+
+    fn list(
+        &self,
+        tenant_id: &TenantId,
+        stage: Option<PipelineStage>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<PagedResult<LineageNode>> {
+        self.list(tenant_id, stage, limit, offset)
+    }
+
+    fn find_by_artifact(
+        &self,
+        artifact_ref: &str,
+        tenant_id: &TenantId,
+    ) -> Result<Vec<LineageNode>> {
+        self.find_by_artifact(artifact_ref, tenant_id)
     }
 }
 
@@ -371,10 +458,12 @@ mod tests {
         let datasets = store
             .list(&t, Some(PipelineStage::Dataset), 100, 0)
             .unwrap();
-        assert_eq!(datasets.len(), 2);
+        assert_eq!(datasets.items.len(), 2);
+        assert_eq!(datasets.total, 2);
 
         let all = store.list(&t, None, 100, 0).unwrap();
-        assert_eq!(all.len(), 3);
+        assert_eq!(all.items.len(), 3);
+        assert_eq!(all.total, 3);
     }
 
     #[test]
@@ -409,8 +498,8 @@ mod tests {
             .record(&make_node(PipelineStage::Dataset, "d2", "d2", vec![]), &t2)
             .unwrap();
 
-        assert_eq!(store.list(&t1, None, 100, 0).unwrap().len(), 1);
-        assert_eq!(store.list(&t2, None, 100, 0).unwrap().len(), 1);
+        assert_eq!(store.list(&t1, None, 100, 0).unwrap().items.len(), 1);
+        assert_eq!(store.list(&t2, None, 100, 0).unwrap().items.len(), 1);
     }
 
     #[test]

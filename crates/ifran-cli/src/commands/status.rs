@@ -54,8 +54,8 @@ pub async fn execute() -> Result<()> {
     output::header("Models");
     let db = ModelDatabase::open(&config.storage.database)?;
     let tenant = ifran_types::TenantId::default_tenant();
-    let models = db.list(&tenant)?;
-    output::kv("Catalog", &format!("{} model(s)", models.len()));
+    let paged = db.list(&tenant, 1000, 0)?;
+    output::kv("Catalog", &format!("{} model(s)", paged.items.len()));
 
     eprintln!();
     output::header("Server");

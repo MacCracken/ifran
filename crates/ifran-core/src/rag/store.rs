@@ -1,12 +1,15 @@
 use ifran_types::IfranError;
+use ifran_types::PagedResult;
 use ifran_types::TenantId;
 use ifran_types::error::Result;
 use ifran_types::rag::{ChunkInfo, DocumentId, DocumentInfo, RagPipelineConfig, RagPipelineId};
-use rusqlite::{Connection, params};
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
+use rusqlite::params;
 use uuid::Uuid;
 
 pub struct RagStore {
-    conn: Connection,
+    pool: Pool<SqliteConnectionManager>,
 }
 
 impl RagStore {
@@ -14,27 +17,41 @@ impl RagStore {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let conn = Connection::open(path).map_err(|e| IfranError::StorageError(e.to_string()))?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")
+        let manager = SqliteConnectionManager::file(path).with_init(|conn| {
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            Ok(())
+        });
+        let pool = Pool::builder()
+            .max_size(4)
+            .build(manager)
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
-        let store = Self { conn };
+        let store = Self { pool };
         store.migrate()?;
         Ok(store)
     }
 
     #[cfg(test)]
     pub fn open_in_memory() -> Result<Self> {
-        let conn =
-            Connection::open_in_memory().map_err(|e| IfranError::StorageError(e.to_string()))?;
-        let store = Self { conn };
+        let manager = SqliteConnectionManager::memory().with_init(|conn| {
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            Ok(())
+        });
+        let pool = Pool::builder()
+            .max_size(1)
+            .build(manager)
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let store = Self { pool };
         store.migrate()?;
         Ok(store)
     }
 
     fn migrate(&self) -> Result<()> {
-        self.conn
-            .execute_batch(
-                "CREATE TABLE IF NOT EXISTS rag_pipelines (
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS rag_pipelines (
                     id          TEXT PRIMARY KEY,
                     config_json TEXT NOT NULL,
                     created_at  TEXT NOT NULL
@@ -57,18 +74,17 @@ impl RagStore {
                 );
                 CREATE INDEX IF NOT EXISTS idx_chunks_document ON rag_chunks(document_id);
                 CREATE INDEX IF NOT EXISTS idx_documents_pipeline ON rag_documents(pipeline_id);",
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
         // Add tenant_id column to rag_pipelines (idempotent — ignore if already exists)
-        let _ = self.conn.execute_batch(
+        let _ = conn.execute_batch(
             "ALTER TABLE rag_pipelines ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';",
         );
-        self.conn
-            .execute_batch(
-                "CREATE INDEX IF NOT EXISTS idx_rag_pipelines_tenant ON rag_pipelines(tenant_id);",
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_rag_pipelines_tenant ON rag_pipelines(tenant_id);",
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
         Ok(())
     }
@@ -79,15 +95,18 @@ impl RagStore {
         config: &RagPipelineConfig,
         tenant_id: &TenantId,
     ) -> Result<()> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
         let config_json =
             serde_json::to_string(config).map_err(|e| IfranError::StorageError(e.to_string()))?;
         let now = chrono::Utc::now().to_rfc3339();
-        self.conn
-            .execute(
-                "INSERT INTO rag_pipelines (id, config_json, created_at, tenant_id) VALUES (?1, ?2, ?3, ?4)",
-                params![id.to_string(), config_json, now, tenant_id.0],
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute(
+            "INSERT INTO rag_pipelines (id, config_json, created_at, tenant_id) VALUES (?1, ?2, ?3, ?4)",
+            params![id.to_string(), config_json, now, tenant_id.0],
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         Ok(())
     }
 
@@ -96,8 +115,11 @@ impl RagStore {
         id: RagPipelineId,
         tenant_id: &TenantId,
     ) -> Result<RagPipelineConfig> {
-        let mut stmt = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let mut stmt = conn
             .prepare("SELECT config_json FROM rag_pipelines WHERE id = ?1 AND tenant_id = ?2")
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
@@ -117,14 +139,28 @@ impl RagStore {
     pub fn list_pipelines(
         &self,
         tenant_id: &TenantId,
-    ) -> Result<Vec<(RagPipelineId, RagPipelineConfig)>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, config_json FROM rag_pipelines WHERE tenant_id = ?1 ORDER BY created_at DESC")
+        limit: u32,
+        offset: u32,
+    ) -> Result<PagedResult<(RagPipelineId, RagPipelineConfig)>> {
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
-        let results = stmt
-            .query_map(params![tenant_id.0], |row| {
+        let total: usize =
+            conn.query_row(
+                "SELECT COUNT(*) FROM rag_pipelines WHERE tenant_id = ?1",
+                params![tenant_id.0],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| IfranError::StorageError(e.to_string()))? as usize;
+
+        let mut stmt = conn
+            .prepare("SELECT id, config_json FROM rag_pipelines WHERE tenant_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3")
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+
+        let items = stmt
+            .query_map(params![tenant_id.0, limit, offset], |row| {
                 let id_str: String = row.get(0)?;
                 let json: String = row.get(1)?;
                 let id = Uuid::parse_str(&id_str).map_err(|e| {
@@ -147,13 +183,16 @@ impl RagStore {
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
-        Ok(results)
+        Ok(PagedResult { items, total })
     }
 
     pub fn delete_pipeline(&self, id: RagPipelineId, tenant_id: &TenantId) -> Result<()> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
         // Verify the pipeline belongs to this tenant before cascading deletes
-        let exists: bool = self
-            .conn
+        let exists: bool = conn
             .query_row(
                 "SELECT COUNT(*) FROM rag_pipelines WHERE id = ?1 AND tenant_id = ?2",
                 params![id.to_string(), tenant_id.0],
@@ -166,72 +205,78 @@ impl RagStore {
         }
 
         // Delete chunks for all documents in this pipeline
-        self.conn
-            .execute(
-                "DELETE FROM rag_chunks WHERE document_id IN (SELECT id FROM rag_documents WHERE pipeline_id = ?1)",
-                params![id.to_string()],
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute(
+            "DELETE FROM rag_chunks WHERE document_id IN (SELECT id FROM rag_documents WHERE pipeline_id = ?1)",
+            params![id.to_string()],
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         // Delete documents
-        self.conn
-            .execute(
-                "DELETE FROM rag_documents WHERE pipeline_id = ?1",
-                params![id.to_string()],
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute(
+            "DELETE FROM rag_documents WHERE pipeline_id = ?1",
+            params![id.to_string()],
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         // Delete pipeline
-        self.conn
-            .execute(
-                "DELETE FROM rag_pipelines WHERE id = ?1 AND tenant_id = ?2",
-                params![id.to_string(), tenant_id.0],
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute(
+            "DELETE FROM rag_pipelines WHERE id = ?1 AND tenant_id = ?2",
+            params![id.to_string(), tenant_id.0],
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         Ok(())
     }
 
     pub fn insert_document(&self, doc: &DocumentInfo) -> Result<()> {
-        self.conn
-            .execute(
-                "INSERT INTO rag_documents (id, pipeline_id, filename, chunk_count, ingested_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![
-                    doc.id.to_string(),
-                    doc.pipeline_id.to_string(),
-                    doc.filename,
-                    doc.chunk_count as i64,
-                    doc.ingested_at.to_rfc3339(),
-                ],
-            )
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute(
+            "INSERT INTO rag_documents (id, pipeline_id, filename, chunk_count, ingested_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                doc.id.to_string(),
+                doc.pipeline_id.to_string(),
+                doc.filename,
+                doc.chunk_count as i64,
+                doc.ingested_at.to_rfc3339(),
+            ],
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         Ok(())
     }
 
     pub fn insert_chunk(&self, chunk: &ChunkInfo) -> Result<()> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
         // Serialize embedding as bytes (4 bytes per f32)
         let embedding_bytes: Vec<u8> = chunk
             .embedding
             .iter()
             .flat_map(|f| f.to_le_bytes())
             .collect();
-        self.conn
-            .execute(
-                "INSERT INTO rag_chunks (id, document_id, content, embedding, position)
+        conn.execute(
+            "INSERT INTO rag_chunks (id, document_id, content, embedding, position)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![
-                    chunk.id.to_string(),
-                    chunk.document_id.to_string(),
-                    chunk.content,
-                    embedding_bytes,
-                    chunk.position as i64,
-                ],
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+            params![
+                chunk.id.to_string(),
+                chunk.document_id.to_string(),
+                chunk.content,
+                embedding_bytes,
+                chunk.position as i64,
+            ],
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         Ok(())
     }
 
     pub fn get_chunks_for_document(&self, document_id: DocumentId) -> Result<Vec<ChunkInfo>> {
-        let mut stmt = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let mut stmt = conn
             .prepare(
                 "SELECT id, document_id, content, embedding, position FROM rag_chunks WHERE document_id = ?1 ORDER BY position",
             )
@@ -251,8 +296,11 @@ impl RagStore {
         &self,
         pipeline_id: RagPipelineId,
     ) -> Result<Vec<ChunkInfo>> {
-        let mut stmt = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let mut stmt = conn
             .prepare(
                 "SELECT c.id, c.document_id, c.content, c.embedding, c.position
                  FROM rag_chunks c
@@ -268,6 +316,50 @@ impl RagStore {
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
         Ok(results)
+    }
+}
+
+impl crate::storage::traits::RagStore for RagStore {
+    fn create_pipeline(
+        &self,
+        id: RagPipelineId,
+        config: &RagPipelineConfig,
+        tenant_id: &TenantId,
+    ) -> Result<()> {
+        self.create_pipeline(id, config, tenant_id)
+    }
+
+    fn get_pipeline(&self, id: RagPipelineId, tenant_id: &TenantId) -> Result<RagPipelineConfig> {
+        self.get_pipeline(id, tenant_id)
+    }
+
+    fn list_pipelines(
+        &self,
+        tenant_id: &TenantId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<PagedResult<(RagPipelineId, RagPipelineConfig)>> {
+        self.list_pipelines(tenant_id, limit, offset)
+    }
+
+    fn delete_pipeline(&self, id: RagPipelineId, tenant_id: &TenantId) -> Result<()> {
+        self.delete_pipeline(id, tenant_id)
+    }
+
+    fn insert_document(&self, doc: &DocumentInfo) -> Result<()> {
+        self.insert_document(doc)
+    }
+
+    fn insert_chunk(&self, chunk: &ChunkInfo) -> Result<()> {
+        self.insert_chunk(chunk)
+    }
+
+    fn get_chunks_for_document(&self, document_id: DocumentId) -> Result<Vec<ChunkInfo>> {
+        self.get_chunks_for_document(document_id)
+    }
+
+    fn get_all_chunks_for_pipeline(&self, pipeline_id: RagPipelineId) -> Result<Vec<ChunkInfo>> {
+        self.get_all_chunks_for_pipeline(pipeline_id)
     }
 }
 
@@ -367,8 +459,8 @@ mod tests {
     fn list_pipelines_empty() {
         let store = RagStore::open_in_memory().unwrap();
         let tenant = TenantId::default_tenant();
-        let list = store.list_pipelines(&tenant).unwrap();
-        assert!(list.is_empty());
+        let list = store.list_pipelines(&tenant, 100, 0).unwrap();
+        assert!(list.items.is_empty());
     }
 
     #[test]
@@ -384,8 +476,9 @@ mod tests {
             .create_pipeline(id2, &sample_config(), &tenant)
             .unwrap();
 
-        let list = store.list_pipelines(&tenant).unwrap();
-        assert_eq!(list.len(), 2);
+        let list = store.list_pipelines(&tenant, 100, 0).unwrap();
+        assert_eq!(list.items.len(), 2);
+        assert_eq!(list.total, 2);
     }
 
     #[test]

@@ -20,9 +20,9 @@ pub async fn search(query: Option<&str>) -> ifran_types::error::Result<()> {
     };
 
     let tenant = ifran_types::TenantId::default_tenant();
-    let entries = catalog.search(&mq, &tenant)?;
+    let paged = catalog.search(&mq, &tenant, 1000, 0)?;
 
-    if entries.is_empty() {
+    if paged.items.is_empty() {
         println!("No marketplace entries found.");
         return Ok(());
     }
@@ -32,7 +32,7 @@ pub async fn search(query: Option<&str>) -> ifran_types::error::Result<()> {
         "MODEL", "FORMAT", "SIZE", "PUBLISHER"
     );
     println!("{}", "-".repeat(82));
-    for entry in &entries {
+    for entry in &paged.items {
         let size = format_size(entry.size_bytes);
         let format = serde_json::to_string(&entry.format)
             .unwrap_or_default()

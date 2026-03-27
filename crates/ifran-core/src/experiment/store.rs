@@ -1,12 +1,15 @@
 //! SQLite storage for experiment and trial results.
 
 use ifran_types::IfranError;
+use ifran_types::PagedResult;
 use ifran_types::TenantId;
 use ifran_types::error::Result;
 use ifran_types::experiment::{
     Direction, ExperimentId, ExperimentProgram, ExperimentStatus, TrialId, TrialResult, TrialStatus,
 };
-use rusqlite::{Connection, params};
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
+use rusqlite::params;
 use uuid::Uuid;
 
 /// Full experiment record returned by `get_experiment`.
@@ -24,7 +27,7 @@ pub type ExperimentSummary = (ExperimentId, String, ExperimentStatus, Option<f64
 
 /// Manages experiment and trial storage in SQLite.
 pub struct ExperimentStore {
-    conn: Connection,
+    pool: Pool<SqliteConnectionManager>,
 }
 
 impl ExperimentStore {
@@ -33,10 +36,15 @@ impl ExperimentStore {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let conn = Connection::open(path).map_err(|e| IfranError::StorageError(e.to_string()))?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")
+        let manager = SqliteConnectionManager::file(path).with_init(|conn| {
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            Ok(())
+        });
+        let pool = Pool::builder()
+            .max_size(4)
+            .build(manager)
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
-        let store = Self { conn };
+        let store = Self { pool };
         store.migrate()?;
         Ok(store)
     }
@@ -44,17 +52,26 @@ impl ExperimentStore {
     /// Create an in-memory store (for testing).
     #[cfg(test)]
     pub fn open_in_memory() -> Result<Self> {
-        let conn =
-            Connection::open_in_memory().map_err(|e| IfranError::StorageError(e.to_string()))?;
-        let store = Self { conn };
+        let manager = SqliteConnectionManager::memory().with_init(|conn| {
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            Ok(())
+        });
+        let pool = Pool::builder()
+            .max_size(1)
+            .build(manager)
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let store = Self { pool };
         store.migrate()?;
         Ok(store)
     }
 
     fn migrate(&self) -> Result<()> {
-        self.conn
-            .execute_batch(
-                "CREATE TABLE IF NOT EXISTS experiments (
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS experiments (
                     id              TEXT PRIMARY KEY,
                     name            TEXT NOT NULL,
                     program_json    TEXT NOT NULL,
@@ -81,18 +98,17 @@ impl ExperimentStore {
                 );
                 CREATE INDEX IF NOT EXISTS idx_trials_experiment
                     ON experiment_trials(experiment_id);",
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
         // Add tenant_id column to experiments (idempotent — ignore if already exists)
-        let _ = self.conn.execute_batch(
+        let _ = conn.execute_batch(
             "ALTER TABLE experiments ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';",
         );
-        self.conn
-            .execute_batch(
-                "CREATE INDEX IF NOT EXISTS idx_experiments_tenant ON experiments(tenant_id);",
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_experiments_tenant ON experiments(tenant_id);",
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
         Ok(())
     }
@@ -105,16 +121,19 @@ impl ExperimentStore {
         program: &ExperimentProgram,
         tenant_id: &TenantId,
     ) -> Result<()> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
         let program_json =
             serde_json::to_string(program).map_err(|e| IfranError::StorageError(e.to_string()))?;
         let now = chrono::Utc::now().to_rfc3339();
-        self.conn
-            .execute(
-                "INSERT INTO experiments (id, name, program_json, status, created_at, updated_at, tenant_id)
+        conn.execute(
+            "INSERT INTO experiments (id, name, program_json, status, created_at, updated_at, tenant_id)
                  VALUES (?1, ?2, ?3, 'running', ?4, ?5, ?6)",
-                params![id.to_string(), name, program_json, now, now, tenant_id.0],
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+            params![id.to_string(), name, program_json, now, now, tenant_id.0],
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         Ok(())
     }
 
@@ -125,17 +144,20 @@ impl ExperimentStore {
         status: ExperimentStatus,
         tenant_id: &TenantId,
     ) -> Result<()> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
         let status_str = serde_json::to_string(&status)
             .unwrap()
             .trim_matches('"')
             .to_string();
         let now = chrono::Utc::now().to_rfc3339();
-        self.conn
-            .execute(
-                "UPDATE experiments SET status = ?1, updated_at = ?2 WHERE id = ?3 AND tenant_id = ?4",
-                params![status_str, now, id.to_string(), tenant_id.0],
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute(
+            "UPDATE experiments SET status = ?1, updated_at = ?2 WHERE id = ?3 AND tenant_id = ?4",
+            params![status_str, now, id.to_string(), tenant_id.0],
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         Ok(())
     }
 
@@ -147,87 +169,94 @@ impl ExperimentStore {
         score: f64,
         tenant_id: &TenantId,
     ) -> Result<()> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
         let now = chrono::Utc::now().to_rfc3339();
-        self.conn
-            .execute(
-                "UPDATE experiments SET best_trial_id = ?1, best_score = ?2, updated_at = ?3 WHERE id = ?4 AND tenant_id = ?5",
-                params![trial_id.to_string(), score, now, experiment_id.to_string(), tenant_id.0],
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute(
+            "UPDATE experiments SET best_trial_id = ?1, best_score = ?2, updated_at = ?3 WHERE id = ?4 AND tenant_id = ?5",
+            params![trial_id.to_string(), score, now, experiment_id.to_string(), tenant_id.0],
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         // Mark the trial as best, unmark previous best
-        self.conn
-            .execute(
-                "UPDATE experiment_trials SET is_best = 0 WHERE experiment_id = ?1 AND trial_id != ?2",
-                params![experiment_id.to_string(), trial_id.to_string()],
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
-        self.conn
-            .execute(
-                "UPDATE experiment_trials SET is_best = 1 WHERE trial_id = ?1",
-                params![trial_id.to_string()],
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute(
+            "UPDATE experiment_trials SET is_best = 0 WHERE experiment_id = ?1 AND trial_id != ?2",
+            params![experiment_id.to_string(), trial_id.to_string()],
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute(
+            "UPDATE experiment_trials SET is_best = 1 WHERE trial_id = ?1",
+            params![trial_id.to_string()],
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         Ok(())
     }
 
     /// Insert a new trial.
     pub fn insert_trial(&self, trial: &TrialResult) -> Result<()> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
         let hp_json = serde_json::to_string(&trial.hyperparams)
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
         let status_str = serde_json::to_string(&trial.status)
             .unwrap()
             .trim_matches('"')
             .to_string();
-        self.conn
-            .execute(
-                "INSERT INTO experiment_trials
+        conn.execute(
+            "INSERT INTO experiment_trials
                     (trial_id, experiment_id, trial_number, hyperparams_json, train_loss,
                      eval_score, status, duration_secs, started_at, completed_at,
                      checkpoint_path, is_best)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-                params![
-                    trial.trial_id.to_string(),
-                    trial.experiment_id.to_string(),
-                    trial.trial_number,
-                    hp_json,
-                    trial.train_loss,
-                    trial.eval_score,
-                    status_str,
-                    trial.duration_secs,
-                    trial.started_at.map(|t| t.to_rfc3339()),
-                    trial.completed_at.map(|t| t.to_rfc3339()),
-                    trial.checkpoint_path,
-                    trial.is_best as i32,
-                ],
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+            params![
+                trial.trial_id.to_string(),
+                trial.experiment_id.to_string(),
+                trial.trial_number,
+                hp_json,
+                trial.train_loss,
+                trial.eval_score,
+                status_str,
+                trial.duration_secs,
+                trial.started_at.map(|t| t.to_rfc3339()),
+                trial.completed_at.map(|t| t.to_rfc3339()),
+                trial.checkpoint_path,
+                trial.is_best as i32,
+            ],
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         Ok(())
     }
 
     /// Update an existing trial.
     pub fn update_trial(&self, trial: &TrialResult) -> Result<()> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
         let status_str = serde_json::to_string(&trial.status)
             .unwrap()
             .trim_matches('"')
             .to_string();
-        self.conn
-            .execute(
-                "UPDATE experiment_trials SET
+        conn.execute(
+            "UPDATE experiment_trials SET
                     train_loss = ?1, eval_score = ?2, status = ?3,
                     duration_secs = ?4, completed_at = ?5, checkpoint_path = ?6, is_best = ?7
                  WHERE trial_id = ?8",
-                params![
-                    trial.train_loss,
-                    trial.eval_score,
-                    status_str,
-                    trial.duration_secs,
-                    trial.completed_at.map(|t| t.to_rfc3339()),
-                    trial.checkpoint_path,
-                    trial.is_best as i32,
-                    trial.trial_id.to_string(),
-                ],
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+            params![
+                trial.train_loss,
+                trial.eval_score,
+                status_str,
+                trial.duration_secs,
+                trial.completed_at.map(|t| t.to_rfc3339()),
+                trial.checkpoint_path,
+                trial.is_best as i32,
+                trial.trial_id.to_string(),
+            ],
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         Ok(())
     }
 
@@ -237,8 +266,11 @@ impl ExperimentStore {
         id: ExperimentId,
         tenant_id: &TenantId,
     ) -> Result<ExperimentRecord> {
-        let mut stmt = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let mut stmt = conn
             .prepare("SELECT id, name, program_json, status, best_trial_id, best_score FROM experiments WHERE id = ?1 AND tenant_id = ?2")
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
@@ -280,16 +312,33 @@ impl ExperimentStore {
     }
 
     /// List all experiments.
-    pub fn list_experiments(&self, tenant_id: &TenantId) -> Result<Vec<ExperimentSummary>> {
-        let mut stmt = self
-            .conn
+    pub fn list_experiments(
+        &self,
+        tenant_id: &TenantId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<PagedResult<ExperimentSummary>> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+
+        let total: usize =
+            conn.query_row(
+                "SELECT COUNT(*) FROM experiments WHERE tenant_id = ?1",
+                params![tenant_id.0],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| IfranError::StorageError(e.to_string()))? as usize;
+
+        let mut stmt = conn
             .prepare(
-                "SELECT id, name, status, best_score FROM experiments WHERE tenant_id = ?1 ORDER BY created_at DESC",
+                "SELECT id, name, status, best_score FROM experiments WHERE tenant_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
             )
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
-        let results = stmt
-            .query_map(params![tenant_id.0], |row| {
+        let items = stmt
+            .query_map(params![tenant_id.0, limit, offset], |row| {
                 let id_str: String = row.get(0)?;
                 let name: String = row.get(1)?;
                 let status_str: String = row.get(2)?;
@@ -317,7 +366,7 @@ impl ExperimentStore {
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
-        Ok(results)
+        Ok(PagedResult { items, total })
     }
 
     /// Get all trials for an experiment.
@@ -329,8 +378,11 @@ impl ExperimentStore {
         // Verify the experiment belongs to this tenant
         let _ = self.get_experiment(experiment_id, tenant_id)?;
 
-        let mut stmt = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let mut stmt = conn
             .prepare(
                 "SELECT trial_id, experiment_id, trial_number, hyperparams_json, train_loss,
                         eval_score, status, duration_secs, started_at, completed_at,
@@ -375,8 +427,11 @@ impl ExperimentStore {
              LIMIT ?2"
         );
 
-        let mut stmt = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let mut stmt = conn
             .prepare(&sql)
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
@@ -390,6 +445,76 @@ impl ExperimentStore {
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
         Ok(results)
+    }
+}
+
+impl crate::storage::traits::ExperimentStore for ExperimentStore {
+    fn insert_experiment(
+        &self,
+        id: ExperimentId,
+        name: &str,
+        program: &ExperimentProgram,
+        tenant_id: &TenantId,
+    ) -> Result<()> {
+        self.insert_experiment(id, name, program, tenant_id)
+    }
+
+    fn update_experiment_status(
+        &self,
+        id: ExperimentId,
+        status: ExperimentStatus,
+        tenant_id: &TenantId,
+    ) -> Result<()> {
+        self.update_experiment_status(id, status, tenant_id)
+    }
+
+    fn update_best_trial(
+        &self,
+        experiment_id: ExperimentId,
+        trial_id: TrialId,
+        score: f64,
+        tenant_id: &TenantId,
+    ) -> Result<()> {
+        self.update_best_trial(experiment_id, trial_id, score, tenant_id)
+    }
+
+    fn insert_trial(&self, trial: &TrialResult) -> Result<()> {
+        self.insert_trial(trial)
+    }
+
+    fn update_trial(&self, trial: &TrialResult) -> Result<()> {
+        self.update_trial(trial)
+    }
+
+    fn get_experiment(&self, id: ExperimentId, tenant_id: &TenantId) -> Result<ExperimentRecord> {
+        self.get_experiment(id, tenant_id)
+    }
+
+    fn list_experiments(
+        &self,
+        tenant_id: &TenantId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<PagedResult<ExperimentSummary>> {
+        self.list_experiments(tenant_id, limit, offset)
+    }
+
+    fn get_trials(
+        &self,
+        experiment_id: ExperimentId,
+        tenant_id: &TenantId,
+    ) -> Result<Vec<TrialResult>> {
+        self.get_trials(experiment_id, tenant_id)
+    }
+
+    fn get_leaderboard(
+        &self,
+        experiment_id: ExperimentId,
+        direction: Direction,
+        limit: usize,
+        tenant_id: &TenantId,
+    ) -> Result<Vec<TrialResult>> {
+        self.get_leaderboard(experiment_id, direction, limit, tenant_id)
     }
 }
 
@@ -591,8 +716,9 @@ mod tests {
             .insert_experiment(Uuid::new_v4(), "exp-2", &sample_program(), &tenant)
             .unwrap();
 
-        let list = store.list_experiments(&tenant).unwrap();
-        assert_eq!(list.len(), 2);
+        let list = store.list_experiments(&tenant, 100, 0).unwrap();
+        assert_eq!(list.items.len(), 2);
+        assert_eq!(list.total, 2);
     }
 
     #[test]

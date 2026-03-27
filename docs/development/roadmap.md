@@ -38,17 +38,17 @@ Current: **1,406 tests** across 7 crates. CI threshold: 65%.
 
 ## Performance & Memory
 
-- [ ] **Fleet list pagination** — `GET /fleet/nodes` returns all nodes unbounded; add `limit`/`offset` using the existing pagination module
-- [ ] **Marketplace list pagination** — `GET /marketplace/entries` and `GET /marketplace/search` return unbounded results; add pagination
-- [ ] **RLHF / RAG / Experiment list pagination** — `GET /rlhf/sessions`, `GET /rag/pipelines`, `GET /experiments` lack pagination; wire in `PaginatedResponse`
-- [ ] **SQLite connection pooling** — each store holds a single `Connection` behind a Mutex; evaluate `r2d2-sqlite` for higher throughput under concurrent load
+- [x] **SQL-level pagination on all list endpoints** — marketplace, RLHF, RAG, experiment, tenant, lineage, version, model list endpoints now push `LIMIT`/`OFFSET` + `COUNT(*)` to SQL; handlers use `PaginatedResponse::pre_sliced()`
+- [ ] **Fleet list pagination** — `GET /fleet/nodes` still uses in-memory pagination (FleetManager is not DB-backed)
+- [x] **SQLite connection pooling** — all stores use `r2d2_sqlite` connection pools (max 4 conns); `tokio::Mutex` removed from `AppState` — concurrent requests use separate pool connections
+- [x] **Swappable DB backend** — store traits defined in `ifran_core::storage::traits`; SQLite implementations can be swapped for Postgres or other backends
 - [ ] **Rate limiter IP eviction** — solved by majra migration (stale-key eviction built in)
 
 ## Observability
 
 - [ ] **Request / correlation ID** — inject a unique ID per request (from header or generated), propagate through tracing spans, return in response headers for distributed tracing
 - [ ] **Prometheus metrics endpoint** — add `GET /metrics` exposing request latency histograms, job queue depth gauges, model load/unload counters, rate limiter rejection counts
-- [ ] **Benchmark suite** — CI job exists but no Criterion benchmarks are defined; add benchmarks for inference latency, model pull throughput, and training scheduling
+- [x] **Benchmark suite** — Criterion benchmarks in `ifran-core` (cosine similarity, memory estimation, cache ops, eval scoring); `scripts/bench-history.sh` tracks CSV history
 
 ## Testing
 

@@ -2,7 +2,6 @@ use ifran_types::error::Result;
 use ifran_types::experiment::ExperimentId;
 /// Autonomous experiment commands — run hyperparameter sweeps, view leaderboards.
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 /// Run an experiment from a TOML program file.
 pub async fn run(program_path: &str) -> Result<()> {
@@ -45,7 +44,7 @@ pub async fn run(program_path: &str) -> Result<()> {
     ));
 
     let store_path = config.storage.database.with_file_name("experiments.db");
-    let store = Arc::new(Mutex::new(ExperimentStore::open(&store_path)?));
+    let store = Arc::new(ExperimentStore::open(&store_path)?);
 
     let handle = ExperimentRunner::start(job_manager, store.clone(), program).await?;
     eprintln!("Experiment started: {}", handle.experiment_id);
@@ -57,9 +56,8 @@ pub async fn run(program_path: &str) -> Result<()> {
     // Wait for completion by polling
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-        let s = store.lock().await;
         let tenant = ifran_types::TenantId::default_tenant();
-        match s.get_experiment(handle.experiment_id, &tenant) {
+        match store.get_experiment(handle.experiment_id, &tenant) {
             Ok((_, _, _, status, _, best_score)) => {
                 use ifran_types::experiment::ExperimentStatus;
                 match status {
@@ -108,16 +106,16 @@ pub async fn list() -> Result<()> {
 
     let store = ExperimentStore::open(&store_path)?;
     let tenant = ifran_types::TenantId::default_tenant();
-    let experiments = store.list_experiments(&tenant)?;
+    let paged = store.list_experiments(&tenant, 100, 0)?;
 
-    if experiments.is_empty() {
+    if paged.items.is_empty() {
         eprintln!("No experiments found.");
         return Ok(());
     }
 
     eprintln!("{:<36}  {:<20}  {:<10}  BEST SCORE", "ID", "NAME", "STATUS");
     eprintln!("{}", "-".repeat(80));
-    for (id, name, status, best_score) in experiments {
+    for (id, name, status, best_score) in paged.items {
         let score_str = best_score
             .map(|s| format!("{s:.4}"))
             .unwrap_or_else(|| "—".into());
@@ -188,11 +186,11 @@ pub async fn status(id: Option<&str>) -> Result<()> {
         }
     } else {
         // Show latest experiment
-        let experiments = store.list_experiments(&tenant)?;
-        if experiments.is_empty() {
+        let paged = store.list_experiments(&tenant, 1, 0)?;
+        if paged.items.is_empty() {
             eprintln!("No experiments found.");
         } else {
-            let (id, name, exp_status, best_score) = &experiments[0];
+            let (id, name, exp_status, best_score) = &paged.items[0];
             eprintln!("Latest experiment: {name} ({id})");
             eprintln!("Status: {exp_status:?}");
             if let Some(score) = best_score {

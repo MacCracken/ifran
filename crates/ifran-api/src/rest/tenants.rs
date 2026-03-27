@@ -39,7 +39,6 @@ pub async fn create_tenant(
         "Tenant store not initialized".into(),
     ))?;
 
-    let store = store.lock().await;
     let (record, raw_key) = store.create_tenant(&req.name).map_err(|e| {
         tracing::error!(error = %e, "internal error");
         (
@@ -71,8 +70,7 @@ pub async fn list_tenants(
         "Tenant store not initialized".into(),
     ))?;
 
-    let store = store.lock().await;
-    let tenants = store.list_tenants().map_err(|e| {
+    let paged = store.list_tenants(1000, 0).map_err(|e| {
         tracing::error!(error = %e, "internal error");
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -81,7 +79,8 @@ pub async fn list_tenants(
     })?;
 
     Ok(Json(
-        tenants
+        paged
+            .items
             .into_iter()
             .map(|r| TenantResponse {
                 id: r.id.0,
@@ -104,12 +103,9 @@ pub async fn disable_tenant(
     ))?;
 
     let tenant_id = ifran_types::TenantId(id);
-    let store = store.lock().await;
     store
         .disable_tenant(&tenant_id)
         .map_err(|_| (StatusCode::NOT_FOUND, "Not found".into()))?;
-    // Release the lock before cancelling jobs (may take time)
-    drop(store);
 
     // Cancel all in-flight training jobs for this tenant
     if let Err(e) = state.job_manager.cancel_tenant_jobs(&tenant_id).await {

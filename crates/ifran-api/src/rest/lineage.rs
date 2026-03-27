@@ -8,7 +8,7 @@ use ifran_types::TenantId;
 use ifran_types::lineage::{LineageNode, PipelineStage};
 use serde::Deserialize;
 
-use super::pagination::{PaginatedResponse, PaginationInfo};
+use super::pagination::PaginatedResponse;
 
 #[derive(Deserialize)]
 pub struct RecordRequest {
@@ -59,7 +59,6 @@ pub async fn record_node(
         created_at: chrono::Utc::now(),
     };
 
-    let store = store.lock().await;
     store.record(&node, &tenant_id).map_err(|e| {
         tracing::error!(error = %e, "internal error");
         (
@@ -89,9 +88,8 @@ pub async fn list_nodes(
         "Lineage store not initialized".into(),
     ))?;
 
-    let store = store.lock().await;
     let safe_limit = query.limit.min(1000);
-    let nodes = store
+    let paged = store
         .list(&tenant_id, query.stage, safe_limit, query.offset)
         .map_err(|e| {
             tracing::error!(error = %e, "internal error");
@@ -101,14 +99,13 @@ pub async fn list_nodes(
             )
         })?;
 
-    Ok(Json(PaginatedResponse {
-        data: nodes.iter().map(node_to_json).collect(),
-        pagination: PaginationInfo {
-            total: nodes.len(),
-            limit: safe_limit,
-            offset: query.offset,
-        },
-    }))
+    let data: Vec<serde_json::Value> = paged.items.iter().map(node_to_json).collect();
+    Ok(Json(PaginatedResponse::pre_sliced(
+        data,
+        paged.total,
+        safe_limit,
+        query.offset,
+    )))
 }
 
 /// GET /lineage/:id — get a lineage node with its parents.
@@ -122,7 +119,6 @@ pub async fn get_node(
         "Lineage store not initialized".into(),
     ))?;
 
-    let store = store.lock().await;
     let node = store
         .get(id, &tenant_id)
         .map_err(|_| (StatusCode::NOT_FOUND, "Not found".into()))?;
@@ -148,7 +144,6 @@ pub async fn get_ancestry(
         "Lineage store not initialized".into(),
     ))?;
 
-    let store = store.lock().await;
     let nodes = store
         .get_ancestry(id, &tenant_id, query.max_depth)
         .map_err(|e| {
