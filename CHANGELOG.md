@@ -5,6 +5,26 @@ All notable changes to Ifran will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 
+## [2026.3.26]
+
+### Changed
+
+#### Dependencies
+- Bumped OpenTelemetry suite from 0.27 to 0.31 (`opentelemetry`, `opentelemetry_sdk`, `opentelemetry-otlp`); `tracing-opentelemetry` 0.28 to 0.32
+- Bumped tonic/tonic-build from 0.12 to 0.14; prost from 0.13 to 0.14; added `tonic-prost` and `tonic-prost-build` for the split codegen
+- Bumped reqwest from 0.12 to 0.13 (feature rename: `rustls-tls` to `rustls`, added `query`)
+- Bumped rusqlite from 0.32 to 0.39
+- Bumped toml from 0.8 to 1, indicatif from 0.17 to 0.18, ai-hwaccel from 0.19.3 to 0.23
+- Switched majra from path dependency to crates.io registry (`1.0.1`)
+- Patched rustls-webpki 0.103.9 to 0.103.10 (RUSTSEC-2026-0049 CRL advisory)
+
+#### Build
+- Updated Docker builder image from `rust:1.85-bookworm` to `rust:1.89-bookworm` (required by majra 1.0.1 MSRV)
+- Migrated `ifran-types` build script from `tonic_build::compile_protos` to `tonic_prost_build::compile_protos`
+
+### Fixed
+- Non-exhaustive match on `majra::heartbeat::Status` in fleet manager
+
 ## [2026.3.19]
 
 ### Changed
