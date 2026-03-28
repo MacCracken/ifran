@@ -5,6 +5,63 @@ All notable changes to Ifran will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
 
+## [2026.3.28]
+
+### Changed
+
+#### Architecture — Flat Crate
+- Restructured from 8-crate workspace (`ifran-types`, `ifran-core`, `ifran-backends`, `ifran-train`, `ifran-api`, `ifran-bridge`, `ifran-cli`) into a single flat crate with `src/lib.rs` + two binaries (`ifran-server`, `ifran`)
+- Module layout: `types/`, `backends/`, `train/`, `bridge/`, `server/`, `cli/` + 20 top-level domain modules from ifran-core
+- Feature-gated `server` module: `axum`, `tower`, `tonic`, `prost`, `hoosh`, `prometheus`, `async-stream` are now optional deps behind `server` feature (included in default)
+- Switched `hoosh` from local path dependency to crates.io `1.0.0`
+
+#### Hoosh Integration
+- **CLI `run` command**: Replaced direct `LlamaCppBackend` with `hoosh::HooshClient` for inference routing — supports streaming, multi-provider, gateway health checks
+- **Server inference cache**: Added `hoosh::ResponseCache` (1000 entries, 5-min TTL) — cache key includes model, prompt, max_tokens, temperature, top_p, top_k, system_prompt
+- **Server token budget**: Added `hoosh::TokenBudget` with per-tenant pools created on demand — gated behind `config.budget.enabled`
+- **System status**: `GET /system/status` now includes `inference_cache` stats (entries, hits, misses, hit_rate) and `token_budget` per-pool info
+
+### Fixed
+
+#### Security
+- **NaN/Infinity validation bypass**: `HyperParams::validate()` now rejects NaN and Infinity for `learning_rate` and `weight_decay`
+- **Timing-safe auth**: API key comparison uses constant-time XOR fold to prevent timing side-channel
+- **SSRF protection**: `POST /marketplace/pull` rejects URLs pointing to localhost, private networks (10.x, 172.16-31.x, 192.168.x), and metadata endpoints (169.254.169.254)
+- **Docker path traversal**: Training executor validates dataset paths are absolute without `..` components before mounting
+- **Checkpoint path traversal**: `CheckpointStore::prune()` validates checkpoint paths are within root directory before deleting
+- **Content-disposition injection**: Sanitized filename in marketplace download header (strips `"`, `\n`, `\r`)
+- **Auth probe endpoints**: `/ready` and `/metrics` now skip auth like `/health` (for load balancer probes)
+- **Inference model fallback removed**: `POST /inference` and `/v1/chat/completions` now return 400 instead of silently using a different model when the requested model isn't loaded
+- **Streaming budget bypass**: `POST /inference/stream` now checks token budget before streaming (was previously unchecked)
+
+#### Correctness
+- **3 panic fixes**: CLI `truncate()` on multi-byte UTF-8 and max=0; `Table::print()` with zero headers (usize underflow); `ReplayBuffer::add()` with zero capacity
+- **10 unwrap() removals**: Replaced with proper error propagation in `experiment/store.rs`, `storage/db.rs`, `dataset/processor.rs`, `dataset/labeler.rs`
+- **Version lineage cycle detection**: `get_lineage()` uses `HashSet` to break cycles + 1000-depth safety limit
+- **LlamaCpp port overflow**: `allocate_port()` wraps at 65000 back to base port 8430
+- **LlamaCpp process leak**: Spawned process killed on `wait_for_ready()` failure
+- **RLHF session name**: `create_session` now uses trimmed name (was using untrimmed `req.name`)
+- **Cache invalidation**: Inference cache cleared on model deletion
+- **Budget config respected**: Token budget enforcement gated behind `config.budget.enabled` (was always-on)
+- **Per-tenant budgets**: Token pools scoped to tenant ID (was shared "default" pool)
+
+### Performance
+- **Cache O(1) total_bytes**: `ModelCache` tracks running total instead of O(n) recomputation — cache_insert_100: −36%, cache_insert_with_eviction: −51%
+- **Float accumulation fix**: `ParamValues::Range::expand()` uses index-based computation (`min + i * step`) instead of accumulated `v += step`
+- **Trigram scoring**: Pre-lowercase words, reuse `String` buffer with `write!` instead of per-trigram `format!`
+- **Vec::with_capacity**: Added to 5 eval runner methods and registry discovery
+- **ReplayBuffer O(1)**: Switched from `Vec::remove(0)` (O(n)) to `VecDeque::pop_front()` (O(1))
+- **Backend DRY extraction**: Created `openai_compat` shared module — eliminated ~3,000 lines of duplicated code across 12 backends (`build_openai_messages`, `parse_openai_response`, `stream_openai_sse`)
+
+### Added
+- `#[non_exhaustive]` on 12 public enums (3 in core, 7 in train, 2 in bridge)
+- `#[must_use]` on ~50 pure functions across all modules
+- `#[inline]` on ~20 hot-path functions
+- `Hash` derive on 21 `PartialEq+Eq` enums; `PartialEq+Eq` on `FinishReason`
+- `HyperParams::validate()` now checks `gradient_accumulation_steps > 0` and `weight_decay >= 0`
+- Tests: UTF-8 truncate, zero-capacity buffer, NaN/Infinity hyperparams, zero gradient accumulation, negative weight decay (1,444 total, up from 1,430)
+- `benchmarks.md`: 3-point trend tracking with P(-1) audit results
+
 ## [2026.3.26]
 
 ### Changed
