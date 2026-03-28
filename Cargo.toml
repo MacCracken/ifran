@@ -143,6 +143,11 @@ http-body-util = "0.1"
 name = "core_benchmarks"
 harness = false
 
+[[bench]]
+name = "server_benchmarks"
+harness = false
+required-features = ["server"]
+
 [lints.clippy]
 collapsible_if = "allow"
 

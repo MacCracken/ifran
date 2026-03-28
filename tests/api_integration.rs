@@ -60,6 +60,29 @@ fn test_app() -> (axum::Router, tempfile::TempDir) {
     (app, tmp)
 }
 
+/// Build a test router with single-tenant auth enabled via IFRAN_API_KEY.
+fn test_app_with_auth(api_key: &str) -> (axum::Router, tempfile::TempDir) {
+    unsafe { std::env::set_var("IFRAN_API_KEY", api_key) };
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut config = test_config(&tmp);
+    config.security.auth_required = true;
+    let state = AppState::new(config).unwrap();
+    let app = ifran::server::router::build(state);
+    (app, tmp)
+}
+
+/// Build a test router with multi-tenant auth enabled.
+fn test_app_multi_tenant() -> (axum::Router, tempfile::TempDir) {
+    // Clear single-tenant key so multi-tenant path is used
+    unsafe { std::env::remove_var("IFRAN_API_KEY") };
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut config = test_config(&tmp);
+    config.security.multi_tenant = true;
+    let state = AppState::new(config).unwrap();
+    let app = ifran::server::router::build(state);
+    (app, tmp)
+}
+
 /// Insert a test model into the database.
 fn insert_test_model(db_path: &std::path::Path) -> ModelInfo {
     let db = ModelDatabase::open(db_path).unwrap();
