@@ -21,6 +21,24 @@ pub async fn metrics(
     ),
     (StatusCode, String),
 > {
+    // Refresh gauge values before gathering.
+    let m = &state.metrics;
+
+    let loaded = state.model_manager.list_loaded(None).await.len();
+    m.loaded_models.set(loaded as i64);
+
+    let running = state.job_manager.running_count().await;
+    m.active_training_jobs.set(running as i64);
+
+    let queued = state.job_manager.queued_count().await;
+    m.queued_training_jobs.set(queued as i64);
+
+    let cache_stats = state.inference_cache.stats();
+    m.cache_hit_rate.set(cache_stats.hit_rate);
+
+    let fleet_stats = state.fleet_manager.stats().await;
+    m.fleet_nodes.set(fleet_stats.total_nodes as i64);
+
     let encoder = prometheus::TextEncoder::new();
     let metric_families = state.prometheus_registry.gather();
     let mut buffer = String::new();

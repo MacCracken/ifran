@@ -13,6 +13,7 @@ use crate::lineage::store::LineageStore;
 use crate::marketplace::catalog::MarketplaceCatalog;
 use crate::rag::store::RagStore;
 use crate::rlhf::store::AnnotationStore;
+use crate::server::metrics::Metrics;
 use crate::storage::db::ModelDatabase;
 use crate::tenant::store::TenantStore;
 use crate::train::dataset::labeler::AutoLabeler;
@@ -60,6 +61,9 @@ pub struct AppState {
     pub telemetry: Option<Arc<TelemetryLoop>>,
     pub fleet_manager: Arc<FleetManager>,
     pub prometheus_registry: Arc<prometheus::Registry>,
+
+    /// Prometheus metric handles for the application.
+    pub metrics: Arc<Metrics>,
 
     /// Inference response cache for deduplication.
     pub inference_cache: Arc<hoosh::ResponseCache>,
@@ -151,6 +155,7 @@ impl AppState {
         };
 
         let prometheus_registry = Arc::new(prometheus::Registry::new());
+        let metrics = Arc::new(Metrics::register(&prometheus_registry));
 
         // Fleet manager
         let fleet_manager = FleetManager::new(
@@ -277,6 +282,7 @@ impl AppState {
             telemetry,
             fleet_manager: Arc::new(fleet_manager),
             prometheus_registry,
+            metrics,
             inference_cache,
             token_budget: Arc::new(Mutex::new(token_budget)),
             hoosh_router,

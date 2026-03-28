@@ -1,5 +1,6 @@
 //! Top-level REST API router that mounts all route groups.
 
+use crate::server::metrics::Metrics;
 use crate::server::middleware;
 use crate::server::rest::{
     bridge, datasets, distributed, eval, experiment, fleet, inference, lineage, marketplace,
@@ -7,8 +8,13 @@ use crate::server::rest::{
 };
 use crate::server::state::AppState;
 use axum::Router;
+use axum::extract::{Request, State};
+use axum::http::StatusCode;
 use axum::middleware as axum_mw;
+use axum::middleware::Next;
+use axum::response::Response;
 use axum::routing::{delete, get, post};
+use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 
@@ -17,6 +23,10 @@ pub fn build(state: AppState) -> Router {
     let limiter = middleware::rate_limit::build_limiter(
         state.config.security.rate_limit_per_second,
         state.config.security.rate_limit_burst,
+    );
+    limiter.start_eviction_loop(
+        std::time::Duration::from_secs(300), // evict IPs idle for 5 minutes
+        std::time::Duration::from_secs(60),  // run eviction every minute
     );
 
     // Admin routes (multi-tenant only) — separate auth via IFRAN_ADMIN_KEY
@@ -196,23 +206,50 @@ pub fn build(state: AppState) -> Router {
             state.clone(),
             middleware::auth::require_auth,
         ))
-        // 2. CORS
+        // 2. Request ID (generates/propagates correlation IDs)
+        .layer(axum_mw::from_fn(middleware::request_id::inject_request_id))
+        // 3. CORS
         .layer(build_cors_layer(
             &state.config.security.cors_allowed_origins,
         ))
-        // 3. Body size limit
+        // 4. Body size limit
         .layer(RequestBodyLimitLayer::new(
             state.config.security.max_body_size_bytes,
         ))
-        // 4. Telemetry
+        // 5. Telemetry
         .layer(middleware::telemetry::layer())
-        // 5. Rate limiting (outermost — runs first, protects against flood)
+        // 6. Rate limiting (runs before most layers, protects against flood)
         .layer(axum_mw::from_fn_with_state(
             limiter,
             middleware::rate_limit::rate_limit,
         ))
+        // 7. Prometheus metrics (outermost — captures all requests including 429s)
+        .layer(axum_mw::from_fn_with_state(
+            state.metrics.clone(),
+            track_metrics,
+        ))
         // State
         .with_state(state)
+}
+
+/// Middleware that records Prometheus request metrics.
+///
+/// Tracks request duration, total request count, and rate-limit rejections
+/// (by inspecting the response status for 429).
+#[inline]
+async fn track_metrics(State(metrics): State<Arc<Metrics>>, req: Request, next: Next) -> Response {
+    let start = std::time::Instant::now();
+    let response = next.run(req).await;
+    let duration = start.elapsed().as_secs_f64();
+
+    metrics.request_duration.observe(duration);
+    metrics.requests_total.inc();
+
+    if response.status() == StatusCode::TOO_MANY_REQUESTS {
+        metrics.rate_limit_rejections.inc();
+    }
+
+    response
 }
 
 /// Build a CORS layer from configured allowed origins.

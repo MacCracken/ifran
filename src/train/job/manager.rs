@@ -276,6 +276,16 @@ impl JobManager {
             .count()
     }
 
+    /// Count of currently queued jobs.
+    pub async fn queued_count(&self) -> usize {
+        self.jobs
+            .read()
+            .await
+            .values()
+            .filter(|j| j.status == TrainingStatus::Queued)
+            .count()
+    }
+
     /// Update progress for a job (called by executor callbacks).
     pub async fn update_progress(&self, id: TrainingJobId, step: u64, epoch: f32, loss: f64) {
         let mut jobs = self.jobs.write().await;

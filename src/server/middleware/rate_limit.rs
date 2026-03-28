@@ -36,6 +36,33 @@ impl SharedLimiter {
         }
     }
 
+    /// Spawn a background task that periodically evicts stale IP buckets.
+    ///
+    /// `max_idle` — buckets idle longer than this are removed.
+    /// `interval` — how often the eviction sweep runs.
+    pub fn start_eviction_loop(
+        &self,
+        max_idle: std::time::Duration,
+        interval: std::time::Duration,
+    ) {
+        let limiter = self.inner.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval);
+            loop {
+                ticker.tick().await;
+                let evicted = limiter.evict_stale(max_idle);
+                if evicted > 0 {
+                    tracing::debug!(evicted, "Rate limiter: evicted stale IP buckets");
+                }
+            }
+        });
+    }
+
+    /// Return statistics from the underlying rate limiter.
+    pub fn stats(&self) -> majra::ratelimit::RateLimitStats {
+        self.inner.stats()
+    }
+
     pub fn check_namespaced(&self, key: &str, namespace: Option<&Namespace>) -> bool {
         let namespaced_key = match namespace {
             Some(ns) => ns.key(key),
@@ -122,6 +149,41 @@ mod tests {
         let limiter = build_limiter(1, 1);
         assert!(limiter.check_namespaced("10.0.0.1", None));
         assert!(!limiter.check_namespaced("10.0.0.1", None));
+    }
+
+    #[tokio::test]
+    async fn eviction_loop_removes_stale_keys() {
+        let limiter = build_limiter(100, 100);
+        let ip = IpAddr::from([192, 168, 1, 1]);
+
+        // Create a bucket entry
+        assert!(limiter.check_ip(ip).is_ok());
+        let before = limiter.stats();
+        assert!(before.active_keys >= 1);
+
+        // Start eviction with a very short max_idle so the entry is immediately stale
+        limiter.start_eviction_loop(
+            std::time::Duration::from_millis(1),
+            std::time::Duration::from_millis(10),
+        );
+
+        // Give the eviction loop time to run
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let after = limiter.stats();
+        assert_eq!(
+            after.active_keys, 0,
+            "stale buckets should have been evicted"
+        );
+    }
+
+    #[test]
+    fn stats_returns_data() {
+        let limiter = build_limiter(10, 10);
+        let ip = IpAddr::from([10, 0, 0, 1]);
+        assert!(limiter.check_ip(ip).is_ok());
+        let stats = limiter.stats();
+        assert!(stats.active_keys >= 1);
     }
 
     #[test]
