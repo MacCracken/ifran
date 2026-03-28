@@ -8,6 +8,7 @@ use std::time::Duration;
 
 /// Connection state between Ifran and SecureYeoman.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ConnectionState {
     Disconnected,
     Connecting,

@@ -35,6 +35,7 @@ impl DistributedWorker {
     ///
     /// These get appended to the base training command so the script knows
     /// its rank, world size, and parallelism strategy.
+    #[must_use]
     pub fn extra_args(&self, world_size: u32) -> Vec<String> {
         vec![
             "--rank".into(),
@@ -76,6 +77,8 @@ impl DistributedWorker {
     }
 
     /// Whether this worker is the coordinator (rank 0).
+    #[must_use]
+    #[inline]
     pub fn is_coordinator(&self) -> bool {
         self.assignment.rank == 0
     }

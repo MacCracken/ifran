@@ -49,6 +49,8 @@ impl JobScheduler {
 
     /// Number of jobs waiting (approximate — includes cancelled entries
     /// not yet drained).
+    #[must_use]
+    #[inline]
     pub fn pending_count(&self) -> usize {
         self.queue.len().saturating_sub(self.cancelled.len())
     }

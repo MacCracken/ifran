@@ -30,6 +30,7 @@ pub struct BenchmarkScore {
 /// Compares model outputs to expected outputs, returning the fraction
 /// of exact matches (case-insensitive, trimmed).
 #[inline]
+#[must_use]
 pub fn score_exact_match(predictions: &[(String, String)]) -> f64 {
     if predictions.is_empty() {
         return 0.0;
@@ -59,6 +60,7 @@ fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
 ///
 /// Checks if the model output contains the expected answer.
 #[inline]
+#[must_use]
 pub fn score_contains_match(predictions: &[(String, String)]) -> f64 {
     if predictions.is_empty() {
         return 0.0;
@@ -73,6 +75,7 @@ pub fn score_contains_match(predictions: &[(String, String)]) -> f64 {
 /// Score MMLU-style multiple-choice: extract first letter (A/B/C/D) from
 /// model output and compare to expected answer letter.
 #[inline]
+#[must_use]
 pub fn score_mmlu(predictions: &[(String, String)]) -> f64 {
     if predictions.is_empty() {
         return 0.0;
@@ -136,6 +139,7 @@ fn extract_answer_letter(text: &str) -> Option<char> {
 /// Since we don't have token-level log-probs, we approximate by checking
 /// whether the model can reproduce segments of text. Lower score = better.
 /// Returns the inverse of the average contains-match rate, bounded to [1.0, 1000.0].
+#[must_use]
 pub fn score_perplexity(predictions: &[(String, String)]) -> f64 {
     if predictions.is_empty() {
         return 1000.0;
@@ -149,6 +153,7 @@ pub fn score_perplexity(predictions: &[(String, String)]) -> f64 {
 }
 
 /// Format an MMLU-style multiple-choice prompt.
+#[must_use]
 pub fn format_mmlu_prompt(sample: &EvalSample) -> String {
     let mut prompt = format!("Question: {}\n", sample.prompt);
     if let Some(ref choices) = sample.choices {
@@ -163,11 +168,13 @@ pub fn format_mmlu_prompt(sample: &EvalSample) -> String {
 }
 
 /// Format a HellaSwag-style completion prompt.
+#[must_use]
 pub fn format_hellaswag_prompt(sample: &EvalSample) -> String {
     format!("{}\nComplete the following:", sample.prompt)
 }
 
 /// Format a HumanEval-style code generation prompt.
+#[must_use]
 pub fn format_humaneval_prompt(sample: &EvalSample) -> String {
     format!(
         "Complete the following Python function:\n\n{}\n",
@@ -176,6 +183,7 @@ pub fn format_humaneval_prompt(sample: &EvalSample) -> String {
 }
 
 /// Format a perplexity measurement prompt — ask model to continue text.
+#[must_use]
 pub fn format_perplexity_prompt(sample: &EvalSample) -> String {
     // Use first half of expected as context, ask model to generate continuation
     let words: Vec<&str> = sample.expected.split_whitespace().collect();
@@ -189,6 +197,7 @@ pub fn format_perplexity_prompt(sample: &EvalSample) -> String {
 }
 
 /// Get the expected answer letter for an MMLU sample.
+#[must_use]
 pub fn mmlu_expected_letter(sample: &EvalSample) -> String {
     if let Some(idx) = sample.answer_index {
         let labels = ['A', 'B', 'C', 'D', 'E', 'F'];

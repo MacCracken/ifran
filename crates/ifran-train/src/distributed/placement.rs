@@ -20,6 +20,7 @@ pub struct NodeResources {
 
 /// Trait for pluggable placement policies.
 pub trait PlacementPolicy: Send + Sync {
+    #[must_use]
     fn name(&self) -> &str;
     fn place(
         &self,

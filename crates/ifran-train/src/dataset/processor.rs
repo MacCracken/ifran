@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 /// Available augmentation strategies for text data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum AugmentationStrategy {
     SynonymReplacement,
     RandomInsertion,
@@ -115,8 +116,12 @@ pub fn augment_dataset(
         original_count += 1;
 
         // Write original
-        writeln!(writer, "{}", serde_json::to_string(&obj).unwrap())
-            .map_err(|e| IfranError::TrainingError(format!("Write failed: {e}")))?;
+        writeln!(
+            writer,
+            "{}",
+            serde_json::to_string(&obj).map_err(|e| IfranError::TrainingError(e.to_string()))?
+        )
+        .map_err(|e| IfranError::TrainingError(format!("Write failed: {e}")))?;
 
         // Get the text field to augment
         let text = match obj.get(&config.text_field) {
@@ -135,8 +140,13 @@ pub fn augment_dataset(
                     config.text_field.clone(),
                     serde_json::Value::String(augmented),
                 );
-                writeln!(writer, "{}", serde_json::to_string(&obj).unwrap())
-                    .map_err(|e| IfranError::TrainingError(format!("Write failed: {e}")))?;
+                writeln!(
+                    writer,
+                    "{}",
+                    serde_json::to_string(&obj)
+                        .map_err(|e| IfranError::TrainingError(e.to_string()))?
+                )
+                .map_err(|e| IfranError::TrainingError(format!("Write failed: {e}")))?;
                 augmented_count += 1;
             }
         }

@@ -43,10 +43,12 @@ pub async fn inference(
     let loaded_model = loaded
         .iter()
         .find(|m| m.model_name == body.model)
-        .or_else(|| loaded.first())
         .ok_or_else(|| {
-            ApiErrorResponse::bad_request("NO_MODEL", "No model loaded for inference")
-                .with_hint("Load a model first with POST /models/{name}")
+            ApiErrorResponse::bad_request(
+                "MODEL_NOT_LOADED",
+                format!("Model '{}' is not loaded", body.model),
+            )
+            .with_hint("Load the model first with POST /models/{name}")
         })?;
 
     let backend = state
@@ -101,10 +103,12 @@ pub async fn inference_stream(
     let loaded_model = loaded
         .iter()
         .find(|m| m.model_name == body.model)
-        .or_else(|| loaded.first())
         .ok_or_else(|| {
-            ApiErrorResponse::bad_request("NO_MODEL", "No model loaded for inference")
-                .with_hint("Load a model first with POST /models/{name}")
+            ApiErrorResponse::bad_request(
+                "MODEL_NOT_LOADED",
+                format!("Model '{}' is not loaded", body.model),
+            )
+            .with_hint("Load the model first with POST /models/{name}")
         })?;
 
     let backend = state
@@ -256,7 +260,7 @@ mod tests {
         .await;
         let err = result.unwrap_err();
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
-        assert!(err.body.message.contains("No model loaded"));
+        assert!(err.body.message.contains("is not loaded"));
         assert!(err.body.hint.is_some());
     }
 

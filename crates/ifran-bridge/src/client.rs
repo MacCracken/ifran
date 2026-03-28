@@ -86,6 +86,7 @@ impl BridgeClient {
     }
 
     /// Current connection state.
+    #[inline]
     pub async fn connection_state(&self) -> ConnectionState {
         *self.state.read().await
     }

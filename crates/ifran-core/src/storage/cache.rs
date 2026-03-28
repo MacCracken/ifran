@@ -24,6 +24,7 @@ pub struct CacheEntry {
 pub struct ModelCache {
     entries: HashMap<String, CacheEntry>,
     max_bytes: u64,
+    current_bytes: u64,
 }
 
 impl ModelCache {
@@ -32,13 +33,15 @@ impl ModelCache {
         Self {
             entries: HashMap::new(),
             max_bytes,
+            current_bytes: 0,
         }
     }
 
     /// Total bytes currently used by cached entries.
     #[inline]
+    #[must_use]
     pub fn total_bytes(&self) -> u64 {
-        self.entries.values().map(|e| e.size_bytes).sum()
+        self.current_bytes
     }
 
     /// Number of cached entries.
@@ -78,20 +81,25 @@ impl ModelCache {
     /// the corresponding files from disk.
     pub fn insert(&mut self, key: String, size_bytes: u64) -> Vec<String> {
         // If the item already exists, remove it first so we re-add with fresh timestamp
-        self.entries.remove(&key);
+        if let Some(old) = self.entries.remove(&key) {
+            self.current_bytes -= old.size_bytes;
+        }
 
         let mut evicted = Vec::new();
 
         // Evict LRU entries until we have room
-        while self.total_bytes() + size_bytes > self.max_bytes && !self.entries.is_empty() {
+        while self.current_bytes + size_bytes > self.max_bytes && !self.entries.is_empty() {
             if let Some(lru_key) = self.find_lru() {
-                self.entries.remove(&lru_key);
+                if let Some(removed) = self.entries.remove(&lru_key) {
+                    self.current_bytes -= removed.size_bytes;
+                }
                 evicted.push(lru_key);
             } else {
                 break;
             }
         }
 
+        self.current_bytes += size_bytes;
         self.entries.insert(
             key.clone(),
             CacheEntry {
@@ -107,7 +115,11 @@ impl ModelCache {
     /// Remove an entry by key.
     #[inline]
     pub fn remove(&mut self, key: &str) -> Option<CacheEntry> {
-        self.entries.remove(key)
+        let entry = self.entries.remove(key);
+        if let Some(ref e) = entry {
+            self.current_bytes -= e.size_bytes;
+        }
+        entry
     }
 
     /// Find the least-recently-used key.

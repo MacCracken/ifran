@@ -8,12 +8,15 @@ use ifran_types::training::{TrainingJobConfig, TrainingJobId, TrainingMethod};
 
 /// Which executor to use for training.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub enum ExecutorKind {
     Docker,
     Subprocess,
 }
 
 /// Map a training method to its Python training script.
+#[must_use]
+#[inline]
 pub fn script_for_method(method: TrainingMethod) -> &'static str {
     match method {
         TrainingMethod::Lora | TrainingMethod::Qlora => "scripts/train_sft.py",

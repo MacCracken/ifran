@@ -1048,7 +1048,7 @@ async fn inference_no_model_loaded() {
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     let body = resp.into_body().collect().await.unwrap().to_bytes();
     let text = String::from_utf8_lossy(&body);
-    assert!(text.contains("No model loaded"));
+    assert!(text.contains("is not loaded"));
 }
 
 #[tokio::test]

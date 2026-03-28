@@ -81,15 +81,13 @@ pub async fn chat_completions(
     }
 
     let loaded = state.model_manager.list_loaded(Some(&tenant_id)).await;
-    let loaded_model = loaded
-        .iter()
-        .find(|m| m.model_name == body.model)
-        .or_else(|| loaded.first())
-        .ok_or((
-            StatusCode::BAD_REQUEST,
-            "No model loaded. Load a model first with POST /v1/models or 'ifran pull <model>'"
-                .into(),
-        ))?;
+    let loaded_model = loaded.iter().find(|m| m.model_name == body.model).ok_or((
+        StatusCode::BAD_REQUEST,
+        format!(
+            "Model '{}' is not loaded. Load it first with POST /v1/models or 'ifran pull {}'",
+            body.model, body.model
+        ),
+    ))?;
 
     let backend = state
         .backends
@@ -375,6 +373,6 @@ mod tests {
         .await;
         let err = result.unwrap_err();
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
-        assert!(err.1.contains("No model loaded"));
+        assert!(err.1.contains("is not loaded"));
     }
 }

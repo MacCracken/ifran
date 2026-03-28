@@ -22,6 +22,7 @@ pub struct ApprovalRequest {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum ApprovalStatus {
     Pending,
     Approved,
@@ -106,11 +107,13 @@ impl ApprovalGate {
     }
 
     /// Get a request by ID.
+    #[must_use]
     pub fn get(&self, id: ApprovalId) -> Option<&ApprovalRequest> {
         self.requests.get(&id)
     }
 
     /// List pending requests.
+    #[must_use]
     pub fn pending(&self) -> Vec<&ApprovalRequest> {
         self.requests
             .values()
@@ -119,6 +122,8 @@ impl ApprovalGate {
     }
 
     /// Check if a request is approved.
+    #[must_use]
+    #[inline]
     pub fn is_approved(&self, id: ApprovalId) -> bool {
         self.requests
             .get(&id)

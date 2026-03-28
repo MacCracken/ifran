@@ -49,11 +49,13 @@ pub async fn register_adapter(
 }
 
 /// Build an Ollama Modelfile for a LoRA adapter.
+#[must_use]
 pub fn build_modelfile(base_model: &str, adapter_path: &str) -> String {
     format!("FROM {base_model}\nADAPTER \"{adapter_path}\"\n")
 }
 
 /// Check if Ollama is available at the given endpoint.
+#[must_use]
 pub async fn check_ollama(endpoint: &str) -> bool {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))

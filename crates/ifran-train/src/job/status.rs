@@ -78,6 +78,8 @@ impl JobState {
         self.completed_at = Some(Utc::now());
     }
 
+    #[must_use]
+    #[inline]
     pub fn progress_percent(&self) -> f64 {
         if self.total_steps == 0 {
             0.0
@@ -86,6 +88,8 @@ impl JobState {
         }
     }
 
+    #[must_use]
+    #[inline]
     pub fn is_terminal(&self) -> bool {
         matches!(
             self.status,

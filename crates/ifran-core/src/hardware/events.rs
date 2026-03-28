@@ -16,6 +16,7 @@ use super::allocator::AllocationId;
 /// A GPU lifecycle event.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum GpuEvent {
     /// GPU devices were allocated to a job.
     Allocated {

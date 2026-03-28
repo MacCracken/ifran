@@ -17,6 +17,7 @@ pub enum HashAlgorithm {
 }
 
 /// Compute the hex-encoded hash of a file.
+#[must_use = "hash result should be used or compared"]
 pub fn hash_file(path: &Path, algorithm: HashAlgorithm) -> Result<String> {
     let file = std::fs::File::open(path)?;
     let mut reader = std::io::BufReader::with_capacity(1024 * 1024, file);

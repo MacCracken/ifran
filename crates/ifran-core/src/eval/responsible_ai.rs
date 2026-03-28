@@ -40,6 +40,7 @@ pub struct LabeledSample {
 }
 
 /// Compute responsible AI metrics from labeled samples.
+#[must_use]
 pub fn compute_report(model_name: &str, samples: &[LabeledSample]) -> ResponsibleAiReport {
     let total = samples.len() as u64;
     let total_correct = samples.iter().filter(|s| s.correct).count() as u64;

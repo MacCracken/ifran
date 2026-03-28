@@ -10,15 +10,14 @@ use ifran_types::backend::{
     AcceleratorType, BackendCapabilities, BackendId, BackendLocality, DeviceConfig,
 };
 use ifran_types::error::Result;
-use ifran_types::inference::{
-    FinishReason, InferenceRequest, InferenceResponse, StreamChunk, TokenUsage,
-};
+use ifran_types::inference::{InferenceRequest, InferenceResponse, StreamChunk};
 use ifran_types::model::{ModelFormat, ModelManifest};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
-use tracing::{info, warn};
+use tracing::info;
 
+use crate::openai_compat::{build_openai_messages, parse_openai_response, stream_openai_sse};
 use crate::traits::{InferenceBackend, ModelHandle};
 
 /// TensorRT-LLM backend proxying to a Triton server.
@@ -111,7 +110,7 @@ impl InferenceBackend for TensorRtBackend {
         let url = format!("{}/v1/chat/completions", self.base_url);
         let body = serde_json::json!({
             "model": model_name,
-            "messages": build_messages(req),
+            "messages": build_openai_messages(req),
             "max_tokens": req.max_tokens.unwrap_or(512),
             "temperature": req.temperature.unwrap_or(0.7),
             "top_p": req.top_p.unwrap_or(0.9),
@@ -136,26 +135,7 @@ impl InferenceBackend for TensorRtBackend {
             .await
             .map_err(|e| IfranError::BackendError(e.to_string()))?;
 
-        let text = json["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
-
-        let finish_reason = match json["choices"][0]["finish_reason"].as_str() {
-            Some("stop") => FinishReason::Stop,
-            Some("length") => FinishReason::MaxTokens,
-            _ => FinishReason::Stop,
-        };
-
-        Ok(InferenceResponse {
-            text,
-            usage: TokenUsage {
-                prompt_tokens: json["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32,
-                completion_tokens: json["usage"]["completion_tokens"].as_u64().unwrap_or(0) as u32,
-                total_tokens: json["usage"]["total_tokens"].as_u64().unwrap_or(0) as u32,
-            },
-            finish_reason,
-        })
+        parse_openai_response(&json)
     }
 
     async fn infer_stream(
@@ -172,7 +152,7 @@ impl InferenceBackend for TensorRtBackend {
         let url = format!("{}/v1/chat/completions", self.base_url);
         let body = serde_json::json!({
             "model": model_name,
-            "messages": build_messages(&req),
+            "messages": build_openai_messages(&req),
             "max_tokens": req.max_tokens.unwrap_or(512),
             "temperature": req.temperature.unwrap_or(0.7),
             "top_p": req.top_p.unwrap_or(0.9),
@@ -190,63 +170,7 @@ impl InferenceBackend for TensorRtBackend {
         let (tx, rx) = mpsc::channel(64);
 
         tokio::spawn(async move {
-            use futures::StreamExt;
-            const MAX_BUFFER_SIZE: usize = 1024 * 1024; // 1 MB
-            let mut stream = resp.bytes_stream();
-            let mut buffer = String::new();
-
-            while let Some(chunk) = stream.next().await {
-                if tx.is_closed() {
-                    break;
-                }
-                let chunk = match chunk {
-                    Ok(c) => c,
-                    Err(e) => {
-                        warn!("TensorRT stream error: {e}");
-                        break;
-                    }
-                };
-                buffer.push_str(&String::from_utf8_lossy(&chunk));
-                if buffer.len() > MAX_BUFFER_SIZE {
-                    warn!("TensorRT stream buffer exceeded {MAX_BUFFER_SIZE} bytes, aborting");
-                    break;
-                }
-
-                while let Some(line_end) = buffer.find('\n') {
-                    let line = buffer[..line_end].trim().to_string();
-                    buffer = buffer[line_end + 1..].to_string();
-
-                    if let Some(data) = line.strip_prefix("data: ") {
-                        if data == "[DONE]" {
-                            let _ = tx
-                                .send(StreamChunk {
-                                    text: String::new(),
-                                    done: true,
-                                    usage: None,
-                                })
-                                .await;
-                            return;
-                        }
-
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                            let text = json["choices"][0]["delta"]["content"]
-                                .as_str()
-                                .unwrap_or("")
-                                .to_string();
-
-                            if !text.is_empty() {
-                                let _ = tx
-                                    .send(StreamChunk {
-                                        text,
-                                        done: false,
-                                        usage: None,
-                                    })
-                                    .await;
-                            }
-                        }
-                    }
-                }
-            }
+            let _ = stream_openai_sse(resp, tx).await;
         });
 
         Ok(rx)
@@ -259,21 +183,6 @@ impl InferenceBackend for TensorRtBackend {
             Err(_) => Ok(false),
         }
     }
-}
-
-fn build_messages(req: &InferenceRequest) -> Vec<serde_json::Value> {
-    let mut messages = Vec::new();
-    if let Some(ref system) = req.system_prompt {
-        messages.push(serde_json::json!({
-            "role": "system",
-            "content": system,
-        }));
-    }
-    messages.push(serde_json::json!({
-        "role": "user",
-        "content": &req.prompt,
-    }));
-    messages
 }
 
 #[cfg(test)]
@@ -409,7 +318,7 @@ mod tests {
             stop_sequences: None,
             sensitivity: None,
         };
-        let msgs = build_messages(&req);
+        let msgs = build_openai_messages(&req);
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0]["role"], "user");
         assert_eq!(msgs[0]["content"], "hello");
@@ -427,7 +336,7 @@ mod tests {
             stop_sequences: None,
             sensitivity: None,
         };
-        let msgs = build_messages(&req);
+        let msgs = build_openai_messages(&req);
         assert_eq!(msgs.len(), 2);
         assert_eq!(msgs[0]["role"], "system");
         assert_eq!(msgs[0]["content"], "You are helpful");

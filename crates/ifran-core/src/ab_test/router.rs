@@ -6,6 +6,7 @@ use ifran_types::ab_test::AbTest;
 ///
 /// Uses a random number to decide based on the traffic split.
 /// Returns the model name to use.
+#[must_use]
 pub fn select_variant(test: &AbTest) -> &str {
     let roll: f64 = rand_fraction();
     if roll < test.traffic_split {

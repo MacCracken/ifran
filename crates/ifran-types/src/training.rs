@@ -5,7 +5,7 @@ pub type TrainingJobId = Uuid;
 
 /// Training method.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrainingMethod {
     FullFineTune,
@@ -44,7 +44,7 @@ pub struct DatasetConfig {
 
 /// Supported dataset formats.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DatasetFormat {
     Jsonl,
@@ -68,9 +68,9 @@ pub struct HyperParams {
 impl HyperParams {
     /// Validate hyperparameters, returning an error if any are invalid.
     pub fn validate(&self) -> crate::error::Result<()> {
-        if self.learning_rate <= 0.0 {
+        if !self.learning_rate.is_finite() || self.learning_rate <= 0.0 {
             return Err(crate::IfranError::TrainingError(
-                "learning_rate must be positive".into(),
+                "learning_rate must be a finite positive number".into(),
             ));
         }
         if self.epochs == 0 {
@@ -81,6 +81,16 @@ impl HyperParams {
         if self.batch_size == 0 {
             return Err(crate::IfranError::TrainingError(
                 "batch_size must be at least 1".into(),
+            ));
+        }
+        if self.gradient_accumulation_steps == 0 {
+            return Err(crate::IfranError::TrainingError(
+                "gradient_accumulation_steps must be at least 1".into(),
+            ));
+        }
+        if !self.weight_decay.is_finite() || self.weight_decay < 0.0 {
+            return Err(crate::IfranError::TrainingError(
+                "weight_decay must be a finite non-negative number".into(),
             ));
         }
         if self.max_seq_length == 0 {
@@ -103,7 +113,7 @@ pub struct LoraConfig {
 
 /// Training job status.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrainingStatus {
     Queued,
@@ -346,6 +356,76 @@ mod tests {
             max_seq_length: 2048,
         };
         assert!(hp.validate().is_ok());
+    }
+
+    #[test]
+    fn hyperparams_validate_nan_learning_rate() {
+        let hp = HyperParams {
+            learning_rate: f64::NAN,
+            epochs: 1,
+            batch_size: 1,
+            gradient_accumulation_steps: 1,
+            warmup_steps: 0,
+            weight_decay: 0.0,
+            max_seq_length: 512,
+        };
+        assert!(hp.validate().is_err());
+    }
+
+    #[test]
+    fn hyperparams_validate_infinity_learning_rate() {
+        let hp = HyperParams {
+            learning_rate: f64::INFINITY,
+            epochs: 1,
+            batch_size: 1,
+            gradient_accumulation_steps: 1,
+            warmup_steps: 0,
+            weight_decay: 0.0,
+            max_seq_length: 512,
+        };
+        assert!(hp.validate().is_err());
+    }
+
+    #[test]
+    fn hyperparams_validate_zero_grad_accum() {
+        let hp = HyperParams {
+            learning_rate: 1e-4,
+            epochs: 1,
+            batch_size: 1,
+            gradient_accumulation_steps: 0,
+            warmup_steps: 0,
+            weight_decay: 0.0,
+            max_seq_length: 512,
+        };
+        assert!(hp.validate().is_err());
+    }
+
+    #[test]
+    fn hyperparams_validate_negative_weight_decay() {
+        let hp = HyperParams {
+            learning_rate: 1e-4,
+            epochs: 1,
+            batch_size: 1,
+            gradient_accumulation_steps: 1,
+            warmup_steps: 0,
+            weight_decay: -0.01,
+            max_seq_length: 512,
+        };
+        assert!(hp.validate().is_err());
+    }
+
+    #[test]
+    fn hyperparams_validate_nan_weight_decay() {
+        let hp = HyperParams {
+            learning_rate: 1e-4,
+            epochs: 1,
+            batch_size: 1,
+            gradient_accumulation_steps: 1,
+            warmup_steps: 0,
+            weight_decay: f64::NAN,
+            max_seq_length: 512,
+        };
+        assert!(hp.validate().is_err());
     }
 
     #[test]

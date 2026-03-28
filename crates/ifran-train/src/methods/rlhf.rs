@@ -3,6 +3,7 @@
 
 use ifran_types::training::TrainingJobConfig;
 
+#[must_use]
 pub fn build_args(config: &TrainingJobConfig) -> Vec<String> {
     vec![
         "--base-model".into(),

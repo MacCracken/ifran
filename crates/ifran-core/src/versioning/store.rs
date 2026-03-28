@@ -1,5 +1,7 @@
 //! SQLite storage for model versions.
 
+use std::collections::HashSet;
+
 use ifran_types::error::Result;
 use ifran_types::versioning::{ModelVersion, ModelVersionId};
 use ifran_types::{IfranError, PagedResult, TenantId};
@@ -7,6 +9,9 @@ use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::params;
 use uuid::Uuid;
+
+/// Maximum depth for version lineage traversal to prevent unbounded walks.
+const MAX_LINEAGE_DEPTH: usize = 1000;
 
 pub struct VersionStore {
     pool: Pool<SqliteConnectionManager>,
@@ -218,14 +223,26 @@ impl VersionStore {
     }
 
     /// Get the version lineage (chain of parent versions).
+    ///
+    /// Walks the parent chain from the given version back to the root.
+    /// Cycle detection via a visited set and a hard depth limit of
+    /// [`MAX_LINEAGE_DEPTH`] prevent unbounded traversal.
     pub fn get_lineage(
         &self,
         id: ModelVersionId,
         tenant_id: &TenantId,
     ) -> Result<Vec<ModelVersion>> {
         let mut chain = Vec::new();
+        let mut visited = HashSet::new();
         let mut current = Some(id);
         while let Some(vid) = current {
+            if !visited.insert(vid) {
+                // Cycle detected — stop traversal.
+                break;
+            }
+            if chain.len() >= MAX_LINEAGE_DEPTH {
+                break;
+            }
             match self.get(vid, tenant_id) {
                 Ok(v) => {
                     current = v.parent_version_id;

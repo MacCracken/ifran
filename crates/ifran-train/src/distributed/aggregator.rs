@@ -10,6 +10,7 @@ use ifran_types::error::Result;
 
 /// Aggregation strategy for merging distributed checkpoints.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum AggregationMethod {
     /// Simple average of all worker checkpoints (default for data-parallel).
     Average,
@@ -50,6 +51,7 @@ impl AggregationPlan {
     ///
     /// MVP: Generates args for a Python aggregation script.
     /// The actual weight-averaging logic lives in Python (using torch).
+    #[must_use]
     pub fn build_command(&self) -> Vec<String> {
         let mut cmd = vec![
             "python3".into(),
@@ -148,6 +150,7 @@ pub fn build_federated_command(
 }
 
 /// Build the expected checkpoint path for a given worker rank.
+#[must_use]
 pub fn worker_checkpoint_dir(base_output_dir: &Path, rank: u32) -> PathBuf {
     base_output_dir.join(format!("worker-{rank}"))
 }

@@ -1,5 +1,7 @@
 //! Configuration for continual/online learning.
 
+use std::collections::VecDeque;
+
 use serde::{Deserialize, Serialize};
 
 /// Configuration for a continual learning session.
@@ -41,26 +43,34 @@ fn default_update_threshold() -> usize {
 }
 
 /// A replay buffer that maintains a sliding window of recent training samples.
+///
+/// Uses `VecDeque` for O(1) eviction from the front.
 pub struct ReplayBuffer {
-    samples: Vec<String>,
+    samples: VecDeque<String>,
     capacity: usize,
 }
 
 impl ReplayBuffer {
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
+        let cap = capacity.min(1_000_000);
         Self {
-            samples: Vec::with_capacity(capacity),
+            samples: VecDeque::with_capacity(cap),
             capacity,
         }
     }
 
     pub fn add(&mut self, sample: String) {
-        if self.samples.len() >= self.capacity {
-            self.samples.remove(0);
+        if self.capacity == 0 {
+            return;
         }
-        self.samples.push(sample);
+        if self.samples.len() >= self.capacity {
+            self.samples.pop_front();
+        }
+        self.samples.push_back(sample);
     }
 
+    #[must_use]
     pub fn sample(&self, count: usize) -> Vec<&str> {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
@@ -69,11 +79,12 @@ impl ReplayBuffer {
             return Vec::new();
         }
 
-        let mut result = Vec::with_capacity(count.min(self.samples.len()));
+        let actual = count.min(self.samples.len());
+        let mut result = Vec::with_capacity(actual);
         let mut hasher = DefaultHasher::new();
         std::time::SystemTime::now().hash(&mut hasher);
 
-        for i in 0..count.min(self.samples.len()) {
+        for i in 0..actual {
             hasher.write_usize(i);
             let idx = (hasher.finish() as usize) % self.samples.len();
             result.push(self.samples[idx].as_str());
@@ -81,12 +92,18 @@ impl ReplayBuffer {
         result
     }
 
+    #[inline]
+    #[must_use]
     pub fn len(&self) -> usize {
         self.samples.len()
     }
+    #[inline]
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.samples.is_empty()
     }
+    #[inline]
+    #[must_use]
     pub fn capacity(&self) -> usize {
         self.capacity
     }
@@ -172,13 +189,11 @@ mod tests {
 
     #[test]
     fn buffer_capacity_zero() {
-        let buf = ReplayBuffer::new(0);
+        let mut buf = ReplayBuffer::new(0);
         assert_eq!(buf.capacity(), 0);
-        // Adding to a zero-capacity buffer: first remove(0) panics or the
-        // check `len() >= capacity` is true immediately — let's verify.
-        // With capacity 0, len() (0) >= capacity (0) is true, so it removes
-        // and then pushes. But remove(0) on empty vec panics.
-        // Actually let's just test that sampling from empty is fine.
+        assert!(buf.is_empty());
+        // Adding to a zero-capacity buffer should be a no-op, not panic.
+        buf.add("should be ignored".into());
         assert!(buf.is_empty());
         assert!(buf.sample(5).is_empty());
     }

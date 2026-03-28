@@ -22,7 +22,7 @@ pub struct LineageNode {
 
 /// Pipeline stage types.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PipelineStage {
     Dataset,
@@ -34,14 +34,15 @@ pub enum PipelineStage {
 }
 
 impl std::fmt::Display for PipelineStage {
+    #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Dataset => write!(f, "dataset"),
-            Self::Training => write!(f, "training"),
-            Self::Evaluation => write!(f, "evaluation"),
-            Self::Deployment => write!(f, "deployment"),
-            Self::Checkpoint => write!(f, "checkpoint"),
-            Self::Merge => write!(f, "merge"),
+            Self::Dataset => f.write_str("dataset"),
+            Self::Training => f.write_str("training"),
+            Self::Evaluation => f.write_str("evaluation"),
+            Self::Deployment => f.write_str("deployment"),
+            Self::Checkpoint => f.write_str("checkpoint"),
+            Self::Merge => f.write_str("merge"),
         }
     }
 }

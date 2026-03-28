@@ -22,7 +22,7 @@ pub struct DistributedTrainingConfig {
 
 /// Placement policy for distributing workers across nodes.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PlacementPolicyKind {
     GpuAffinity,
@@ -32,7 +32,7 @@ pub enum PlacementPolicyKind {
 
 /// Parallelism strategy for distributed training.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DistributedStrategy {
     /// Each worker trains on a data shard with full model copy.

@@ -8,7 +8,7 @@ pub type EvalRunId = Uuid;
 
 /// Available benchmark types.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BenchmarkKind {
     /// Perplexity on a text corpus.
@@ -51,7 +51,7 @@ pub struct EvalResult {
 
 /// Status of an eval run.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EvalStatus {
     Queued,

@@ -20,6 +20,7 @@ pub struct DiscoveredModel {
 /// Where a model was discovered from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum DiscoverySource {
     Ollama,
     LmStudio,
@@ -52,10 +53,13 @@ pub async fn discover_all() -> Vec<DiscoveredModel> {
         discover_local_ai(LOCAL_AI_DEFAULT),
     );
 
-    let mut results = Vec::new();
-    results.extend(ollama.unwrap_or_default());
-    results.extend(lm_studio.unwrap_or_default());
-    results.extend(local_ai.unwrap_or_default());
+    let ollama = ollama.unwrap_or_default();
+    let lm_studio = lm_studio.unwrap_or_default();
+    let local_ai = local_ai.unwrap_or_default();
+    let mut results = Vec::with_capacity(ollama.len() + lm_studio.len() + local_ai.len());
+    results.extend(ollama);
+    results.extend(lm_studio);
+    results.extend(local_ai);
     results
 }
 

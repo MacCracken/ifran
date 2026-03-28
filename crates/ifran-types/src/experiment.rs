@@ -11,7 +11,7 @@ pub type TrialId = Uuid;
 
 /// Whether the objective should be minimized or maximized.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Direction {
     Minimize,
@@ -21,6 +21,7 @@ pub enum Direction {
 impl Direction {
     /// Returns true if `a` is better than `b` according to this direction.
     #[must_use]
+    #[inline]
     pub fn is_better(&self, a: f64, b: f64) -> bool {
         match self {
             Direction::Minimize => a < b,
@@ -68,14 +69,15 @@ impl ParamValues {
                     }
                     return Vec::new();
                 }
-                let mut vals = Vec::new();
-                let mut v = *min;
-                while v <= *max + f64::EPSILON {
-                    vals.push(v);
-                    if vals.len() >= 100_000 {
+                let count = ((*max - *min) / *step).floor() as usize + 1;
+                let count = count.min(100_000);
+                let mut vals = Vec::with_capacity(count);
+                for i in 0..count {
+                    let v = *min + (i as f64) * *step;
+                    if v > *max + f64::EPSILON {
                         break;
                     }
-                    v += step;
+                    vals.push(v);
                 }
                 vals
             }
@@ -119,7 +121,7 @@ fn default_dataset_format() -> String {
 
 /// Status of an experiment.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExperimentStatus {
     Running,
@@ -130,7 +132,7 @@ pub enum ExperimentStatus {
 
 /// Status of a single trial within an experiment.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrialStatus {
     Training,

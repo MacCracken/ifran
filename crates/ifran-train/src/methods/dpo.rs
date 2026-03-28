@@ -2,6 +2,7 @@
 
 use ifran_types::training::{HyperParams, TrainingJobConfig};
 
+#[must_use]
 pub fn default_hyperparams() -> HyperParams {
     HyperParams {
         learning_rate: 5e-6,
@@ -14,6 +15,7 @@ pub fn default_hyperparams() -> HyperParams {
     }
 }
 
+#[must_use]
 pub fn build_args(config: &TrainingJobConfig) -> Vec<String> {
     vec![
         "--base-model".into(),

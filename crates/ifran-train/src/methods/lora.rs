@@ -2,6 +2,7 @@
 
 use ifran_types::training::{HyperParams, LoraConfig, TrainingJobConfig};
 
+#[must_use]
 pub fn default_lora_config() -> LoraConfig {
     LoraConfig {
         rank: 16,
@@ -16,6 +17,7 @@ pub fn default_lora_config() -> LoraConfig {
     }
 }
 
+#[must_use]
 pub fn default_hyperparams() -> HyperParams {
     HyperParams {
         learning_rate: 2e-4,
@@ -28,6 +30,7 @@ pub fn default_hyperparams() -> HyperParams {
     }
 }
 
+#[must_use]
 pub fn build_args(config: &TrainingJobConfig) -> Vec<String> {
     let lora = config
         .lora

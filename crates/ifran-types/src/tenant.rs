@@ -8,12 +8,15 @@ pub struct TenantId(pub String);
 
 impl TenantId {
     /// The default tenant used in single-tenant mode.
+    #[must_use]
+    #[inline]
     pub fn default_tenant() -> Self {
         Self("default".into())
     }
 
     /// Whether this is the default (single-tenant) tenant.
     #[must_use]
+    #[inline]
     pub fn is_default(&self) -> bool {
         self.0 == "default"
     }
@@ -26,6 +29,7 @@ impl AsRef<str> for TenantId {
 }
 
 impl std::fmt::Display for TenantId {
+    #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
     }

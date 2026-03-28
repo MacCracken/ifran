@@ -36,6 +36,14 @@ impl TrainingExecutor for DockerExecutor {
         let config_json =
             serde_json::to_string(config).map_err(|e| IfranError::TrainingError(e.to_string()))?;
 
+        // Validate dataset path does not escape allowed directories
+        let dataset_path = std::path::Path::new(&config.dataset.path);
+        if config.dataset.path.contains("..") || !dataset_path.is_absolute() {
+            return Err(IfranError::TrainingError(
+                "dataset path must be an absolute path without '..' components".into(),
+            ));
+        }
+
         let container_name = format!("ifran-train-{}", job_id);
         let script = super::script_for_method(config.method);
 

@@ -14,6 +14,7 @@ pub struct PagedResult<T> {
 impl<T> PagedResult<T> {
     /// Create an empty paged result.
     #[must_use]
+    #[inline]
     pub fn empty() -> Self {
         Self {
             items: Vec::new(),

@@ -39,6 +39,7 @@ impl BridgeServer {
     }
 
     /// Get current connection state.
+    #[inline]
     pub async fn connection_state(&self) -> ConnectionState {
         *self.state.read().await
     }
@@ -80,6 +81,7 @@ impl BridgeServer {
     }
 
     /// Build a heartbeat message with current state.
+    #[must_use]
     pub fn build_heartbeat(
         &self,
         loaded_models: u32,
@@ -96,6 +98,8 @@ impl BridgeServer {
     }
 
     /// Heartbeat interval from config.
+    #[must_use]
+    #[inline]
     pub fn heartbeat_interval(&self) -> std::time::Duration {
         self.config.heartbeat_interval
     }

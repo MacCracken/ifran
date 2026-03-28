@@ -33,6 +33,7 @@ pub struct GpuDevice {
 
 /// Kind of accelerator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum AcceleratorKind {
     Cuda,
     Rocm,

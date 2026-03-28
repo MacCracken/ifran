@@ -97,6 +97,10 @@ impl ModelDatabase {
             .pool
             .get()
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let format_str =
+            serde_json::to_string(&model.format).map_err(|e| IfranError::Other(e.to_string()))?;
+        let quant_str =
+            serde_json::to_string(&model.quant).map_err(|e| IfranError::Other(e.to_string()))?;
         conn.execute(
             "INSERT INTO models (id, name, repo_id, format, quant, size_bytes,
                     parameter_count, architecture, license, local_path, sha256, pulled_at, tenant_id)
@@ -105,12 +109,8 @@ impl ModelDatabase {
                 model.id.to_string(),
                 model.name,
                 model.repo_id,
-                serde_json::to_string(&model.format)
-                    .unwrap()
-                    .trim_matches('"'),
-                serde_json::to_string(&model.quant)
-                    .unwrap()
-                    .trim_matches('"'),
+                format_str.trim_matches('"'),
+                quant_str.trim_matches('"'),
                 model.size_bytes as i64,
                 model.parameter_count.map(|v| v as i64),
                 model.architecture,
@@ -201,6 +201,10 @@ impl ModelDatabase {
             .pool
             .get()
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let format_str =
+            serde_json::to_string(&model.format).map_err(|e| IfranError::Other(e.to_string()))?;
+        let quant_str =
+            serde_json::to_string(&model.quant).map_err(|e| IfranError::Other(e.to_string()))?;
         let rows = conn
             .execute(
                 "UPDATE models SET name = ?2, repo_id = ?3, format = ?4, quant = ?5,
@@ -211,12 +215,8 @@ impl ModelDatabase {
                     model.id.to_string(),
                     model.name,
                     model.repo_id,
-                    serde_json::to_string(&model.format)
-                        .unwrap()
-                        .trim_matches('"'),
-                    serde_json::to_string(&model.quant)
-                        .unwrap()
-                        .trim_matches('"'),
+                    format_str.trim_matches('"'),
+                    quant_str.trim_matches('"'),
                     model.size_bytes as i64,
                     model.parameter_count.map(|v| v as i64),
                     model.architecture,

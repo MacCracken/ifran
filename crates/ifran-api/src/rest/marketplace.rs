@@ -177,7 +177,8 @@ pub async fn download(
     let filename = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| model_name.clone());
+        .unwrap_or_else(|| model_name.clone())
+        .replace(['"', '\n', '\r'], "");
 
     // Stream file instead of loading entirely into memory
     let stream = tokio_util::io::ReaderStream::new(file);
@@ -206,6 +207,35 @@ pub async fn pull(
         return Err((
             StatusCode::BAD_REQUEST,
             "source_url must start with http:// or https://".into(),
+        ));
+    }
+
+    // Reject URLs pointing to private/internal networks to prevent SSRF.
+    // Extract host from URL by stripping scheme and path.
+    let host = req
+        .source_url
+        .split("://")
+        .nth(1)
+        .and_then(|rest| rest.split('/').next())
+        .and_then(|authority| authority.split(':').next())
+        .unwrap_or("");
+    let is_private = host == "localhost"
+        || host == "127.0.0.1"
+        || host == "::1"
+        || host == "0.0.0.0"
+        || host.starts_with("10.")
+        || host.starts_with("192.168.")
+        || host == "169.254.169.254"
+        || (host.starts_with("172.")
+            && host
+                .split('.')
+                .nth(1)
+                .and_then(|s| s.parse::<u8>().ok())
+                .is_some_and(|n| (16..=31).contains(&n)));
+    if is_private {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "source_url must not point to a private or internal network address".into(),
         ));
     }
 

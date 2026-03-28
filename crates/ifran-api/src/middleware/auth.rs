@@ -32,8 +32,9 @@ pub async fn require_auth(
     mut req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    // Skip auth for health endpoint
-    if req.uri().path() == "/health" {
+    // Skip auth for health and readiness probe endpoints
+    let path = req.uri().path();
+    if path == "/health" || path == "/ready" || path == "/metrics" {
         req.extensions_mut().insert(TenantId::default_tenant());
         return Ok(next.run(req).await);
     }
@@ -70,7 +71,16 @@ pub async fn require_auth(
 
         let token = extract_bearer_token(&req).ok_or(StatusCode::UNAUTHORIZED)?;
 
-        if token == api_key {
+        // Use constant-time comparison to prevent timing side-channel attacks.
+        let token_bytes = token.as_bytes();
+        let key_bytes = api_key.as_bytes();
+        let keys_match = token_bytes.len() == key_bytes.len()
+            && token_bytes
+                .iter()
+                .zip(key_bytes.iter())
+                .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+                == 0;
+        if keys_match {
             req.extensions_mut().insert(TenantId::default_tenant());
             Ok(next.run(req).await)
         } else {

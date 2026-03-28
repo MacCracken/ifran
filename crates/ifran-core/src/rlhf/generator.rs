@@ -2,6 +2,7 @@ use ifran_types::rlhf::AnnotationPair;
 use uuid::Uuid;
 
 /// Create a single annotation pair from a prompt and two responses.
+#[must_use]
 pub fn generate_pair(
     session_id: Uuid,
     prompt: String,
@@ -21,6 +22,7 @@ pub fn generate_pair(
 
 /// Generate pairs from prompts using an inference function.
 /// The `infer_fn` is called twice per prompt (for response A and B).
+#[must_use]
 pub fn generate_pairs_from_prompts(
     session_id: Uuid,
     prompts: &[String],

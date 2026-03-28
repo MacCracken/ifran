@@ -33,6 +33,7 @@ pub fn info(msg: &str) {
 }
 
 /// Format a byte count as human-readable size.
+#[must_use]
 pub fn format_size(bytes: u64) -> String {
     const GB: u64 = 1_000_000_000;
     const MB: u64 = 1_000_000;
@@ -44,12 +45,22 @@ pub fn format_size(bytes: u64) -> String {
     }
 }
 
-/// Truncate a string to max width, adding ellipsis if needed.
+/// Truncate a string to max characters, adding ellipsis if needed.
+#[must_use]
 pub fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
+    if max == 0 {
+        return String::new();
+    }
+    let char_count = s.chars().count();
+    if char_count <= max {
         s.to_string()
     } else {
-        format!("{}…", &s[..max - 1])
+        let end = s
+            .char_indices()
+            .nth(max - 1)
+            .map(|(i, _)| i)
+            .unwrap_or(s.len());
+        format!("{}…", &s[..end])
     }
 }
 
@@ -90,7 +101,12 @@ impl Table {
         println!("{}", header_line.join("  ").bold());
 
         // Separator
-        let total_width: usize = self.widths.iter().sum::<usize>() + (self.widths.len() - 1) * 2;
+        let spacing = if self.widths.is_empty() {
+            0
+        } else {
+            (self.widths.len() - 1) * 2
+        };
+        let total_width: usize = self.widths.iter().sum::<usize>() + spacing;
         println!("{}", "─".repeat(total_width).dimmed());
 
         // Rows
@@ -160,5 +176,33 @@ mod tests {
         t.add_row(vec!["short".into(), "x".into()]);
         t.add_row(vec!["a much longer cell value".into(), "y".into()]);
         assert_eq!(t.widths[0], "a much longer cell value".len());
+    }
+
+    #[test]
+    fn truncate_multibyte_utf8() {
+        // Japanese characters are 3 bytes each — must not panic at byte boundary
+        let s = "日本語テスト";
+        let result = truncate(s, 3);
+        assert!(result.ends_with('…'));
+        assert_eq!(result.chars().count(), 3); // 2 chars + ellipsis
+    }
+
+    #[test]
+    fn truncate_zero_max() {
+        assert_eq!(truncate("hello", 0), "");
+    }
+
+    #[test]
+    fn truncate_max_one() {
+        // max=1 means 0 content chars + ellipsis
+        let result = truncate("hello", 1);
+        assert!(result.ends_with('…'));
+    }
+
+    #[test]
+    fn table_empty_headers() {
+        let t = Table::new(vec![]);
+        // Must not panic with zero headers
+        t.print();
     }
 }

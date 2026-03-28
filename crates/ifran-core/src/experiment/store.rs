@@ -149,7 +149,7 @@ impl ExperimentStore {
             .get()
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
         let status_str = serde_json::to_string(&status)
-            .unwrap()
+            .map_err(|e| IfranError::Other(e.to_string()))?
             .trim_matches('"')
             .to_string();
         let now = chrono::Utc::now().to_rfc3339();
@@ -202,7 +202,7 @@ impl ExperimentStore {
         let hp_json = serde_json::to_string(&trial.hyperparams)
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
         let status_str = serde_json::to_string(&trial.status)
-            .unwrap()
+            .map_err(|e| IfranError::Other(e.to_string()))?
             .trim_matches('"')
             .to_string();
         conn.execute(
@@ -237,7 +237,7 @@ impl ExperimentStore {
             .get()
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
         let status_str = serde_json::to_string(&trial.status)
-            .unwrap()
+            .map_err(|e| IfranError::Other(e.to_string()))?
             .trim_matches('"')
             .to_string();
         conn.execute(

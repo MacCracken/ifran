@@ -50,6 +50,7 @@ fn default_prompt_field() -> String {
 /// Status of an auto-labeling job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum AutoLabelStatus {
     Queued,
     Running,
@@ -214,8 +215,13 @@ where
             Some(serde_json::Value::String(s)) => s.clone(),
             _ => {
                 // Write unchanged if no prompt field
-                writeln!(writer, "{}", serde_json::to_string(&obj).unwrap())
-                    .map_err(|e| IfranError::TrainingError(format!("Write error: {e}")))?;
+                writeln!(
+                    writer,
+                    "{}",
+                    serde_json::to_string(&obj)
+                        .map_err(|e| IfranError::TrainingError(e.to_string()))?
+                )
+                .map_err(|e| IfranError::TrainingError(format!("Write error: {e}")))?;
                 continue;
             }
         };
@@ -240,8 +246,12 @@ where
             }
         }
 
-        writeln!(writer, "{}", serde_json::to_string(&obj).unwrap())
-            .map_err(|e| IfranError::TrainingError(format!("Write error: {e}")))?;
+        writeln!(
+            writer,
+            "{}",
+            serde_json::to_string(&obj).map_err(|e| IfranError::TrainingError(e.to_string()))?
+        )
+        .map_err(|e| IfranError::TrainingError(format!("Write error: {e}")))?;
 
         processed += 1;
         #[allow(clippy::manual_is_multiple_of)]

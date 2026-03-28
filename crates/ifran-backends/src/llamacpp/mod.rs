@@ -13,9 +13,7 @@ use ifran_types::backend::{
     AcceleratorType, BackendCapabilities, BackendId, BackendLocality, DeviceConfig,
 };
 use ifran_types::error::Result;
-use ifran_types::inference::{
-    FinishReason, InferenceRequest, InferenceResponse, StreamChunk, TokenUsage,
-};
+use ifran_types::inference::{InferenceRequest, InferenceResponse, StreamChunk};
 use ifran_types::model::{ModelFormat, ModelManifest};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -23,7 +21,14 @@ use tokio::process::{Child, Command};
 use tokio::sync::{RwLock, mpsc};
 use tracing::{info, warn};
 
+use crate::openai_compat::{build_openai_messages, parse_openai_response, stream_openai_sse};
 use crate::traits::{InferenceBackend, ModelHandle};
+
+/// Starting port for llama-server instances.
+const BASE_PORT: u16 = 8430;
+
+/// Maximum port before wrapping back to [`BASE_PORT`].
+const MAX_PORT: u16 = 65_000;
 
 /// A running llama-server instance for one model.
 struct ServerInstance {
@@ -54,7 +59,7 @@ impl LlamaCppBackend {
         Self {
             server_bin: server_bin.unwrap_or_else(|| "llama-server".into()),
             instances: Arc::new(RwLock::new(HashMap::new())),
-            next_port: Arc::new(RwLock::new(8430)),
+            next_port: Arc::new(RwLock::new(BASE_PORT)),
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(300))
                 .build()
@@ -63,10 +68,13 @@ impl LlamaCppBackend {
     }
 
     /// Allocate the next available port.
+    ///
+    /// Wraps back to [`BASE_PORT`] when the port exceeds [`MAX_PORT`] to avoid
+    /// assigning privileged or invalid ports.
     async fn allocate_port(&self) -> u16 {
         let mut port = self.next_port.write().await;
         let p = *port;
-        *port += 1;
+        *port = if p >= MAX_PORT { BASE_PORT } else { p + 1 };
         p
     }
 
@@ -160,7 +168,13 @@ impl InferenceBackend for LlamaCppBackend {
         let handle_id = format!("llamacpp-{port}");
         info!(handle = %handle_id, port, model = %model_path, "Starting llama-server");
 
-        self.wait_for_ready(port).await?;
+        if let Err(e) = self.wait_for_ready(port).await {
+            warn!(handle = %handle_id, "llama-server failed to become ready, killing process");
+            let mut process = process;
+            let _ = process.kill().await;
+            let _ = process.wait().await;
+            return Err(e);
+        }
 
         let instance = ServerInstance {
             process,
@@ -200,7 +214,7 @@ impl InferenceBackend for LlamaCppBackend {
 
         let url = format!("http://127.0.0.1:{}/v1/chat/completions", instance.port);
 
-        let messages = build_messages(req);
+        let messages = build_openai_messages(req);
         let body = serde_json::json!({
             "messages": messages,
             "max_tokens": req.max_tokens.unwrap_or(512),
@@ -230,7 +244,7 @@ impl InferenceBackend for LlamaCppBackend {
             .await
             .map_err(|e| IfranError::BackendError(e.to_string()))?;
 
-        parse_completion_response(&json)
+        parse_openai_response(&json)
     }
 
     async fn infer_stream(
@@ -244,7 +258,7 @@ impl InferenceBackend for LlamaCppBackend {
             .ok_or_else(|| IfranError::ModelNotFound(handle.0.clone()))?;
 
         let url = format!("http://127.0.0.1:{}/v1/chat/completions", instance.port);
-        let messages = build_messages(&req);
+        let messages = build_openai_messages(&req);
         let body = serde_json::json!({
             "messages": messages,
             "max_tokens": req.max_tokens.unwrap_or(512),
@@ -264,65 +278,7 @@ impl InferenceBackend for LlamaCppBackend {
         let (tx, rx) = mpsc::channel(64);
 
         tokio::spawn(async move {
-            use futures::StreamExt;
-            const MAX_BUFFER_SIZE: usize = 1024 * 1024; // 1 MB
-            let mut stream = resp.bytes_stream();
-            let mut buffer = String::new();
-
-            while let Some(chunk) = stream.next().await {
-                if tx.is_closed() {
-                    break;
-                }
-                let chunk = match chunk {
-                    Ok(c) => c,
-                    Err(e) => {
-                        warn!("Stream error: {e}");
-                        break;
-                    }
-                };
-
-                buffer.push_str(&String::from_utf8_lossy(&chunk));
-                if buffer.len() > MAX_BUFFER_SIZE {
-                    warn!("Stream buffer exceeded {MAX_BUFFER_SIZE} bytes, aborting");
-                    break;
-                }
-
-                // Parse SSE lines
-                while let Some(line_end) = buffer.find('\n') {
-                    let line = buffer[..line_end].trim().to_string();
-                    buffer = buffer[line_end + 1..].to_string();
-
-                    if let Some(data) = line.strip_prefix("data: ") {
-                        if data == "[DONE]" {
-                            let _ = tx
-                                .send(StreamChunk {
-                                    text: String::new(),
-                                    done: true,
-                                    usage: None,
-                                })
-                                .await;
-                            return;
-                        }
-
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                            let text = json["choices"][0]["delta"]["content"]
-                                .as_str()
-                                .unwrap_or("")
-                                .to_string();
-
-                            if !text.is_empty() {
-                                let _ = tx
-                                    .send(StreamChunk {
-                                        text,
-                                        done: false,
-                                        usage: None,
-                                    })
-                                    .await;
-                            }
-                        }
-                    }
-                }
-            }
+            let _ = stream_openai_sse(resp, tx).await;
         });
 
         Ok(rx)
@@ -341,52 +297,11 @@ impl InferenceBackend for LlamaCppBackend {
     }
 }
 
-/// Build OpenAI-compatible messages array from an InferenceRequest.
-fn build_messages(req: &InferenceRequest) -> Vec<serde_json::Value> {
-    let mut messages = Vec::new();
-    if let Some(ref system) = req.system_prompt {
-        messages.push(serde_json::json!({
-            "role": "system",
-            "content": system,
-        }));
-    }
-    messages.push(serde_json::json!({
-        "role": "user",
-        "content": &req.prompt,
-    }));
-    messages
-}
-
-/// Parse an OpenAI-compatible chat completion response.
-fn parse_completion_response(json: &serde_json::Value) -> Result<InferenceResponse> {
-    let text = json["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
-
-    let finish_reason = match json["choices"][0]["finish_reason"].as_str() {
-        Some("stop") => FinishReason::Stop,
-        Some("length") => FinishReason::MaxTokens,
-        _ => FinishReason::Stop,
-    };
-
-    let usage = TokenUsage {
-        prompt_tokens: json["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32,
-        completion_tokens: json["usage"]["completion_tokens"].as_u64().unwrap_or(0) as u32,
-        total_tokens: json["usage"]["total_tokens"].as_u64().unwrap_or(0) as u32,
-    };
-
-    Ok(InferenceResponse {
-        text,
-        usage,
-        finish_reason,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::traits::InferenceBackend;
+    use ifran_types::inference::FinishReason;
 
     #[test]
     fn new_default_server_bin() {
@@ -448,7 +363,7 @@ mod tests {
             system_prompt: None,
             sensitivity: None,
         };
-        let msgs = build_messages(&req);
+        let msgs = build_openai_messages(&req);
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0]["role"], "user");
         assert_eq!(msgs[0]["content"], "Hello");
@@ -466,7 +381,7 @@ mod tests {
             system_prompt: Some("Be helpful.".into()),
             sensitivity: None,
         };
-        let msgs = build_messages(&req);
+        let msgs = build_openai_messages(&req);
         assert_eq!(msgs.len(), 2);
         assert_eq!(msgs[0]["role"], "system");
         assert_eq!(msgs[0]["content"], "Be helpful.");
@@ -486,7 +401,7 @@ mod tests {
                 "total_tokens": 8
             }
         });
-        let resp = parse_completion_response(&json).unwrap();
+        let resp = parse_openai_response(&json).unwrap();
         assert_eq!(resp.text, "Hello there!");
         assert_eq!(resp.usage.prompt_tokens, 5);
         assert_eq!(resp.usage.completion_tokens, 3);
@@ -507,7 +422,7 @@ mod tests {
                 "total_tokens": 522
             }
         });
-        let resp = parse_completion_response(&json).unwrap();
+        let resp = parse_openai_response(&json).unwrap();
         assert!(matches!(resp.finish_reason, FinishReason::MaxTokens));
     }
 
@@ -517,7 +432,7 @@ mod tests {
             "choices": [{"message": {}}],
             "usage": {}
         });
-        let resp = parse_completion_response(&json).unwrap();
+        let resp = parse_openai_response(&json).unwrap();
         assert_eq!(resp.text, "");
         assert_eq!(resp.usage.prompt_tokens, 0);
         assert!(matches!(resp.finish_reason, FinishReason::Stop));
@@ -526,7 +441,7 @@ mod tests {
     #[test]
     fn parse_completion_response_empty_json() {
         let json = serde_json::json!({});
-        let resp = parse_completion_response(&json).unwrap();
+        let resp = parse_openai_response(&json).unwrap();
         assert_eq!(resp.text, "");
         assert_eq!(resp.usage.total_tokens, 0);
     }

@@ -102,6 +102,7 @@ impl StorageLayout {
     /// Examples:
     /// - `("meta-llama/Llama-3.1-8B-Instruct", "q4_k_m")` → `"llama-3.1-8b-instruct-q4km"`
     /// - `("mistral-7b", "f16")` → `"mistral-7b-f16"`
+    #[must_use]
     pub fn slugify(name: &str, quant: &str) -> String {
         let base = name.rsplit('/').next().unwrap_or(name);
 

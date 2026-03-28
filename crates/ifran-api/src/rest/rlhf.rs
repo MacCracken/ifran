@@ -67,7 +67,7 @@ pub async fn create_session(
     ))?;
 
     let session = store
-        .create_session(&req.name, &req.model_name, &tenant_id)
+        .create_session(name, &req.model_name, &tenant_id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok((

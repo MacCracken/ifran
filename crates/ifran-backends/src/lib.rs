@@ -5,6 +5,7 @@
 //! [`BackendRouter`] handles smart backend selection at runtime.
 
 pub mod cost;
+pub(crate) mod openai_compat;
 pub mod router;
 pub mod traits;
 

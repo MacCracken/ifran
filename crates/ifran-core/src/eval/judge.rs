@@ -70,6 +70,7 @@ impl Default for JudgeRubric {
 }
 
 /// Build the judge prompt for a pairwise comparison.
+#[must_use]
 pub fn build_judge_prompt(
     rubric: &JudgeRubric,
     prompt: &str,
@@ -98,6 +99,7 @@ pub fn build_judge_prompt(
 }
 
 /// Parse a verdict from judge model output.
+#[must_use]
 pub fn parse_verdict(output: &str) -> Verdict {
     let lower = output.trim().to_lowercase();
     // Look for the verdict keyword
@@ -112,6 +114,7 @@ pub fn parse_verdict(output: &str) -> Verdict {
 }
 
 /// Aggregate verdicts into a JudgeResult.
+#[must_use]
 pub fn aggregate_verdicts(model_a: &str, model_b: &str, verdicts: &[Verdict]) -> JudgeResult {
     let mut result = JudgeResult {
         model_a: model_a.into(),

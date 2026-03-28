@@ -286,6 +286,7 @@ impl JobManager {
     }
 
     /// Maximum concurrent job limit.
+    #[must_use]
     pub fn max_concurrent(&self) -> usize {
         self.max_concurrent
     }

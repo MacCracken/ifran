@@ -20,6 +20,7 @@ pub struct SyEndpoint {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub enum DiscoveryMethod {
     Config,
     Environment,

@@ -15,6 +15,7 @@ impl CheckpointStore {
     }
 
     /// Directory for a specific job's checkpoints.
+    #[must_use]
     pub fn job_dir(&self, job_id: TrainingJobId) -> PathBuf {
         self.root.join(job_id.to_string())
     }
@@ -67,6 +68,18 @@ impl CheckpointStore {
         let mut removed = 0;
         for cp in to_remove {
             let cp_path = Path::new(&cp.path);
+            // Validate checkpoint path is within our root to prevent path traversal
+            if let (Ok(canonical), Ok(root_canonical)) =
+                (cp_path.canonicalize(), self.root.canonicalize())
+            {
+                if !canonical.starts_with(&root_canonical) {
+                    tracing::warn!(
+                        path = %cp.path,
+                        "Refusing to delete checkpoint outside root directory"
+                    );
+                    continue;
+                }
+            }
             match std::fs::remove_dir_all(cp_path) {
                 Ok(()) => removed += 1,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {

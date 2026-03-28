@@ -19,6 +19,7 @@ use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 use tracing::{info, warn};
 
+use crate::openai_compat::build_openai_messages;
 use crate::traits::{InferenceBackend, ModelHandle};
 
 /// Ollama backend that proxies to a running Ollama server.
@@ -149,7 +150,7 @@ impl InferenceBackend for OllamaBackend {
             .ok_or_else(|| IfranError::ModelNotFound(handle.0.clone()))?;
 
         let url = format!("{}/api/chat", self.base_url);
-        let messages = build_ollama_messages(req);
+        let messages = build_openai_messages(req);
         let body = serde_json::json!({
             "model": model_name,
             "messages": messages,
@@ -210,7 +211,7 @@ impl InferenceBackend for OllamaBackend {
             .clone();
 
         let url = format!("{}/api/chat", self.base_url);
-        let messages = build_ollama_messages(&req);
+        let messages = build_openai_messages(&req);
         let body = serde_json::json!({
             "model": model_name,
             "messages": messages,
@@ -302,21 +303,6 @@ impl InferenceBackend for OllamaBackend {
     }
 }
 
-fn build_ollama_messages(req: &InferenceRequest) -> Vec<serde_json::Value> {
-    let mut messages = Vec::new();
-    if let Some(ref system) = req.system_prompt {
-        messages.push(serde_json::json!({
-            "role": "system",
-            "content": system,
-        }));
-    }
-    messages.push(serde_json::json!({
-        "role": "user",
-        "content": &req.prompt,
-    }));
-    messages
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -370,7 +356,7 @@ mod tests {
             system_prompt: None,
             sensitivity: None,
         };
-        let msgs = build_ollama_messages(&req);
+        let msgs = build_openai_messages(&req);
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0]["role"], "user");
         assert_eq!(msgs[0]["content"], "Hello");
@@ -388,7 +374,7 @@ mod tests {
             system_prompt: Some("Be concise.".into()),
             sensitivity: None,
         };
-        let msgs = build_ollama_messages(&req);
+        let msgs = build_openai_messages(&req);
         assert_eq!(msgs.len(), 2);
         assert_eq!(msgs[0]["role"], "system");
         assert_eq!(msgs[0]["content"], "Be concise.");

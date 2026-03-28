@@ -24,6 +24,7 @@ pub struct PipelineStep {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum StepType {
     Curate,
     Train,
@@ -34,6 +35,7 @@ pub enum StepType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum StepStatus {
     Pending,
     Running,
@@ -44,6 +46,7 @@ pub enum StepStatus {
 }
 
 /// Find the next steps that are ready to run (all dependencies completed).
+#[must_use]
 pub fn ready_steps(pipeline: &Pipeline) -> Vec<StepId> {
     let completed: std::collections::HashSet<StepId> = pipeline
         .steps

@@ -6,6 +6,7 @@ use std::fmt;
 pub struct BackendId(pub String);
 
 impl fmt::Display for BackendId {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -13,7 +14,7 @@ impl fmt::Display for BackendId {
 
 /// Hardware accelerator type.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AcceleratorType {
     Cuda,
     Rocm,
@@ -41,7 +42,7 @@ pub struct BackendCapabilities {
 
 /// Whether a backend runs locally or calls a remote API.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BackendLocality {
     /// Runs on local hardware, data never leaves the machine.

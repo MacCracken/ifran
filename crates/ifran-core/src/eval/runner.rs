@@ -195,7 +195,7 @@ impl EvalRunner {
         let samples = super::benchmarks::load_samples(dataset_path, sample_limit)?;
         let start = Instant::now();
 
-        let mut predictions = Vec::new();
+        let mut predictions = Vec::with_capacity(samples.len());
         for sample in &samples {
             match infer_fn(sample.prompt.clone()).await {
                 Ok(output) => predictions.push((output, sample.expected.clone())),
@@ -243,7 +243,7 @@ impl EvalRunner {
         let samples = super::benchmarks::load_samples(dataset_path, sample_limit)?;
         let start = Instant::now();
 
-        let mut predictions = Vec::new();
+        let mut predictions = Vec::with_capacity(samples.len());
         for sample in &samples {
             let prompt = super::benchmarks::format_mmlu_prompt(sample);
             let expected = super::benchmarks::mmlu_expected_letter(sample);
@@ -293,7 +293,7 @@ impl EvalRunner {
         let samples = super::benchmarks::load_samples(dataset_path, sample_limit)?;
         let start = Instant::now();
 
-        let mut predictions = Vec::new();
+        let mut predictions = Vec::with_capacity(samples.len());
         for sample in &samples {
             let prompt = super::benchmarks::format_hellaswag_prompt(sample);
             match infer_fn(prompt).await {
@@ -342,7 +342,7 @@ impl EvalRunner {
         let samples = super::benchmarks::load_samples(dataset_path, sample_limit)?;
         let start = Instant::now();
 
-        let mut predictions = Vec::new();
+        let mut predictions = Vec::with_capacity(samples.len());
         for sample in &samples {
             let prompt = super::benchmarks::format_humaneval_prompt(sample);
             match infer_fn(prompt).await {
@@ -391,7 +391,7 @@ impl EvalRunner {
         let samples = super::benchmarks::load_samples(dataset_path, sample_limit)?;
         let start = Instant::now();
 
-        let mut predictions = Vec::new();
+        let mut predictions = Vec::with_capacity(samples.len());
         for sample in &samples {
             let prompt = super::benchmarks::format_perplexity_prompt(sample);
             // Expected: second half of the text

@@ -3,6 +3,8 @@
 //! Scores inference sessions to identify high-quality responses suitable
 //! for use as training data. Supports multiple heuristic scoring criteria.
 
+use std::fmt::Write;
+
 use serde::{Deserialize, Serialize};
 
 /// Quality score for an inference response.
@@ -29,6 +31,7 @@ pub struct CriterionScore {
 /// - Completeness: checks for sentence-ending punctuation
 /// - Repetition: penalizes repeated n-grams
 /// - Coherence: checks vocabulary diversity (type-token ratio)
+#[must_use]
 pub fn score_response(prompt: &str, response: &str) -> QualityScore {
     let criteria = vec![
         CriterionScore {
@@ -60,6 +63,7 @@ pub fn score_response(prompt: &str, response: &str) -> QualityScore {
 }
 
 /// Filter responses by quality threshold.
+#[must_use]
 pub fn filter_high_quality(
     pairs: &[(String, String)],
     threshold: f64,
@@ -72,6 +76,7 @@ pub fn filter_high_quality(
         .collect()
 }
 
+#[inline]
 fn score_length(prompt: &str, response: &str) -> f64 {
     let prompt_words = prompt.split_whitespace().count();
     let response_words = response.split_whitespace().count();
@@ -91,6 +96,7 @@ fn score_length(prompt: &str, response: &str) -> f64 {
     }
 }
 
+#[inline]
 fn score_completeness(response: &str) -> f64 {
     let trimmed = response.trim();
     if trimmed.is_empty() {
@@ -106,8 +112,12 @@ fn score_completeness(response: &str) -> f64 {
     if ends_properly { 1.0 } else { 0.5 }
 }
 
+#[inline]
 fn score_repetition(response: &str) -> f64 {
-    let words: Vec<&str> = response.split_whitespace().collect();
+    let words: Vec<String> = response
+        .split_whitespace()
+        .map(|w| w.to_lowercase())
+        .collect();
     if words.is_empty() {
         return 0.0;
     }
@@ -118,14 +128,11 @@ fn score_repetition(response: &str) -> f64 {
     // Count repeated trigrams
     let mut trigrams = std::collections::HashSet::new();
     let mut repeated = 0u64;
+    let mut buf = String::new();
     for window in words.windows(3) {
-        let trigram = format!(
-            "{} {} {}",
-            window[0].to_lowercase(),
-            window[1].to_lowercase(),
-            window[2].to_lowercase()
-        );
-        if !trigrams.insert(trigram) {
+        buf.clear();
+        let _ = write!(buf, "{} {} {}", window[0], window[1], window[2]);
+        if !trigrams.insert(buf.clone()) {
             repeated += 1;
         }
     }
@@ -136,6 +143,7 @@ fn score_repetition(response: &str) -> f64 {
     (1.0 - repetition_rate * 3.0).max(0.0) // 33% repetition -> 0 score
 }
 
+#[inline]
 fn score_coherence(response: &str) -> f64 {
     let words: Vec<String> = response
         .split_whitespace()
