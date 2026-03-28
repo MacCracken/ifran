@@ -3,10 +3,10 @@
 ## Project Identity
 
 
-- **Type**: Flat library crate
+- **Type**: Flat crate with binaries (`ifran-server`, `ifran`)
 - **License**: AGPL-3.0-only
 - **MSRV**: 1.89
-- **Version**: In Progress
+- **Version**: CalVer (YYYY.M.D)
 
 
 ## Development Process

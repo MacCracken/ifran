@@ -59,3 +59,13 @@ timestamp,label,benchmark,time_ns,time_unit
 2026-03-28T16:15:57Z,p-1-post-audit,score_exact_match_1000,10672,ns
 2026-03-28T16:15:57Z,p-1-post-audit,score_contains_match_1000,4729,ns
 2026-03-28T16:15:57Z,p-1-post-audit,score_mmlu_500,73349,ns
+2026-03-28T17:12:13Z,p-1-flat-crate,cosine_similarity_768d,1719,ns
+2026-03-28T17:12:13Z,p-1-flat-crate,cosine_similarity_1536d,3488,ns
+2026-03-28T17:12:13Z,p-1-flat-crate,estimate_gguf_7b,4,ns
+2026-03-28T17:12:13Z,p-1-flat-crate,estimate_gguf_70b,4,ns
+2026-03-28T17:12:13Z,p-1-flat-crate,cache_insert_100,17387,ns
+2026-03-28T17:12:13Z,p-1-flat-crate,cache_insert_with_eviction,23367,ns
+2026-03-28T17:12:13Z,p-1-flat-crate,cache_touch_hit,40,ns
+2026-03-28T17:12:13Z,p-1-flat-crate,score_exact_match_1000,9294,ns
+2026-03-28T17:12:13Z,p-1-flat-crate,score_contains_match_1000,4478,ns
+2026-03-28T17:12:13Z,p-1-flat-crate,score_mmlu_500,75376,ns
