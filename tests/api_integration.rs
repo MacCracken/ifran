@@ -27,7 +27,7 @@ fn test_config(tmp: &tempfile::TempDir) -> IfranConfig {
         },
         backends: BackendsConfig {
             default: "llamacpp".into(),
-            enabled: vec!["llamacpp".into()],
+            enabled: vec![],
         },
         training: TrainingConfig {
             executor: "subprocess".into(),

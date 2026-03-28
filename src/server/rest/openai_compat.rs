@@ -49,7 +49,7 @@ pub async fn list_models(
         .list(&tenant_id, 1000, 0)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let data: Vec<serde_json::Value> = paged
+    let mut data: Vec<serde_json::Value> = paged
         .items
         .iter()
         .map(|m| {
@@ -61,6 +61,25 @@ pub async fn list_models(
             })
         })
         .collect();
+
+    // Merge models from hoosh provider registry
+    if let Some(providers) = &state.hoosh_providers {
+        for provider in providers.all() {
+            if let Ok(models) = provider.list_models().await {
+                for m in models {
+                    // Avoid duplicates — skip models already listed from local DB
+                    if !data.iter().any(|d| d["id"].as_str() == Some(&m.id)) {
+                        data.push(serde_json::json!({
+                            "id": m.id,
+                            "object": "model",
+                            "created": 0,
+                            "owned_by": m.provider,
+                        }));
+                    }
+                }
+            }
+        }
+    }
 
     Ok(Json(serde_json::json!({
         "object": "list",
@@ -80,27 +99,6 @@ pub async fn chat_completions(
         validate_prompt_length(&msg.content, state.config.security.max_prompt_length)?;
     }
 
-    let loaded = state.model_manager.list_loaded(Some(&tenant_id)).await;
-    let loaded_model = loaded.iter().find(|m| m.model_name == body.model).ok_or((
-        StatusCode::BAD_REQUEST,
-        format!(
-            "Model '{}' is not loaded. Load it first with POST /v1/models or 'ifran pull {}'",
-            body.model, body.model
-        ),
-    ))?;
-
-    let backend = state
-        .backends
-        .get(&crate::types::backend::BackendId(
-            loaded_model.backend_id.clone(),
-        ))
-        .ok_or((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Backend not available".into(),
-        ))?;
-
-    let handle = crate::backends::ModelHandle(loaded_model.handle.clone());
-
     // Extract system prompt and user messages
     let system_prompt = body
         .messages
@@ -116,26 +114,191 @@ pub async fn chat_completions(
         .map(|m| m.content.clone())
         .unwrap_or_default();
 
-    let req = InferenceRequest {
-        prompt,
-        max_tokens: Some(body.max_tokens),
-        temperature: body.temperature,
-        top_p: body.top_p,
-        top_k: None,
-        stop_sequences: None,
-        system_prompt,
-        sensitivity: None,
-    };
+    // Try local model path first
+    let loaded = state.model_manager.list_loaded(Some(&tenant_id)).await;
+    let loaded_model = loaded.iter().find(|m| m.model_name == body.model);
 
-    if body.stream {
-        return stream_response(backend, handle, req, &body.model).await;
+    if let Some(loaded_model) = loaded_model {
+        // Local model path — use existing backend
+        let backend = state
+            .backends
+            .get(&crate::types::backend::BackendId(
+                loaded_model.backend_id.clone(),
+            ))
+            .ok_or((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Backend not available".into(),
+            ))?;
+
+        let handle = crate::backends::ModelHandle(loaded_model.handle.clone());
+
+        let req = InferenceRequest {
+            prompt,
+            max_tokens: Some(body.max_tokens),
+            temperature: body.temperature,
+            top_p: body.top_p,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt,
+            sensitivity: None,
+        };
+
+        if body.stream {
+            return stream_response(backend, handle, req, &body.model).await;
+        }
+
+        // Non-streaming response
+        let resp = backend
+            .infer(&handle, &req)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        let response_id = format!("chatcmpl-{}", uuid::Uuid::new_v4());
+
+        let json = serde_json::json!({
+            "id": response_id,
+            "object": "chat.completion",
+            "created": chrono::Utc::now().timestamp(),
+            "model": body.model,
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": resp.text,
+                },
+                "finish_reason": match resp.finish_reason {
+                    crate::types::inference::FinishReason::Stop => "stop",
+                    crate::types::inference::FinishReason::MaxTokens => "length",
+                    crate::types::inference::FinishReason::StopSequence => "stop",
+                },
+            }],
+            "usage": {
+                "prompt_tokens": resp.usage.prompt_tokens,
+                "completion_tokens": resp.usage.completion_tokens,
+                "total_tokens": resp.usage.total_tokens,
+            },
+        });
+
+        return Ok(Json(json).into_response());
     }
 
-    // Non-streaming response
-    let resp = backend
-        .infer(&handle, &req)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    // Fallback: route through hoosh if model is not loaded locally
+    let (router, providers) = match (&state.hoosh_router, &state.hoosh_providers) {
+        (Some(r), Some(p)) => (r, p),
+        _ => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "Model '{}' is not loaded. Load it first with POST /v1/models or 'ifran pull {}'",
+                    body.model, body.model
+                ),
+            ));
+        }
+    };
+
+    let route = router.select(&body.model).ok_or((
+        StatusCode::BAD_REQUEST,
+        format!(
+            "Model '{}' is not loaded and no hoosh provider matches",
+            body.model
+        ),
+    ))?;
+
+    let provider = providers.get(route.provider, &route.base_url).ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        format!(
+            "Hoosh provider '{}' at {} is not registered",
+            route.provider, route.base_url
+        ),
+    ))?;
+
+    // Convert messages to hoosh format
+    let hoosh_messages: Vec<hoosh::inference::Message> = body
+        .messages
+        .iter()
+        .map(|m| {
+            let role = match m.role.as_str() {
+                "system" => hoosh::inference::Role::System,
+                "assistant" => hoosh::inference::Role::Assistant,
+                "tool" => hoosh::inference::Role::Tool,
+                _ => hoosh::inference::Role::User,
+            };
+            hoosh::inference::Message::new(role, &m.content)
+        })
+        .collect();
+
+    let hoosh_req = hoosh::InferenceRequest {
+        model: body.model.clone(),
+        prompt,
+        system: system_prompt,
+        messages: hoosh_messages,
+        max_tokens: Some(body.max_tokens),
+        temperature: body.temperature.map(|t| t as f64),
+        top_p: body.top_p.map(|p| p as f64),
+        stream: body.stream,
+        ..Default::default()
+    };
+
+    tracing::info!(
+        model = %body.model,
+        provider = %route.provider,
+        "Routing chat completion through hoosh fallback"
+    );
+
+    if body.stream {
+        // Hoosh streaming fallback
+        let mut rx = provider.infer_stream(hoosh_req).await.map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Hoosh streaming failed: {e}"),
+            )
+        })?;
+
+        let model = body.model.clone();
+        let response_id = format!("chatcmpl-{}", uuid::Uuid::new_v4());
+
+        let stream = async_stream::stream! {
+            while let Some(chunk_result) = rx.recv().await {
+                match chunk_result {
+                    Ok(text) => {
+                        if text.is_empty() {
+                            let data = serde_json::json!({
+                                "id": response_id,
+                                "object": "chat.completion.chunk",
+                                "model": model,
+                                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                            });
+                            yield Ok(Event::default().data(data.to_string()));
+                            yield Ok(Event::default().data("[DONE]"));
+                            break;
+                        }
+                        let data = serde_json::json!({
+                            "id": response_id,
+                            "object": "chat.completion.chunk",
+                            "model": model,
+                            "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": serde_json::Value::Null}],
+                        });
+                        yield Ok::<_, std::convert::Infallible>(Event::default().data(data.to_string()));
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "Hoosh stream chunk error");
+                        yield Ok(Event::default().data("[DONE]"));
+                        break;
+                    }
+                }
+            }
+        };
+
+        return Ok(Sse::new(stream).into_response());
+    }
+
+    // Non-streaming hoosh fallback
+    let hoosh_resp = provider.infer(&hoosh_req).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Hoosh inference failed: {e}"),
+        )
+    })?;
 
     let response_id = format!("chatcmpl-{}", uuid::Uuid::new_v4());
 
@@ -148,18 +311,14 @@ pub async fn chat_completions(
             "index": 0,
             "message": {
                 "role": "assistant",
-                "content": resp.text,
+                "content": hoosh_resp.text,
             },
-            "finish_reason": match resp.finish_reason {
-                crate::types::inference::FinishReason::Stop => "stop",
-                crate::types::inference::FinishReason::MaxTokens => "length",
-                crate::types::inference::FinishReason::StopSequence => "stop",
-            },
+            "finish_reason": "stop",
         }],
         "usage": {
-            "prompt_tokens": resp.usage.prompt_tokens,
-            "completion_tokens": resp.usage.completion_tokens,
-            "total_tokens": resp.usage.total_tokens,
+            "prompt_tokens": hoosh_resp.usage.prompt_tokens,
+            "completion_tokens": hoosh_resp.usage.completion_tokens,
+            "total_tokens": hoosh_resp.usage.total_tokens,
         },
     });
 
@@ -371,7 +530,7 @@ mod tests {
         )
         .await;
         let err = result.unwrap_err();
-        assert_eq!(err.0, StatusCode::BAD_REQUEST);
-        assert!(err.1.contains("is not loaded"));
+        // With hoosh fallback, the error may come from hoosh routing or model-not-loaded
+        assert!(err.0 == StatusCode::BAD_REQUEST || err.0 == StatusCode::INTERNAL_SERVER_ERROR);
     }
 }

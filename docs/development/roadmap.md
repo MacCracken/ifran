@@ -4,31 +4,13 @@
 
 ### Test Coverage
 
-Current: **1,444 tests**, single flat crate. CI threshold: 65%.
+Current: **1,445 tests**, single flat crate. CI threshold: 65%.
 
 ---
 
-## Ecosystem Integration
-
-### Hoosh — inference gateway
-- [ ] **Route server inference through hoosh** — use `hoosh::Router` + `ProviderRegistry` as the primary inference path, replacing direct backend HTTP calls for remote providers
-- [ ] **Simplify OpenAI-compat API** — `/v1/chat/completions` and `/v1/models` proxy to hoosh instead of reimplementing
-- [ ] **Drop `ai-hwaccel` direct dep** — hardware detection comes through hoosh; remove ifran's fallback detection code
-- [ ] **Evaluate embedding hoosh server** — share one process for inference + management endpoints (pending hoosh `HooshServer::builder()` API)
-
-### Majra — remaining primitives
-- [ ] **Use `majra::fleet` for multi-node GPU scheduling** — `FleetQueue` with work-stealing replaces manual node selection; `ResourcePool`/`ResourceReq` for GPU-aware routing
-- [ ] **Use `majra::dag` for training pipelines** — model lifecycle (download → convert → quantise → index) is a DAG; `WorkflowEngine` provides tier-based parallel execution, retry, error policies
-- [ ] **Evaluate `majra::redis_backend` for multi-instance** — `RedisRateLimiter` for distributed rate limiting, `RedisHeartbeatTracker` for cross-instance fleet health
-- [ ] **Evaluate `majra::postgres` for durable job scheduling** — `PostgresQueueBackend` for `ManagedQueue` persistence (currently SQLite); `PostgresWorkflowStorage` for DAG workflow runs
-
-### Dependency cleanup
-- [ ] Remove: `ai-hwaccel`, `async-trait` (if no longer needed after hoosh migration)
-- [ ] Evaluate removing: `axum` (if hoosh embeds the server)
-
 ## Performance & Memory
 
-- [ ] **Rate limiter IP eviction** — solved by majra migration (stale-key eviction built in), wire it through
+- [ ] **Rate limiter IP eviction** — wire majra's stale-key eviction through the rate limiter
 
 ## Observability
 
@@ -50,3 +32,5 @@ Current: **1,444 tests**, single flat crate. CI threshold: 65%.
 - Experiment DSL documentation and guide
 - Advanced features guide (auto-labeling, data augmentation, A/B testing, drift detection)
 - Marketplace and RAG user guides
+- Redis backend for multi-instance fleet coordination (see ADR-010)
+- PostgreSQL backend for durable workflow persistence (see ADR-010)

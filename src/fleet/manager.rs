@@ -4,8 +4,11 @@
 //! using majra's HeartbeatTracker for the Online/Suspect/Offline FSM.
 
 use crate::types::IfranError;
+use crate::types::training::TrainingJobId;
 use chrono::{DateTime, Utc};
+use majra::fleet::{FleetQueue, FleetQueueConfig, FleetQueueStats};
 use majra::heartbeat::{HeartbeatConfig, HeartbeatTracker, Status};
+use majra::queue::{Priority, ResourcePool, ResourceReq, TaskId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -93,6 +96,7 @@ struct NodeMeta {
 pub struct FleetManager {
     tracker: Arc<RwLock<HeartbeatTracker>>,
     meta: Arc<RwLock<HashMap<NodeId, NodeMeta>>>,
+    fleet_queue: Arc<RwLock<FleetQueue<TrainingJobId>>>,
     offline_timeout: Duration,
     cancel_tx: watch::Sender<bool>,
 }
@@ -101,6 +105,7 @@ impl FleetManager {
     /// Create a new fleet manager.
     pub fn new(suspect_timeout: Duration, offline_timeout: Duration) -> Self {
         let (cancel_tx, _) = watch::channel(false);
+        let fleet_queue = FleetQueue::new(FleetQueueConfig::default());
         Self {
             tracker: Arc::new(RwLock::new(HeartbeatTracker::new(HeartbeatConfig {
                 suspect_after: suspect_timeout,
@@ -108,6 +113,7 @@ impl FleetManager {
                 eviction_policy: None,
             }))),
             meta: Arc::new(RwLock::new(HashMap::new())),
+            fleet_queue: Arc::new(RwLock::new(fleet_queue)),
             offline_timeout,
             cancel_tx,
         }
@@ -208,6 +214,15 @@ impl FleetManager {
             last_heartbeat: now,
             registered_at: now,
         };
+
+        // Register with fleet queue for job routing
+        self.fleet_queue.write().await.register_node(
+            &req.id,
+            ResourcePool {
+                gpu_count: req.gpu_count as u32,
+                vram_mb: req.total_gpu_memory_mb,
+            },
+        );
 
         self.meta.write().await.insert(req.id, node_meta);
         Ok(node)
@@ -386,6 +401,7 @@ impl FleetManager {
     /// Remove a node from the fleet.
     pub async fn remove(&self, node_id: &str) -> bool {
         self.tracker.write().await.deregister(node_id);
+        self.fleet_queue.write().await.deregister_node(node_id);
         self.meta.write().await.remove(node_id).is_some()
     }
 
@@ -419,6 +435,39 @@ impl FleetManager {
         }
 
         stats
+    }
+
+    /// Submit a training job to the fleet queue.
+    ///
+    /// Routes the job to the least-loaded node that satisfies the GPU
+    /// requirements. Returns `(node_id, task_id)` if a suitable node
+    /// was found, or `None` if no node can handle the request.
+    pub async fn submit_job(
+        &self,
+        job_id: TrainingJobId,
+        gpu_count: u32,
+        vram_mb: u64,
+    ) -> Option<(String, TaskId)> {
+        let req = ResourceReq { gpu_count, vram_mb };
+        self.fleet_queue
+            .write()
+            .await
+            .submit(Priority::Normal, job_id, Some(req))
+            .await
+            .map(|(node_id, task_id)| (node_id.to_string(), task_id))
+    }
+
+    /// Rebalance the fleet queue via work-stealing.
+    ///
+    /// Moves jobs from overloaded nodes to idle nodes. Returns the
+    /// number of jobs stolen.
+    pub async fn rebalance(&self) -> usize {
+        self.fleet_queue.write().await.rebalance().await
+    }
+
+    /// Get fleet queue statistics.
+    pub async fn fleet_stats(&self) -> FleetQueueStats {
+        self.fleet_queue.read().await.stats()
     }
 
     /// Stop the health check loop.

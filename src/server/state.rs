@@ -66,6 +66,12 @@ pub struct AppState {
 
     /// Token budget for per-tenant usage tracking.
     pub token_budget: Arc<Mutex<hoosh::TokenBudget>>,
+
+    /// Hoosh provider router for fallback inference routing to remote/local LLM providers.
+    pub hoosh_router: Option<Arc<hoosh::Router>>,
+
+    /// Hoosh provider registry — live provider instances for inference.
+    pub hoosh_providers: Option<Arc<hoosh::ProviderRegistry>>,
 }
 
 impl AppState {
@@ -190,6 +196,55 @@ impl AppState {
         // Token budget — create a default pool; per-tenant pools are created on demand
         let token_budget = hoosh::TokenBudget::new();
 
+        // Initialize hoosh Router and ProviderRegistry from backends config.
+        // For each enabled backend, create a ProviderRoute and register it.
+        let (hoosh_router, hoosh_providers) = {
+            let mut routes = Vec::new();
+            let mut registry = hoosh::ProviderRegistry::new();
+
+            for (priority, backend_name) in config.backends.enabled.iter().enumerate() {
+                let provider_type = match backend_name.as_str() {
+                    "llamacpp" => hoosh::ProviderType::LlamaCpp,
+                    "ollama" => hoosh::ProviderType::Ollama,
+                    "vllm" => hoosh::ProviderType::OpenAi,
+                    _ => hoosh::ProviderType::OpenAi,
+                };
+
+                let base_url = match backend_name.as_str() {
+                    "ollama" => std::env::var("OLLAMA_HOST")
+                        .unwrap_or_else(|_| "http://localhost:11434".into()),
+                    "llamacpp" => std::env::var("LLAMACPP_HOST")
+                        .unwrap_or_else(|_| "http://localhost:8080".into()),
+                    "vllm" => std::env::var("VLLM_HOST")
+                        .unwrap_or_else(|_| "http://localhost:8000".into()),
+                    _ => std::env::var(format!("{}_HOST", backend_name.to_uppercase()))
+                        .unwrap_or_else(|_| "http://localhost:8080".into()),
+                };
+
+                let route = hoosh::router::ProviderRoute {
+                    provider: provider_type,
+                    priority: priority as u32,
+                    model_patterns: vec![], // wildcard — accepts all models
+                    enabled: true,
+                    base_url: base_url.clone(),
+                    api_key: None,
+                    max_tokens_limit: None,
+                    rate_limit_rpm: None,
+                    tls_config: None,
+                };
+
+                registry.register_from_route(&route);
+                routes.push(route);
+            }
+
+            if routes.is_empty() {
+                (None, None)
+            } else {
+                let router = hoosh::Router::new(routes, hoosh::router::RoutingStrategy::Priority);
+                (Some(Arc::new(router)), Some(Arc::new(registry)))
+            }
+        };
+
         if let Some(ws_addr) = &config.server.ws_bind {
             if let Ok(addr) = ws_addr.parse() {
                 let bridge = Arc::new(WsBridge::new(event_hub.clone(), WsBridgeConfig::default()));
@@ -224,6 +279,8 @@ impl AppState {
             prometheus_registry,
             inference_cache,
             token_budget: Arc::new(Mutex::new(token_budget)),
+            hoosh_router,
+            hoosh_providers,
         })
     }
 }
