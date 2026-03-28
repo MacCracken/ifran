@@ -58,27 +58,42 @@ pub async fn inference(
         ))
         .ok_or_else(|| ApiErrorResponse::internal("Backend not available"))?;
 
-    // Check hoosh response cache before running inference
-    let cache_key = format!("{}:{}", body.model, body.prompt);
+    let pool_name = tenant_id.to_string();
+
+    // Check token budget before inference (if budget enforcement is enabled)
+    if state.config.budget.enabled {
+        let mut budget = state.token_budget.lock().await;
+        // Create per-tenant pool on demand (1M tokens default capacity)
+        if budget.get_pool(&pool_name).is_none() {
+            budget.add_pool(hoosh::TokenPool::new(&pool_name, 1_000_000));
+        }
+        let estimated_tokens = (body.max_tokens as u64) + (body.prompt.len() as u64 / 4);
+        if !budget.check(&pool_name, estimated_tokens) {
+            return Err(ApiErrorResponse::bad_request(
+                "BUDGET_EXCEEDED",
+                "Token budget exhausted for this tenant",
+            )
+            .with_hint("Wait for the budget to reset or increase the pool capacity"));
+        }
+    }
+
+    // Check response cache — key includes all parameters that affect output
+    let cache_key = format!(
+        "{}:{}:{}:{:?}:{:?}:{:?}:{:?}",
+        body.model,
+        body.prompt,
+        body.max_tokens,
+        body.temperature,
+        body.top_p,
+        body.top_k,
+        body.system_prompt
+    );
     if let Some(cached) = state.inference_cache.get(&cache_key) {
         tracing::debug!(model = %body.model, "Inference cache hit");
         return Ok(Json(
             serde_json::from_str(&cached)
                 .unwrap_or(serde_json::json!({"text": &*cached, "cached": true})),
         ));
-    }
-
-    // Check token budget before running inference
-    {
-        let budget = state.token_budget.lock().await;
-        let estimated_tokens = (body.max_tokens as u64) + (body.prompt.len() as u64 / 4);
-        if !budget.check("default", estimated_tokens) {
-            return Err(ApiErrorResponse::bad_request(
-                "BUDGET_EXCEEDED",
-                "Token budget exhausted for this pool",
-            )
-            .with_hint("Wait for the budget to reset or increase the pool capacity"));
-        }
     }
 
     let handle = crate::backends::ModelHandle(loaded_model.handle.clone());
@@ -98,10 +113,14 @@ pub async fn inference(
         .await
         .map_err(|e| ApiErrorResponse::internal(e.to_string()))?;
 
-    // Report token usage to hoosh budget
-    {
+    // Report actual token usage to budget
+    if state.config.budget.enabled {
         let mut budget = state.token_budget.lock().await;
-        budget.report("default", 0, resp.usage.total_tokens as u64);
+        budget.report(
+            &pool_name,
+            resp.usage.prompt_tokens as u64,
+            resp.usage.total_tokens as u64,
+        );
     }
 
     let response_json = serde_json::json!({
@@ -153,6 +172,23 @@ pub async fn inference_stream(
             loaded_model.backend_id.clone(),
         ))
         .ok_or_else(|| ApiErrorResponse::internal("Backend not available"))?;
+
+    // Check token budget for streaming requests too
+    if state.config.budget.enabled {
+        let pool_name = tenant_id.to_string();
+        let mut budget = state.token_budget.lock().await;
+        if budget.get_pool(&pool_name).is_none() {
+            budget.add_pool(hoosh::TokenPool::new(&pool_name, 1_000_000));
+        }
+        let estimated_tokens = (body.max_tokens as u64) + (body.prompt.len() as u64 / 4);
+        if !budget.check(&pool_name, estimated_tokens) {
+            return Err(ApiErrorResponse::bad_request(
+                "BUDGET_EXCEEDED",
+                "Token budget exhausted for this tenant",
+            )
+            .with_hint("Wait for the budget to reset or increase the pool capacity"));
+        }
+    }
 
     let handle = crate::backends::ModelHandle(loaded_model.handle.clone());
     let req = InferenceRequest {

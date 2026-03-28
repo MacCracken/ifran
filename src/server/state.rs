@@ -61,13 +61,10 @@ pub struct AppState {
     pub fleet_manager: Arc<FleetManager>,
     pub prometheus_registry: Arc<prometheus::Registry>,
 
-    /// Hoosh inference gateway client for LLM provider routing.
-    pub hoosh_client: Arc<hoosh::HooshClient>,
-
-    /// Hoosh response cache for inference deduplication.
+    /// Inference response cache for deduplication.
     pub inference_cache: Arc<hoosh::ResponseCache>,
 
-    /// Hoosh token budget for per-tenant usage tracking.
+    /// Token budget for per-tenant usage tracking.
     pub token_budget: Arc<Mutex<hoosh::TokenBudget>>,
 }
 
@@ -183,21 +180,15 @@ impl AppState {
             (None, None)
         };
 
-        // Hoosh inference gateway client
-        let hoosh_url =
-            std::env::var("HOOSH_URL").unwrap_or_else(|_| "http://127.0.0.1:8088".to_string());
-        let hoosh_client = Arc::new(hoosh::HooshClient::new(&hoosh_url));
-
-        // Hoosh response cache — 1000 entries, 5-minute TTL
+        // Inference response cache
         let inference_cache = Arc::new(hoosh::ResponseCache::new(hoosh::cache::CacheConfig {
             max_entries: 1000,
             ttl_secs: 300,
             enabled: true,
         }));
 
-        // Hoosh token budget — default pool per tenant, 1M tokens/day
-        let mut token_budget = hoosh::TokenBudget::new();
-        token_budget.add_pool(hoosh::TokenPool::new("default", 1_000_000));
+        // Token budget — create a default pool; per-tenant pools are created on demand
+        let token_budget = hoosh::TokenBudget::new();
 
         if let Some(ws_addr) = &config.server.ws_bind {
             if let Ok(addr) = ws_addr.parse() {
@@ -231,7 +222,6 @@ impl AppState {
             telemetry,
             fleet_manager: Arc::new(fleet_manager),
             prometheus_registry,
-            hoosh_client,
             inference_cache,
             token_budget: Arc::new(Mutex::new(token_budget)),
         })

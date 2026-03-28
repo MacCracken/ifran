@@ -4,7 +4,9 @@ pub mod list;
 pub mod marketplace;
 pub mod pull;
 pub mod remove;
+#[cfg(feature = "server")]
 pub mod run;
+#[cfg(feature = "server")]
 pub mod serve;
 pub mod status;
 pub mod train;

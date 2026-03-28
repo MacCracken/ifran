@@ -107,6 +107,9 @@ pub async fn delete_model(
         .delete(model.id, &tenant_id)
         .map_err(|e| ApiErrorResponse::internal(e.to_string()))?;
 
+    // Invalidate inference cache — model is being removed, cached responses are stale
+    state.inference_cache.clear();
+
     // Clean up files from disk (best-effort after successful DB delete)
     let local_path = std::path::Path::new(&model.local_path);
     if let Some(model_dir) = local_path.parent() {

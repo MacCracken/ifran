@@ -3,11 +3,13 @@ pub mod backend;
 pub mod dataset;
 
 /// Generated protobuf types for the Ifran↔SY bridge protocol.
+#[cfg(feature = "server")]
 pub mod bridge {
     tonic::include_proto!("ifran.bridge");
 }
 
 /// Generated protobuf types for the core Ifran gRPC service.
+#[cfg(feature = "server")]
 pub mod ifran_proto {
     tonic::include_proto!("ifran");
 }

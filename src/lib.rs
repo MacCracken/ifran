@@ -22,6 +22,7 @@
 //! `qualcomm`, `xdna`
 //!
 //! Other features:
+//! - **`server`** — API server, gRPC bridge, fleet management, metrics, hoosh integration.
 //! - **`hwaccel`** — Hardware accelerator detection via `ai-hwaccel`.
 //! - **`otlp`** — OpenTelemetry OTLP trace export.
 //! - **`full`** — All of the above.
@@ -29,7 +30,7 @@
 // -- Shared types --
 pub mod types;
 
-// -- Core domain modules (from ifran-core) --
+// -- Core domain modules --
 pub mod ab_test;
 pub mod budget;
 pub mod config;
@@ -59,10 +60,12 @@ pub mod backends;
 // -- Training pipeline --
 pub mod train;
 
-// -- gRPC bridge --
+// -- gRPC bridge (server feature) --
+#[cfg(feature = "server")]
 pub mod bridge;
 
-// -- API server --
+// -- API server (server feature) --
+#[cfg(feature = "server")]
 pub mod server;
 
 // -- CLI --
