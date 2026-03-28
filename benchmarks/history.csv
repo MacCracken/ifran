@@ -109,3 +109,13 @@ timestamp,label,benchmark,time_ns,time_unit
 2026-03-28T20:21:58Z,post-audit-perf-obs,score_exact_match_1000,10170,ns
 2026-03-28T20:21:58Z,post-audit-perf-obs,score_contains_match_1000,4292,ns
 2026-03-28T20:21:58Z,post-audit-perf-obs,score_mmlu_500,68802,ns
+2026-03-28T21:02:03Z,post-pre1.0-work,cosine_similarity_768d,1991,ns
+2026-03-28T21:02:03Z,post-pre1.0-work,cosine_similarity_1536d,4013,ns
+2026-03-28T21:02:03Z,post-pre1.0-work,estimate_gguf_7b,9,ns
+2026-03-28T21:02:03Z,post-pre1.0-work,estimate_gguf_70b,9,ns
+2026-03-28T21:02:03Z,post-pre1.0-work,cache_insert_100,33240,ns
+2026-03-28T21:02:03Z,post-pre1.0-work,cache_insert_with_eviction,43333,ns
+2026-03-28T21:02:03Z,post-pre1.0-work,cache_touch_hit,61,ns
+2026-03-28T21:02:03Z,post-pre1.0-work,score_exact_match_1000,19165,ns
+2026-03-28T21:02:03Z,post-pre1.0-work,score_contains_match_1000,6734,ns
+2026-03-28T21:02:03Z,post-pre1.0-work,score_mmlu_500,157994,ns

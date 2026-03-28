@@ -4,7 +4,9 @@
 //! - POST /v1/chat/completions
 //! - GET /v1/models
 
-use crate::server::middleware::validation::{validate_model_name, validate_prompt_length};
+use crate::server::middleware::validation::{
+    sanitize_prompt, validate_model_name, validate_prompt_length,
+};
 use crate::server::state::AppState;
 use crate::types::TenantId;
 use crate::types::inference::InferenceRequest;
@@ -104,31 +106,58 @@ pub async fn chat_completions(
         validate_prompt_length(&msg.content, state.config.security.max_prompt_length)?;
     }
 
-    // Validate combined message length against prompt length limit
+    // Validate combined message length against prompt length limit (with 50K hard cap)
     let total_content_length: usize = body.messages.iter().map(|m| m.content.len()).sum();
-    if total_content_length > state.config.security.max_prompt_length {
+    let effective_total_limit = state.config.security.max_prompt_length.min(50_000);
+    if total_content_length > effective_total_limit {
         return Err((
             StatusCode::BAD_REQUEST,
             format!(
                 "Combined message length {} exceeds maximum {}",
-                total_content_length, state.config.security.max_prompt_length
+                total_content_length, effective_total_limit
             ),
         ));
     }
 
-    // Extract system prompt and user messages
+    // Prompt injection detection — scan user messages before sanitization
+    for msg in &body.messages {
+        if msg.role == "user" {
+            let scan = crate::server::middleware::prompt_guard::scan(&msg.content);
+            if scan.risk_score >= 0.8 {
+                tracing::warn!(
+                    risk_score = scan.risk_score,
+                    patterns = ?scan.matched_patterns.iter().map(|m| m.pattern_name).collect::<Vec<_>>(),
+                    "Blocked high-risk prompt injection attempt (chat)"
+                );
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    "Input contains patterns consistent with prompt injection".into(),
+                ));
+            }
+            if scan.is_suspicious {
+                tracing::info!(
+                    risk_score = scan.risk_score,
+                    patterns = ?scan.matched_patterns.iter().map(|m| m.pattern_name).collect::<Vec<_>>(),
+                    "Suspicious prompt patterns detected in chat message (allowed)"
+                );
+            }
+        }
+    }
+
+    // Extract system prompt (not sanitized — server-controlled)
     let system_prompt = body
         .messages
         .iter()
         .find(|m| m.role == "system")
         .map(|m| m.content.clone());
 
+    // Extract and sanitize the last user message
     let prompt = match body
         .messages
         .iter()
         .rev()
         .find(|m| m.role == "user")
-        .map(|m| m.content.clone())
+        .map(|m| sanitize_prompt(&m.content))
     {
         Some(content) if !content.is_empty() => content,
         _ => {
@@ -237,7 +266,7 @@ pub async fn chat_completions(
         ),
     ))?;
 
-    // Convert messages to hoosh format
+    // Convert messages to hoosh format, sanitizing user content only
     let hoosh_messages: Vec<hoosh::inference::Message> = body
         .messages
         .iter()
@@ -248,7 +277,12 @@ pub async fn chat_completions(
                 "tool" => hoosh::inference::Role::Tool,
                 _ => hoosh::inference::Role::User,
             };
-            hoosh::inference::Message::new(role, &m.content)
+            let content = if role == hoosh::inference::Role::User {
+                sanitize_prompt(&m.content)
+            } else {
+                m.content.clone()
+            };
+            hoosh::inference::Message::new(role, &content)
         })
         .collect();
 
@@ -393,51 +427,11 @@ async fn stream_response(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::*;
-    use crate::server::state::AppState;
+    use crate::server::test_helpers::helpers::test_state;
     use crate::storage::db::ModelDatabase;
     use crate::types::TenantId;
     use crate::types::model::{ModelFormat, ModelInfo, QuantLevel};
     use axum::extract::Extension;
-
-    fn test_state(tmp: &tempfile::TempDir) -> AppState {
-        let config = IfranConfig {
-            server: ServerConfig {
-                bind: "127.0.0.1:0".into(),
-                grpc_bind: "127.0.0.1:0".into(),
-                ws_bind: None,
-            },
-            storage: StorageConfig {
-                models_dir: tmp.path().join("models"),
-                database: tmp.path().join("test.db"),
-                cache_dir: tmp.path().join("cache"),
-            },
-            backends: BackendsConfig {
-                default: "llamacpp".into(),
-                enabled: vec!["llamacpp".into()],
-            },
-            training: TrainingConfig {
-                executor: "subprocess".into(),
-                trainer_image: None,
-                max_concurrent_jobs: 2,
-                checkpoints_dir: tmp.path().join("checkpoints"),
-                job_eviction_ttl_secs: 86400,
-            },
-            bridge: BridgeConfig {
-                sy_endpoint: None,
-                enabled: false,
-                heartbeat_interval_secs: 10,
-            },
-            hardware: HardwareConfig {
-                gpu_memory_reserve_mb: 512,
-                telemetry_interval_secs: 0,
-            },
-            security: SecurityConfig::default(),
-            budget: BudgetConfig::default(),
-            fleet: FleetConfig::default(),
-        };
-        AppState::new(config).unwrap()
-    }
 
     #[test]
     fn chat_message_deserialize() {

@@ -100,7 +100,9 @@ async-stream = { version = "0.3", optional = true }
 
 # Crypto / hashing
 sha2 = "0.10"
+hmac = "0.12"
 blake3 = "1"
+hex = "0.4"
 
 # UUID
 uuid = { version = "1", features = ["v4", "serde"] }

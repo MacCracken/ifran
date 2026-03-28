@@ -319,8 +319,7 @@ fn entry_to_response(entry: &MarketplaceEntry) -> MarketplaceEntryResponse {
 mod tests {
     use super::super::pagination::DEFAULT_LIMIT;
     use super::*;
-    use crate::config::*;
-    use crate::server::state::AppState;
+    use crate::server::test_helpers::helpers::test_state;
     use crate::types::marketplace::MarketplaceEntry;
     use crate::types::model::{ModelFormat, QuantLevel};
     use axum::extract::Extension;
@@ -330,45 +329,6 @@ mod tests {
             limit: DEFAULT_LIMIT,
             offset: 0,
         }
-    }
-
-    fn test_state(tmp: &tempfile::TempDir) -> AppState {
-        let config = IfranConfig {
-            server: ServerConfig {
-                bind: "127.0.0.1:0".into(),
-                grpc_bind: "127.0.0.1:0".into(),
-                ws_bind: None,
-            },
-            storage: StorageConfig {
-                models_dir: tmp.path().join("models"),
-                database: tmp.path().join("test.db"),
-                cache_dir: tmp.path().join("cache"),
-            },
-            backends: BackendsConfig {
-                default: "llamacpp".into(),
-                enabled: vec!["llamacpp".into()],
-            },
-            training: TrainingConfig {
-                executor: "subprocess".into(),
-                trainer_image: None,
-                max_concurrent_jobs: 2,
-                checkpoints_dir: tmp.path().join("checkpoints"),
-                job_eviction_ttl_secs: 86400,
-            },
-            bridge: BridgeConfig {
-                sy_endpoint: None,
-                enabled: false,
-                heartbeat_interval_secs: 10,
-            },
-            hardware: HardwareConfig {
-                gpu_memory_reserve_mb: 512,
-                telemetry_interval_secs: 0,
-            },
-            security: SecurityConfig::default(),
-            budget: BudgetConfig::default(),
-            fleet: FleetConfig::default(),
-        };
-        AppState::new(config).unwrap()
     }
 
     fn test_entry() -> MarketplaceEntry {

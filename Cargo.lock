@@ -1342,6 +1342,8 @@ dependencies = [
  "clap",
  "criterion",
  "futures",
+ "hex",
+ "hmac",
  "hoosh",
  "http-body-util",
  "indicatif",

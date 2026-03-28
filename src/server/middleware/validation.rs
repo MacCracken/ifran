@@ -5,18 +5,35 @@
 
 use axum::http::StatusCode;
 
+/// Absolute hard cap on input length (50K characters). Config can only be stricter.
+const MAX_INPUT_CHARS: usize = 50_000;
+
 /// Reject prompts that exceed the configured maximum length.
+///
+/// A hard cap of [`MAX_INPUT_CHARS`] is always enforced regardless of what the
+/// caller passes as `max_len`.
 pub fn validate_prompt_length(prompt: &str, max_len: usize) -> Result<(), (StatusCode, String)> {
-    if prompt.len() > max_len {
+    let effective_limit = max_len.min(MAX_INPUT_CHARS);
+    if prompt.len() > effective_limit {
         return Err((
             StatusCode::PAYLOAD_TOO_LARGE,
             format!(
-                "Prompt exceeds maximum length of {max_len} characters ({} provided)",
+                "Prompt exceeds maximum length of {effective_limit} characters ({} provided)",
                 prompt.len()
             ),
         ));
     }
     Ok(())
+}
+
+/// Wrap user content in boundary markers to prevent prompt confusion.
+///
+/// This adds delimiters that separate user content from system instructions,
+/// making it harder for injected text to be interpreted as system-level directives.
+#[must_use]
+#[inline]
+pub fn sanitize_prompt(user_content: &str) -> String {
+    format!("<|user_input_start|>\n{user_content}\n<|user_input_end|>")
 }
 
 /// Validate a model name: alphanumeric, hyphens, underscores, slashes
@@ -89,6 +106,58 @@ mod tests {
     #[test]
     fn prompt_empty_ok() {
         assert!(validate_prompt_length("", 100).is_ok());
+    }
+
+    #[test]
+    fn prompt_hard_cap_enforced_when_config_higher() {
+        // Config says 100_000 but hard cap is 50_000
+        let s = "a".repeat(50_001);
+        let err = validate_prompt_length(&s, 100_000).unwrap_err();
+        assert_eq!(err.0, StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(err.1.contains("50000"));
+    }
+
+    #[test]
+    fn prompt_config_stricter_than_hard_cap() {
+        // Config says 1000, which is stricter than 50K hard cap
+        let s = "a".repeat(1001);
+        let err = validate_prompt_length(&s, 1000).unwrap_err();
+        assert_eq!(err.0, StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(err.1.contains("1000"));
+    }
+
+    #[test]
+    fn prompt_at_hard_cap_ok() {
+        let s = "a".repeat(50_000);
+        assert!(validate_prompt_length(&s, 100_000).is_ok());
+    }
+
+    // -- sanitize_prompt --
+
+    #[test]
+    fn sanitize_wraps_content() {
+        let result = sanitize_prompt("hello world");
+        assert_eq!(
+            result,
+            "<|user_input_start|>\nhello world\n<|user_input_end|>"
+        );
+    }
+
+    #[test]
+    fn sanitize_empty_prompt() {
+        let result = sanitize_prompt("");
+        assert_eq!(result, "<|user_input_start|>\n\n<|user_input_end|>");
+    }
+
+    #[test]
+    fn sanitize_prompt_with_existing_markers() {
+        // Content that already contains boundary markers gets double-wrapped — outer markers are authoritative
+        let input = "<|user_input_start|>\nmalicious\n<|user_input_end|>";
+        let result = sanitize_prompt(input);
+        assert!(result.starts_with("<|user_input_start|>\n"));
+        assert!(result.ends_with("\n<|user_input_end|>"));
+        // The original markers are inside the outer wrapping
+        assert!(result.contains("<|user_input_start|>\nmalicious\n<|user_input_end|>"));
     }
 
     // -- validate_model_name --

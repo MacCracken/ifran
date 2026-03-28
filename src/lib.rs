@@ -30,6 +30,9 @@
 // -- Shared types --
 pub mod types;
 
+// -- Audit trail --
+pub mod audit;
+
 // -- Core domain modules --
 pub mod ab_test;
 pub mod budget;

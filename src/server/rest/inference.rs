@@ -1,6 +1,9 @@
 //! REST handlers for inference requests (generate with optional streaming).
 
-use crate::server::middleware::validation::{validate_model_name, validate_prompt_length};
+use crate::server::middleware::output_filter::filter_output;
+use crate::server::middleware::validation::{
+    sanitize_prompt, validate_model_name, validate_prompt_length,
+};
 use crate::server::rest::error::ApiErrorResponse;
 use crate::server::state::AppState;
 use crate::types::TenantId;
@@ -39,6 +42,29 @@ pub async fn inference(
     validate_model_name(&body.model).map_err(ApiErrorResponse::from)?;
     validate_prompt_length(&body.prompt, state.config.security.max_prompt_length)
         .map_err(ApiErrorResponse::from)?;
+
+    // Prompt injection detection — before sanitization so we see raw input
+    let scan = crate::server::middleware::prompt_guard::scan(&body.prompt);
+    if scan.risk_score >= 0.8 {
+        tracing::warn!(
+            risk_score = scan.risk_score,
+            patterns = ?scan.matched_patterns.iter().map(|m| m.pattern_name).collect::<Vec<_>>(),
+            "Blocked high-risk prompt injection attempt"
+        );
+        return Err(ApiErrorResponse::bad_request(
+            "PROMPT_INJECTION_DETECTED",
+            "Input contains patterns consistent with prompt injection",
+        ));
+    }
+    if scan.is_suspicious {
+        tracing::info!(
+            risk_score = scan.risk_score,
+            patterns = ?scan.matched_patterns.iter().map(|m| m.pattern_name).collect::<Vec<_>>(),
+            "Suspicious prompt patterns detected (allowed)"
+        );
+    }
+
+    let sanitized_prompt = sanitize_prompt(&body.prompt);
 
     let pool_name = tenant_id.to_string();
 
@@ -96,7 +122,7 @@ pub async fn inference(
 
         let handle = crate::backends::ModelHandle(loaded_model.handle.clone());
         let req = InferenceRequest {
-            prompt: body.prompt.clone(),
+            prompt: sanitized_prompt.clone(),
             max_tokens: Some(body.max_tokens),
             temperature: body.temperature,
             top_p: body.top_p,
@@ -117,8 +143,18 @@ pub async fn inference(
             budget.report(&pool_name, estimated, resp.usage.total_tokens as u64);
         }
 
+        // Filter output for leaked secrets / PII before returning
+        let filtered = filter_output(&resp.text);
+        if !filtered.redactions.is_empty() {
+            tracing::warn!(
+                redaction_count = filtered.redactions.len(),
+                categories = ?filtered.redactions.iter().map(|r| r.category).collect::<Vec<_>>(),
+                "Redacted sensitive content from inference response"
+            );
+        }
+
         let response_json = serde_json::json!({
-            "text": resp.text,
+            "text": filtered.text,
             "usage": {
                 "prompt_tokens": resp.usage.prompt_tokens,
                 "completion_tokens": resp.usage.completion_tokens,
@@ -169,7 +205,7 @@ pub async fn inference(
 
     let hoosh_req = hoosh::InferenceRequest {
         model: body.model.clone(),
-        prompt: body.prompt.clone(),
+        prompt: sanitized_prompt.clone(),
         system: body.system_prompt.clone(),
         max_tokens: Some(body.max_tokens),
         temperature: body.temperature.map(|t| t as f64),
@@ -195,8 +231,18 @@ pub async fn inference(
         budget.report(&pool_name, estimated, hoosh_resp.usage.total_tokens as u64);
     }
 
+    // Filter output for leaked secrets / PII before returning
+    let filtered = filter_output(&hoosh_resp.text);
+    if !filtered.redactions.is_empty() {
+        tracing::warn!(
+            redaction_count = filtered.redactions.len(),
+            categories = ?filtered.redactions.iter().map(|r| r.category).collect::<Vec<_>>(),
+            "Redacted sensitive content from hoosh inference response"
+        );
+    }
+
     let response_json = serde_json::json!({
-        "text": hoosh_resp.text,
+        "text": filtered.text,
         "usage": {
             "prompt_tokens": hoosh_resp.usage.prompt_tokens,
             "completion_tokens": hoosh_resp.usage.completion_tokens,
@@ -223,6 +269,29 @@ pub async fn inference_stream(
     validate_model_name(&body.model).map_err(ApiErrorResponse::from)?;
     validate_prompt_length(&body.prompt, state.config.security.max_prompt_length)
         .map_err(ApiErrorResponse::from)?;
+
+    // Prompt injection detection — before sanitization so we see raw input
+    let scan = crate::server::middleware::prompt_guard::scan(&body.prompt);
+    if scan.risk_score >= 0.8 {
+        tracing::warn!(
+            risk_score = scan.risk_score,
+            patterns = ?scan.matched_patterns.iter().map(|m| m.pattern_name).collect::<Vec<_>>(),
+            "Blocked high-risk prompt injection attempt (stream)"
+        );
+        return Err(ApiErrorResponse::bad_request(
+            "PROMPT_INJECTION_DETECTED",
+            "Input contains patterns consistent with prompt injection",
+        ));
+    }
+    if scan.is_suspicious {
+        tracing::info!(
+            risk_score = scan.risk_score,
+            patterns = ?scan.matched_patterns.iter().map(|m| m.pattern_name).collect::<Vec<_>>(),
+            "Suspicious prompt patterns detected in stream request (allowed)"
+        );
+    }
+
+    let sanitized_prompt = sanitize_prompt(&body.prompt);
 
     // Reserve tokens from budget for streaming requests too
     if state.config.budget.enabled {
@@ -255,7 +324,7 @@ pub async fn inference_stream(
 
         let handle = crate::backends::ModelHandle(loaded_model.handle.clone());
         let req = InferenceRequest {
-            prompt: body.prompt,
+            prompt: sanitized_prompt.clone(),
             max_tokens: Some(body.max_tokens),
             temperature: body.temperature,
             top_p: body.top_p,
@@ -320,7 +389,7 @@ pub async fn inference_stream(
 
     let hoosh_req = hoosh::InferenceRequest {
         model: body.model.clone(),
-        prompt: body.prompt,
+        prompt: sanitized_prompt,
         system: body.system_prompt,
         max_tokens: Some(body.max_tokens),
         temperature: body.temperature.map(|t| t as f64),
@@ -368,50 +437,10 @@ pub async fn inference_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::*;
-    use crate::server::state::AppState;
+    use crate::server::test_helpers::helpers::test_state;
     use crate::types::TenantId;
     use axum::extract::Extension;
     use axum::http::StatusCode;
-
-    fn test_state(tmp: &tempfile::TempDir) -> AppState {
-        let config = IfranConfig {
-            server: ServerConfig {
-                bind: "127.0.0.1:0".into(),
-                grpc_bind: "127.0.0.1:0".into(),
-                ws_bind: None,
-            },
-            storage: StorageConfig {
-                models_dir: tmp.path().join("models"),
-                database: tmp.path().join("test.db"),
-                cache_dir: tmp.path().join("cache"),
-            },
-            backends: BackendsConfig {
-                default: "llamacpp".into(),
-                enabled: vec!["llamacpp".into()],
-            },
-            training: TrainingConfig {
-                executor: "subprocess".into(),
-                trainer_image: None,
-                max_concurrent_jobs: 2,
-                checkpoints_dir: tmp.path().join("checkpoints"),
-                job_eviction_ttl_secs: 86400,
-            },
-            bridge: BridgeConfig {
-                sy_endpoint: None,
-                enabled: false,
-                heartbeat_interval_secs: 10,
-            },
-            hardware: HardwareConfig {
-                gpu_memory_reserve_mb: 512,
-                telemetry_interval_secs: 0,
-            },
-            security: SecurityConfig::default(),
-            budget: BudgetConfig::default(),
-            fleet: FleetConfig::default(),
-        };
-        AppState::new(config).unwrap()
-    }
 
     #[test]
     fn inference_body_deserialize() {
