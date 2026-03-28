@@ -102,12 +102,38 @@ pub async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
         },
     });
 
+    let cache_stats = state.inference_cache.stats();
+    let budget_pools = {
+        let budget = state.token_budget.lock().await;
+        budget
+            .pools()
+            .iter()
+            .map(|(name, pool)| {
+                serde_json::json!({
+                    "name": name,
+                    "capacity": pool.capacity,
+                    "used": pool.used,
+                    "available": pool.available(),
+                    "utilization": pool.utilization(),
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+
     Json(serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"),
         "loaded_models": loaded_models.len(),
         "registered_backends": backends.iter().map(|b| &b.0).collect::<Vec<_>>(),
         "hardware": hardware,
         "bridge": bridge,
+        "inference_cache": {
+            "entries": cache_stats.entries,
+            "max_entries": cache_stats.max_entries,
+            "hits": cache_stats.hits,
+            "misses": cache_stats.misses,
+            "hit_rate": cache_stats.hit_rate,
+        },
+        "token_budget": budget_pools,
     }))
 }
 

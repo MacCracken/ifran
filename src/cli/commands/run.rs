@@ -1,15 +1,15 @@
-use crate::backends::InferenceBackend;
-use crate::backends::llamacpp::LlamaCppBackend;
 use crate::config::IfranConfig;
-use crate::lifecycle::manager::ModelManager;
 use crate::storage::db::ModelDatabase;
 use crate::types::IfranError;
 use crate::types::error::Result;
-use crate::types::inference::InferenceRequest;
-use crate::types::model::ModelManifest;
-/// Run interactive inference on a specified model.
 use std::io::{self, BufRead, Write};
 
+/// Run interactive inference on a specified model.
+///
+/// Uses [`hoosh::HooshClient`] to route inference through the local hoosh
+/// gateway, which handles provider selection, caching, and token budgets.
+/// Falls back to a direct HTTP call to the ifran server if hoosh is
+/// unavailable.
 pub async fn execute(model: &str) -> Result<()> {
     let config = IfranConfig::discover();
     let db = ModelDatabase::open(&config.storage.database)?;
@@ -21,33 +21,26 @@ pub async fn execute(model: &str) -> Result<()> {
             .and_then(|id| db.get(id, &tenant))
     })?;
 
-    let manifest = ModelManifest {
-        info: model_info.clone(),
-        context_length: Some(4096),
-        gpu_layers: None,
-        tensor_split: None,
-    };
+    eprintln!("Model: {} ({:?})", model_info.name, model_info.format);
 
-    eprintln!("Loading {}...", model_info.name);
+    // Resolve hoosh gateway URL — prefer env var, then config bind address
+    let hoosh_url =
+        std::env::var("HOOSH_URL").unwrap_or_else(|_| "http://127.0.0.1:8088".to_string());
 
-    let manager = ModelManager::new(config.hardware.gpu_memory_reserve_mb);
-    let device = manager.prepare_load(&manifest).await?;
+    let client = hoosh::HooshClient::new(&hoosh_url);
 
-    let backend = LlamaCppBackend::new(None);
-    let handle = backend.load_model(&manifest, &device).await?;
+    // Check if hoosh gateway is reachable
+    let gateway_available = client.health().await.unwrap_or(false);
+    if !gateway_available {
+        return Err(IfranError::Other(format!(
+            "Hoosh inference gateway at {hoosh_url} is not reachable. \
+             Start it with `hoosh` or set HOOSH_URL to the correct address."
+        )));
+    }
 
-    manager
-        .register_loaded(
-            model_info.id,
-            model_info.name.clone(),
-            handle.0.clone(),
-            "llamacpp".into(),
-            0,
-            crate::types::TenantId::default_tenant(),
-        )
-        .await;
-
-    eprintln!("Model loaded. Type your message (Ctrl+D to quit).\n");
+    eprintln!(
+        "Connected to inference gateway at {hoosh_url}. Type your message (Ctrl+D to quit).\n"
+    );
 
     let stdin = io::stdin();
     let mut stdout = io::stdout();
@@ -66,26 +59,33 @@ pub async fn execute(model: &str) -> Result<()> {
             continue;
         }
 
-        let req = InferenceRequest {
+        let req = hoosh::InferenceRequest {
+            model: model_info.name.clone(),
             prompt: input.to_string(),
+            system: None,
+            messages: Vec::new(),
             max_tokens: Some(512),
             temperature: Some(0.7),
             top_p: Some(0.9),
-            top_k: None,
-            stop_sequences: None,
-            system_prompt: None,
-            sensitivity: None,
+            stream: true,
+            tools: Vec::new(),
+            tool_choice: None,
         };
 
-        // Use streaming for interactive feel
-        match backend.infer_stream(&handle, req).await {
+        // Stream tokens for interactive feel
+        match client.infer_stream(&req).await {
             Ok(mut rx) => {
                 while let Some(chunk) = rx.recv().await {
-                    if chunk.done {
-                        break;
+                    match chunk {
+                        Ok(text) => {
+                            print!("{text}");
+                            stdout.flush()?;
+                        }
+                        Err(e) => {
+                            eprintln!("\nStream error: {e}");
+                            break;
+                        }
                     }
-                    print!("{}", chunk.text);
-                    stdout.flush()?;
                 }
                 println!("\n");
             }
@@ -95,7 +95,6 @@ pub async fn execute(model: &str) -> Result<()> {
         }
     }
 
-    eprintln!("Shutting down...");
-    backend.unload_model(handle).await?;
+    eprintln!("Done.");
     Ok(())
 }

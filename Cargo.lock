@@ -24,17 +24,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ai-hwaccel"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cd3d3539f780343ed071981ff2c7341466202a5f46831efa58e3a628714bc23"
-dependencies = [
- "serde",
- "serde_json",
- "tracing",
-]
-
-[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1054,8 +1043,9 @@ dependencies = [
 [[package]]
 name = "hoosh"
 version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "683628068a628d2d88042f53b1d21243cf24416eeeef6999ec6bc33219957494"
 dependencies = [
- "ai-hwaccel 1.0.0",
  "anyhow",
  "arc-swap",
  "async-stream",
@@ -1342,7 +1332,7 @@ dependencies = [
 name = "ifran"
 version = "2026.3.28"
 dependencies = [
- "ai-hwaccel 0.23.3",
+ "ai-hwaccel",
  "anyhow",
  "async-stream",
  "async-trait",

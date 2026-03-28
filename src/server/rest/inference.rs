@@ -58,9 +58,32 @@ pub async fn inference(
         ))
         .ok_or_else(|| ApiErrorResponse::internal("Backend not available"))?;
 
+    // Check hoosh response cache before running inference
+    let cache_key = format!("{}:{}", body.model, body.prompt);
+    if let Some(cached) = state.inference_cache.get(&cache_key) {
+        tracing::debug!(model = %body.model, "Inference cache hit");
+        return Ok(Json(
+            serde_json::from_str(&cached)
+                .unwrap_or(serde_json::json!({"text": &*cached, "cached": true})),
+        ));
+    }
+
+    // Check token budget before running inference
+    {
+        let budget = state.token_budget.lock().await;
+        let estimated_tokens = (body.max_tokens as u64) + (body.prompt.len() as u64 / 4);
+        if !budget.check("default", estimated_tokens) {
+            return Err(ApiErrorResponse::bad_request(
+                "BUDGET_EXCEEDED",
+                "Token budget exhausted for this pool",
+            )
+            .with_hint("Wait for the budget to reset or increase the pool capacity"));
+        }
+    }
+
     let handle = crate::backends::ModelHandle(loaded_model.handle.clone());
     let req = InferenceRequest {
-        prompt: body.prompt,
+        prompt: body.prompt.clone(),
         max_tokens: Some(body.max_tokens),
         temperature: body.temperature,
         top_p: body.top_p,
@@ -75,7 +98,13 @@ pub async fn inference(
         .await
         .map_err(|e| ApiErrorResponse::internal(e.to_string()))?;
 
-    Ok(Json(serde_json::json!({
+    // Report token usage to hoosh budget
+    {
+        let mut budget = state.token_budget.lock().await;
+        budget.report("default", 0, resp.usage.total_tokens as u64);
+    }
+
+    let response_json = serde_json::json!({
         "text": resp.text,
         "usage": {
             "prompt_tokens": resp.usage.prompt_tokens,
@@ -83,7 +112,14 @@ pub async fn inference(
             "total_tokens": resp.usage.total_tokens,
         },
         "finish_reason": serde_json::to_value(resp.finish_reason).unwrap_or(serde_json::Value::Null),
-    })))
+    });
+
+    // Cache the response
+    if let Ok(json_str) = serde_json::to_string(&response_json) {
+        state.inference_cache.insert(cache_key, json_str);
+    }
+
+    Ok(Json(response_json))
 }
 
 /// POST /inference/stream — run inference with SSE streaming.
