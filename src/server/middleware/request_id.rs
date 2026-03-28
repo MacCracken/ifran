@@ -26,7 +26,12 @@ pub async fn inject_request_id(mut req: Request, next: Next) -> Response {
         .headers()
         .get("x-request-id")
         .and_then(|v| v.to_str().ok())
-        .filter(|s| !s.is_empty() && s.len() <= 128)
+        .filter(|s| {
+            !s.is_empty()
+                && s.len() <= 128
+                && s.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
+        })
         .map(String::from)
         .unwrap_or_else(|| Uuid::new_v4().to_string());
 

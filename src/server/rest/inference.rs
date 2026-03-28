@@ -42,22 +42,25 @@ pub async fn inference(
 
     let pool_name = tenant_id.to_string();
 
-    // Check token budget before inference (if budget enforcement is enabled)
-    if state.config.budget.enabled {
+    // Reserve tokens from budget before inference (if budget enforcement is enabled)
+    let estimated_tokens = if state.config.budget.enabled {
         let mut budget = state.token_budget.lock().await;
         // Create per-tenant pool on demand (1M tokens default capacity)
         if budget.get_pool(&pool_name).is_none() {
             budget.add_pool(hoosh::TokenPool::new(&pool_name, 1_000_000));
         }
-        let estimated_tokens = (body.max_tokens as u64) + (body.prompt.len() as u64 / 4);
-        if !budget.check(&pool_name, estimated_tokens) {
+        let estimated = (body.max_tokens as u64) + (body.prompt.len() as u64 / 4);
+        if !budget.reserve(&pool_name, estimated) {
             return Err(ApiErrorResponse::bad_request(
                 "BUDGET_EXCEEDED",
                 "Token budget exhausted for this tenant",
             )
             .with_hint("Wait for the budget to reset or increase the pool capacity"));
         }
-    }
+        Some(estimated)
+    } else {
+        None
+    };
 
     // Check response cache — key includes all parameters that affect output
     let cache_key = format!(
@@ -108,14 +111,10 @@ pub async fn inference(
             .await
             .map_err(|e| ApiErrorResponse::internal(e.to_string()))?;
 
-        // Report actual token usage to budget
-        if state.config.budget.enabled {
+        // Commit reservation with actual token usage
+        if let Some(estimated) = estimated_tokens {
             let mut budget = state.token_budget.lock().await;
-            budget.report(
-                &pool_name,
-                resp.usage.prompt_tokens as u64,
-                resp.usage.total_tokens as u64,
-            );
+            budget.report(&pool_name, estimated, resp.usage.total_tokens as u64);
         }
 
         let response_json = serde_json::json!({
@@ -190,14 +189,10 @@ pub async fn inference(
         .await
         .map_err(|e| ApiErrorResponse::internal(format!("Hoosh inference failed: {e}")))?;
 
-    // Report token usage to budget
-    if state.config.budget.enabled {
+    // Commit reservation with actual token usage
+    if let Some(estimated) = estimated_tokens {
         let mut budget = state.token_budget.lock().await;
-        budget.report(
-            &pool_name,
-            hoosh_resp.usage.prompt_tokens as u64,
-            hoosh_resp.usage.total_tokens as u64,
-        );
+        budget.report(&pool_name, estimated, hoosh_resp.usage.total_tokens as u64);
     }
 
     let response_json = serde_json::json!({
@@ -229,7 +224,7 @@ pub async fn inference_stream(
     validate_prompt_length(&body.prompt, state.config.security.max_prompt_length)
         .map_err(ApiErrorResponse::from)?;
 
-    // Check token budget for streaming requests too
+    // Reserve tokens from budget for streaming requests too
     if state.config.budget.enabled {
         let pool_name = tenant_id.to_string();
         let mut budget = state.token_budget.lock().await;
@@ -237,7 +232,7 @@ pub async fn inference_stream(
             budget.add_pool(hoosh::TokenPool::new(&pool_name, 1_000_000));
         }
         let estimated_tokens = (body.max_tokens as u64) + (body.prompt.len() as u64 / 4);
-        if !budget.check(&pool_name, estimated_tokens) {
+        if !budget.reserve(&pool_name, estimated_tokens) {
             return Err(ApiErrorResponse::bad_request(
                 "BUDGET_EXCEEDED",
                 "Token budget exhausted for this tenant",

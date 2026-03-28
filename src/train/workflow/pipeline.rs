@@ -127,6 +127,7 @@ pub struct TrainingWorkflow {
 
 impl TrainingWorkflow {
     /// Create a new training workflow engine with default configuration.
+    #[must_use]
     pub fn new() -> Self {
         let storage = Arc::new(InMemoryWorkflowStorage::new());
         let executor = Arc::new(TrainingStepExecutor);
@@ -136,6 +137,7 @@ impl TrainingWorkflow {
     }
 
     /// Create a new training workflow engine with custom configuration.
+    #[must_use]
     pub fn with_config(config: WorkflowEngineConfig) -> Self {
         let storage = Arc::new(InMemoryWorkflowStorage::new());
         let executor = Arc::new(TrainingStepExecutor);

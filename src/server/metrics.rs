@@ -7,6 +7,7 @@ use prometheus::{Histogram, HistogramOpts, IntCounter, IntGauge, Opts, Registry}
 
 /// Application-wide Prometheus metrics.
 #[derive(Clone)]
+#[must_use]
 pub struct Metrics {
     /// HTTP request duration in seconds.
     pub request_duration: Histogram,
@@ -31,12 +32,8 @@ pub struct Metrics {
 impl Metrics {
     /// Register all metrics with the given Prometheus registry.
     ///
-    /// # Panics
-    ///
-    /// Panics if registration fails (duplicate metric names). This is called
-    /// once at startup, so a panic here is an immediate, obvious bug.
-    #[must_use]
-    pub fn register(registry: &Registry) -> Self {
+    /// Returns an error if registration fails (e.g. duplicate metric names).
+    pub fn register(registry: &Registry) -> Result<Self, prometheus::Error> {
         let request_duration = Histogram::with_opts(
             HistogramOpts::new(
                 "ifran_request_duration_seconds",
@@ -45,85 +42,58 @@ impl Metrics {
             .buckets(vec![
                 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
             ]),
-        )
-        .expect("valid histogram opts");
-        registry
-            .register(Box::new(request_duration.clone()))
-            .expect("request_duration registration");
+        )?;
+        registry.register(Box::new(request_duration.clone()))?;
 
         let requests_total = IntCounter::with_opts(Opts::new(
             "ifran_requests_total",
             "Total HTTP requests served",
-        ))
-        .expect("valid counter opts");
-        registry
-            .register(Box::new(requests_total.clone()))
-            .expect("requests_total registration");
+        ))?;
+        registry.register(Box::new(requests_total.clone()))?;
 
         let rate_limit_rejections = IntCounter::with_opts(Opts::new(
             "ifran_rate_limit_rejections_total",
             "Total HTTP 429 rate-limit rejections",
-        ))
-        .expect("valid counter opts");
-        registry
-            .register(Box::new(rate_limit_rejections.clone()))
-            .expect("rate_limit_rejections registration");
+        ))?;
+        registry.register(Box::new(rate_limit_rejections.clone()))?;
 
         let loaded_models = IntGauge::with_opts(Opts::new(
             "ifran_loaded_models",
             "Number of currently loaded models",
-        ))
-        .expect("valid gauge opts");
-        registry
-            .register(Box::new(loaded_models.clone()))
-            .expect("loaded_models registration");
+        ))?;
+        registry.register(Box::new(loaded_models.clone()))?;
 
         let active_training_jobs = IntGauge::with_opts(Opts::new(
             "ifran_active_training_jobs",
             "Number of currently running training jobs",
-        ))
-        .expect("valid gauge opts");
-        registry
-            .register(Box::new(active_training_jobs.clone()))
-            .expect("active_training_jobs registration");
+        ))?;
+        registry.register(Box::new(active_training_jobs.clone()))?;
 
         let queued_training_jobs = IntGauge::with_opts(Opts::new(
             "ifran_queued_training_jobs",
             "Number of queued training jobs",
-        ))
-        .expect("valid gauge opts");
-        registry
-            .register(Box::new(queued_training_jobs.clone()))
-            .expect("queued_training_jobs registration");
+        ))?;
+        registry.register(Box::new(queued_training_jobs.clone()))?;
 
         let inference_requests = IntCounter::with_opts(Opts::new(
             "ifran_inference_requests_total",
             "Total inference requests",
-        ))
-        .expect("valid counter opts");
-        registry
-            .register(Box::new(inference_requests.clone()))
-            .expect("inference_requests registration");
+        ))?;
+        registry.register(Box::new(inference_requests.clone()))?;
 
         let cache_hit_rate = prometheus::Gauge::with_opts(Opts::new(
             "ifran_cache_hit_rate",
             "Inference cache hit rate (0.0 to 1.0)",
-        ))
-        .expect("valid gauge opts");
-        registry
-            .register(Box::new(cache_hit_rate.clone()))
-            .expect("cache_hit_rate registration");
+        ))?;
+        registry.register(Box::new(cache_hit_rate.clone()))?;
 
         let fleet_nodes = IntGauge::with_opts(Opts::new(
             "ifran_fleet_nodes",
             "Number of registered fleet nodes",
-        ))
-        .expect("valid gauge opts");
-        registry
-            .register(Box::new(fleet_nodes.clone()))
-            .expect("fleet_nodes registration");
+        ))?;
+        registry.register(Box::new(fleet_nodes.clone()))?;
 
-        Self {
+        Ok(Self {
             request_duration,
             requests_total,
             rate_limit_rejections,
@@ -133,7 +103,7 @@ impl Metrics {
             inference_requests,
             cache_hit_rate,
             fleet_nodes,
-        }
+        })
     }
 }
 
@@ -144,7 +114,7 @@ mod tests {
     #[test]
     fn metrics_register_succeeds() {
         let registry = Registry::new();
-        let metrics = Metrics::register(&registry);
+        let metrics = Metrics::register(&registry).unwrap();
 
         // Verify counters start at zero
         assert_eq!(metrics.requests_total.get(), 0);
@@ -162,7 +132,7 @@ mod tests {
     #[test]
     fn metrics_counters_increment() {
         let registry = Registry::new();
-        let metrics = Metrics::register(&registry);
+        let metrics = Metrics::register(&registry).unwrap();
 
         metrics.requests_total.inc();
         metrics.requests_total.inc();
@@ -178,7 +148,7 @@ mod tests {
     #[test]
     fn metrics_gauges_update() {
         let registry = Registry::new();
-        let metrics = Metrics::register(&registry);
+        let metrics = Metrics::register(&registry).unwrap();
 
         metrics.loaded_models.set(3);
         assert_eq!(metrics.loaded_models.get(), 3);
@@ -196,7 +166,7 @@ mod tests {
     #[test]
     fn metrics_histogram_observes() {
         let registry = Registry::new();
-        let metrics = Metrics::register(&registry);
+        let metrics = Metrics::register(&registry).unwrap();
 
         metrics.request_duration.observe(0.042);
         metrics.request_duration.observe(0.123);
@@ -206,7 +176,7 @@ mod tests {
     #[test]
     fn metrics_clone_shares_state() {
         let registry = Registry::new();
-        let m1 = Metrics::register(&registry);
+        let m1 = Metrics::register(&registry).unwrap();
         let m2 = m1.clone();
 
         m1.requests_total.inc();
@@ -216,7 +186,7 @@ mod tests {
     #[test]
     fn metrics_appear_in_gather() {
         let registry = Registry::new();
-        let metrics = Metrics::register(&registry);
+        let metrics = Metrics::register(&registry).unwrap();
 
         metrics.requests_total.inc_by(42);
         metrics.loaded_models.set(7);

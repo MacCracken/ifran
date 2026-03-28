@@ -267,6 +267,8 @@ impl JobManager {
     }
 
     /// Count of currently running jobs.
+    #[must_use]
+    #[inline]
     pub async fn running_count(&self) -> usize {
         self.jobs
             .read()
@@ -277,6 +279,8 @@ impl JobManager {
     }
 
     /// Count of currently queued jobs.
+    #[must_use]
+    #[inline]
     pub async fn queued_count(&self) -> usize {
         self.jobs
             .read()
@@ -297,6 +301,7 @@ impl JobManager {
 
     /// Maximum concurrent job limit.
     #[must_use]
+    #[inline]
     pub fn max_concurrent(&self) -> usize {
         self.max_concurrent
     }

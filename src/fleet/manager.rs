@@ -29,6 +29,7 @@ pub enum NodeHealth {
 }
 
 impl From<Status> for NodeHealth {
+    #[inline]
     fn from(s: Status) -> Self {
         match s {
             Status::Online => NodeHealth::Online,
@@ -120,6 +121,7 @@ impl FleetManager {
     }
 
     /// Create with default timeouts (30s suspect, 90s offline).
+    #[must_use]
     pub fn with_defaults() -> Self {
         Self::new(Duration::from_secs(30), Duration::from_secs(90))
     }
@@ -192,7 +194,14 @@ impl FleetManager {
             .await
             .register(&req.id, serde_json::json!({}));
 
-        // Store Ifran-specific metadata
+        // Check if node already exists — if so, update endpoint and GPU info
+        // but preserve the original registered_at timestamp.
+        let mut meta_guard = self.meta.write().await;
+        let registered_at = meta_guard
+            .get(&req.id)
+            .map(|existing| existing.registered_at)
+            .unwrap_or(now);
+
         let node_meta = NodeMeta {
             endpoint: req.endpoint.clone(),
             gpu_info: NodeGpuInfo {
@@ -203,7 +212,7 @@ impl FleetManager {
                 gpu_temperature_c: None,
             },
             last_heartbeat: now,
-            registered_at: now,
+            registered_at,
         };
 
         let node = FleetNode {
@@ -212,7 +221,7 @@ impl FleetManager {
             health: NodeHealth::Online,
             gpu_info: node_meta.gpu_info.clone(),
             last_heartbeat: now,
-            registered_at: now,
+            registered_at,
         };
 
         // Register with fleet queue for job routing
@@ -224,7 +233,7 @@ impl FleetManager {
             },
         );
 
-        self.meta.write().await.insert(req.id, node_meta);
+        meta_guard.insert(req.id, node_meta);
         Ok(node)
     }
 
@@ -354,6 +363,7 @@ impl FleetManager {
     }
 
     /// List all registered nodes.
+    #[must_use]
     pub async fn list_nodes(&self) -> Vec<FleetNode> {
         let tracker = self.tracker.read().await;
         let meta = self.meta.read().await;
@@ -378,6 +388,7 @@ impl FleetManager {
     }
 
     /// Get a specific node.
+    #[must_use]
     pub async fn get_node(&self, node_id: &str) -> Option<FleetNode> {
         let tracker = self.tracker.read().await;
         let meta = self.meta.read().await;
@@ -406,6 +417,7 @@ impl FleetManager {
     }
 
     /// Get aggregate fleet statistics.
+    #[must_use]
     pub async fn stats(&self) -> FleetStats {
         let tracker = self.tracker.read().await;
         let meta = self.meta.read().await;

@@ -155,7 +155,9 @@ impl AppState {
         };
 
         let prometheus_registry = Arc::new(prometheus::Registry::new());
-        let metrics = Arc::new(Metrics::register(&prometheus_registry));
+        let metrics = Arc::new(Metrics::register(&prometheus_registry).map_err(|e| {
+            crate::types::IfranError::ConfigError(format!("Failed to register metrics: {e}"))
+        })?);
 
         // Fleet manager
         let fleet_manager = FleetManager::new(

@@ -10,11 +10,13 @@ use axum::response::Response;
 use majra::namespace::Namespace;
 use majra::ratelimit::RateLimiter;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Per-IP rate limiter backed by majra.
 #[derive(Clone)]
 pub struct SharedLimiter {
     inner: std::sync::Arc<RateLimiter>,
+    eviction_started: std::sync::Arc<AtomicBool>,
 }
 
 /// Build a per-IP rate limiter from config values.
@@ -24,6 +26,7 @@ pub fn build_limiter(per_second: u64, burst: u64) -> SharedLimiter {
             per_second.max(1) as f64,
             burst.max(1) as usize,
         )),
+        eviction_started: std::sync::Arc::new(AtomicBool::new(false)),
     }
 }
 
@@ -45,6 +48,14 @@ impl SharedLimiter {
         max_idle: std::time::Duration,
         interval: std::time::Duration,
     ) {
+        // Prevent spawning multiple eviction tasks
+        if self
+            .eviction_started
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return;
+        }
         let limiter = self.inner.clone();
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(interval);

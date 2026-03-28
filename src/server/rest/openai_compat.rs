@@ -64,11 +64,16 @@ pub async fn list_models(
 
     // Merge models from hoosh provider registry
     if let Some(providers) = &state.hoosh_providers {
+        let mut seen: std::collections::HashSet<String> = data
+            .iter()
+            .filter_map(|d| d["id"].as_str().map(String::from))
+            .collect();
+
         for provider in providers.all() {
             if let Ok(models) = provider.list_models().await {
                 for m in models {
                     // Avoid duplicates — skip models already listed from local DB
-                    if !data.iter().any(|d| d["id"].as_str() == Some(&m.id)) {
+                    if seen.insert(m.id.clone()) {
                         data.push(serde_json::json!({
                             "id": m.id,
                             "object": "model",
@@ -94,9 +99,21 @@ pub async fn chat_completions(
     Json(body): Json<ChatCompletionRequest>,
 ) -> Result<axum::response::Response, (StatusCode, String)> {
     validate_model_name(&body.model)?;
-    // Validate all message contents against prompt length limit
+    // Validate each message content against prompt length limit
     for msg in &body.messages {
         validate_prompt_length(&msg.content, state.config.security.max_prompt_length)?;
+    }
+
+    // Validate combined message length against prompt length limit
+    let total_content_length: usize = body.messages.iter().map(|m| m.content.len()).sum();
+    if total_content_length > state.config.security.max_prompt_length {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Combined message length {} exceeds maximum {}",
+                total_content_length, state.config.security.max_prompt_length
+            ),
+        ));
     }
 
     // Extract system prompt and user messages
@@ -106,13 +123,21 @@ pub async fn chat_completions(
         .find(|m| m.role == "system")
         .map(|m| m.content.clone());
 
-    let prompt = body
+    let prompt = match body
         .messages
         .iter()
         .rev()
         .find(|m| m.role == "user")
         .map(|m| m.content.clone())
-        .unwrap_or_default();
+    {
+        Some(content) if !content.is_empty() => content,
+        _ => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "At least one non-empty user message is required".into(),
+            ));
+        }
+    };
 
     // Try local model path first
     let loaded = state.model_manager.list_loaded(Some(&tenant_id)).await;
