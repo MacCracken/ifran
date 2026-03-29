@@ -8,7 +8,7 @@ Current: **1,785 tests**, 72.2% coverage. CI threshold: **70%**.
 
 ---
 
-## Pre-1.0 — All Complete
+## 1.0.0 — All Complete
 
 ### Security Hardening
 - [x] Prompt injection detection (32 patterns, 5 categories)
@@ -39,29 +39,28 @@ Current: **1,785 tests**, 72.2% coverage. CI threshold: **70%**.
 
 ---
 
-## Sprint 1 — Coverage to 75% absolute
+## 1.1.0 — Coverage & Hardening
 
-*Target: raise CI threshold from 70% to 75%.*
+### Sprint 1 — Coverage to 75% absolute
 
 - [ ] **Extract CLI execute() logic into testable functions** — `pull::execute()`, `list::execute()`, `serve::execute()` each contain 30-50 lines of pure logic (path construction, config resolution, output formatting) that can be extracted and tested. ~200 lines recoverable.
 - [ ] **Mock-based backend inference tests** — create a `MockBackend` implementing `InferenceBackend` that returns canned responses. Test the full inference handler path (cache → budget → backend → filter → cache store) without network. ~80 lines in `inference.rs`.
 - [ ] **Experiment runner test with mock executor** — test `ExperimentRunner::run()` with a mock executor that completes trials instantly. Covers the trial loop, grid/random search selection, and result recording. ~100 lines in `runner.rs`.
 - [ ] **OpenAI-compat streaming test** — test `/v1/chat/completions` with `stream: true` using a mock backend that yields chunks. ~30 lines in `openai_compat.rs`.
+- [ ] **Raise CI threshold to 75%**
 
-## Sprint 2 — Coverage to 78% + hardening
-
-*Target: raise CI threshold to 75%. Harden the remaining untested paths.*
+### Sprint 2 — Coverage to 78% + hardening
 
 - [ ] **Docker executor integration test** — test `DockerExecutor::run()` with a mock Docker binary (shell script that echoes success). Covers the container lifecycle, timeout, and cancellation paths. ~50 lines.
 - [ ] **Bridge protocol tests** — test `BridgeClient::connect()` and `BridgeServer::start()` with loopback. Covers connection state machine, heartbeat, and reconnect. ~80 lines.
 - [ ] **Telemetry integration test** — test OTLP init path with a no-op exporter. ~20 lines.
-- [ ] **CLI main dispatch test** — test `Cli::parse` → `Commands` dispatch with dry-run mode (parse + validate, don't execute). Already partially done via clap parsing tests. ~30 lines.
-- [ ] **Property-based tests for prompt guard** — add proptest strategies that generate adversarial strings and verify the scanner never panics or returns risk_score outside [0, 1].
-- [ ] **Raise CI threshold to 75%**
+- [ ] **CLI main dispatch test** — test `Cli::parse` → `Commands` dispatch with dry-run mode (parse + validate, don't execute). ~30 lines.
+- [ ] **Property-based tests for prompt guard** — proptest strategies generating adversarial strings; verify scanner never panics or returns risk_score outside [0, 1].
+- [ ] **Raise CI threshold to 78%**
 
 ---
 
-## Post-v1 Considerations
+## Post-1.1 Considerations
 
 - Prompt management and versioning
 - Experiment DSL documentation and guide
