@@ -175,11 +175,11 @@ mod tests {
         // Start eviction with a very short max_idle so the entry is immediately stale
         limiter.start_eviction_loop(
             std::time::Duration::from_millis(1),
-            std::time::Duration::from_millis(10),
+            std::time::Duration::from_millis(50),
         );
 
-        // Give the eviction loop time to run
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        // Give the eviction loop time to run (generous margin for instrumented builds)
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
         let after = limiter.stats();
         assert_eq!(

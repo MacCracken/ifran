@@ -230,6 +230,12 @@ mod tests {
     }
 
     #[test]
+    fn error_display_budget_exceeded() {
+        let e = IfranError::BudgetExceeded("GPU hours exhausted".into());
+        assert_eq!(e.to_string(), "Budget exceeded: GPU hours exhausted");
+    }
+
+    #[test]
     fn error_display_other() {
         let e = IfranError::Other("unknown".into());
         assert_eq!(e.to_string(), "unknown");

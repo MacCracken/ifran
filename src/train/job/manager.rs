@@ -920,4 +920,224 @@ mod tests {
         let result = manager.cancel_job(id, &tenant_b).await;
         assert!(result.is_err());
     }
+
+    // -- Approval gate tests --
+
+    fn rlhf_config() -> TrainingJobConfig {
+        let mut cfg = test_config();
+        cfg.method = TrainingMethod::Rlhf;
+        cfg
+    }
+
+    fn dpo_config() -> TrainingJobConfig {
+        let mut cfg = test_config();
+        cfg.method = TrainingMethod::Dpo;
+        cfg
+    }
+
+    fn full_finetune_config() -> TrainingJobConfig {
+        let mut cfg = test_config();
+        cfg.method = TrainingMethod::FullFineTune;
+        cfg
+    }
+
+    #[test]
+    fn requires_approval_for_high_risk_methods() {
+        assert!(super::requires_approval(TrainingMethod::Rlhf));
+        assert!(super::requires_approval(TrainingMethod::Dpo));
+        assert!(super::requires_approval(TrainingMethod::FullFineTune));
+        assert!(!super::requires_approval(TrainingMethod::Lora));
+        assert!(!super::requires_approval(TrainingMethod::Qlora));
+        assert!(!super::requires_approval(TrainingMethod::Distillation));
+    }
+
+    #[test]
+    fn estimate_gpu_hours_calculation() {
+        let config = test_config();
+        let hours = super::estimate_gpu_hours(&config);
+        // 100 samples / 4 batch * 1 epoch = 25 steps * 0.001 = 0.025 hours
+        assert!((hours - 0.025).abs() < 0.001);
+    }
+
+    #[test]
+    fn estimate_gpu_hours_no_max_samples() {
+        let mut config = test_config();
+        config.dataset.max_samples = None;
+        let hours = super::estimate_gpu_hours(&config);
+        // 10000 default / 4 batch * 1 epoch = 2500 steps * 0.001 = 2.5 hours
+        assert!((hours - 2.5).abs() < 0.01);
+    }
+
+    #[tokio::test]
+    async fn rlhf_job_enters_pending_approval() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 10);
+        let tenant = TenantId::default_tenant();
+
+        let id = manager
+            .create_job(rlhf_config(), tenant.clone())
+            .await
+            .unwrap();
+
+        // start_job should put it into PendingApproval, not Running
+        manager.start_job(id, &tenant).await.unwrap();
+        let job = manager.get_job(id, &tenant).await.unwrap();
+        assert_eq!(job.status, TrainingStatus::PendingApproval);
+    }
+
+    #[tokio::test]
+    async fn dpo_job_enters_pending_approval() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 10);
+        let tenant = TenantId::default_tenant();
+
+        let id = manager
+            .create_job(dpo_config(), tenant.clone())
+            .await
+            .unwrap();
+
+        manager.start_job(id, &tenant).await.unwrap();
+        let job = manager.get_job(id, &tenant).await.unwrap();
+        assert_eq!(job.status, TrainingStatus::PendingApproval);
+    }
+
+    #[tokio::test]
+    async fn full_finetune_enters_pending_approval() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 10);
+        let tenant = TenantId::default_tenant();
+
+        let id = manager
+            .create_job(full_finetune_config(), tenant.clone())
+            .await
+            .unwrap();
+
+        manager.start_job(id, &tenant).await.unwrap();
+        let job = manager.get_job(id, &tenant).await.unwrap();
+        assert_eq!(job.status, TrainingStatus::PendingApproval);
+    }
+
+    #[tokio::test]
+    async fn lora_job_starts_directly() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 10);
+        let tenant = TenantId::default_tenant();
+
+        let id = manager
+            .create_job(test_config(), tenant.clone())
+            .await
+            .unwrap();
+
+        manager.start_job(id, &tenant).await.unwrap();
+        let job = manager.get_job(id, &tenant).await.unwrap();
+        // LoRA doesn't require approval — should go straight to Running
+        assert_eq!(job.status, TrainingStatus::Running);
+    }
+
+    #[tokio::test]
+    async fn approve_job_transitions_to_running() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 10);
+        let tenant = TenantId::default_tenant();
+
+        let id = manager
+            .create_job(rlhf_config(), tenant.clone())
+            .await
+            .unwrap();
+
+        manager.start_job(id, &tenant).await.unwrap();
+        assert_eq!(
+            manager.get_job(id, &tenant).await.unwrap().status,
+            TrainingStatus::PendingApproval
+        );
+
+        // Approve should transition to Running
+        manager
+            .approve_job(id, &tenant, "admin", Some("Looks good"))
+            .await
+            .unwrap();
+
+        let job = manager.get_job(id, &tenant).await.unwrap();
+        assert_eq!(job.status, TrainingStatus::Running);
+    }
+
+    #[tokio::test]
+    async fn reject_job_transitions_to_failed() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 10);
+        let tenant = TenantId::default_tenant();
+
+        let id = manager
+            .create_job(dpo_config(), tenant.clone())
+            .await
+            .unwrap();
+
+        manager.start_job(id, &tenant).await.unwrap();
+
+        manager
+            .reject_job(id, &tenant, "reviewer", Some("Too risky"))
+            .await
+            .unwrap();
+
+        let job = manager.get_job(id, &tenant).await.unwrap();
+        assert_eq!(job.status, TrainingStatus::Failed);
+        assert!(job.error.unwrap().contains("Too risky"));
+    }
+
+    #[tokio::test]
+    async fn approve_nonexistent_job_fails() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 10);
+        let tenant = TenantId::default_tenant();
+        let result = manager
+            .approve_job(uuid::Uuid::new_v4(), &tenant, "admin", None)
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn reject_nonexistent_job_fails() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 10);
+        let tenant = TenantId::default_tenant();
+        let result = manager
+            .reject_job(uuid::Uuid::new_v4(), &tenant, "admin", None)
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn approve_wrong_tenant_fails() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 10);
+        let tenant_a = TenantId("a".into());
+        let tenant_b = TenantId("b".into());
+
+        let id = manager
+            .create_job(rlhf_config(), tenant_a.clone())
+            .await
+            .unwrap();
+        manager.start_job(id, &tenant_a).await.unwrap();
+
+        let result = manager
+            .approve_job(id, &tenant_b, "admin", None)
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn approval_gate_accessor() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 10);
+        let gate = manager.approval_gate();
+        let locked = gate.lock().unwrap();
+        // Fresh gate has no pending requests
+        assert!(locked.pending().is_empty());
+    }
+
+    #[tokio::test]
+    async fn pending_approval_listed_in_gate() {
+        let manager = JobManager::new(ExecutorKind::Subprocess, None, 10);
+        let tenant = TenantId::default_tenant();
+
+        let id = manager
+            .create_job(rlhf_config(), tenant.clone())
+            .await
+            .unwrap();
+        manager.start_job(id, &tenant).await.unwrap();
+
+        let gate = manager.approval_gate();
+        let locked = gate.lock().unwrap();
+        assert_eq!(locked.pending().len(), 1);
+    }
 }

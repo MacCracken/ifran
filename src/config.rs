@@ -776,4 +776,155 @@ gpu_memory_reserve_mb = 512
         assert_eq!(cfg.fleet.suspect_timeout_secs, 30);
         assert_eq!(cfg.hardware.telemetry_interval_secs, 10);
     }
+
+    #[test]
+    fn storage_backend_kind_serde() {
+        let sqlite: StorageBackendKind = serde_json::from_str(r#""sqlite""#).unwrap();
+        assert!(matches!(sqlite, StorageBackendKind::Sqlite));
+        let postgres: StorageBackendKind = serde_json::from_str(r#""postgres""#).unwrap();
+        assert!(matches!(postgres, StorageBackendKind::Postgres));
+        // Default
+        assert!(matches!(StorageBackendKind::default(), StorageBackendKind::Sqlite));
+    }
+
+    #[test]
+    fn fleet_backend_kind_serde() {
+        let memory: FleetBackendKind = serde_json::from_str(r#""memory""#).unwrap();
+        assert!(matches!(memory, FleetBackendKind::Memory));
+        let redis: FleetBackendKind = serde_json::from_str(r#""redis""#).unwrap();
+        assert!(matches!(redis, FleetBackendKind::Redis));
+        assert!(matches!(FleetBackendKind::default(), FleetBackendKind::Memory));
+    }
+
+    #[test]
+    fn validate_postgres_without_url_rejected() {
+        let mut cfg = IfranConfig::default();
+        cfg.storage.backend = StorageBackendKind::Postgres;
+        cfg.storage.postgres_url = None;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn validate_postgres_with_url_ok() {
+        let mut cfg = IfranConfig::default();
+        cfg.storage.backend = StorageBackendKind::Postgres;
+        cfg.storage.postgres_url = Some("postgres://localhost/ifran".into());
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_redis_fleet_without_url_rejected() {
+        let mut cfg = IfranConfig::default();
+        cfg.fleet.backend = FleetBackendKind::Redis;
+        cfg.fleet.redis_url = None;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn validate_redis_fleet_with_url_ok() {
+        let mut cfg = IfranConfig::default();
+        cfg.fleet.backend = FleetBackendKind::Redis;
+        cfg.fleet.redis_url = Some("redis://127.0.0.1".into());
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn default_storage_config_fields() {
+        let cfg = IfranConfig::default();
+        assert!(matches!(cfg.storage.backend, StorageBackendKind::Sqlite));
+        assert!(cfg.storage.postgres_url.is_none());
+        assert_eq!(cfg.storage.postgres_pool_size, 8);
+    }
+
+    #[test]
+    fn default_fleet_config_fields() {
+        let cfg = IfranConfig::default();
+        assert!(matches!(cfg.fleet.backend, FleetBackendKind::Memory));
+        assert!(cfg.fleet.redis_url.is_none());
+    }
+
+    #[test]
+    fn config_with_storage_backend_section() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let toml_content = r#"
+[server]
+bind = "127.0.0.1:9000"
+grpc_bind = "127.0.0.1:9001"
+
+[storage]
+models_dir = "/tmp/models"
+database = "/tmp/test.db"
+cache_dir = "/tmp/cache"
+backend = "postgres"
+postgres_url = "postgres://user:pass@host/db"
+postgres_pool_size = 16
+
+[backends]
+default = "llamacpp"
+enabled = ["llamacpp"]
+
+[training]
+executor = "subprocess"
+max_concurrent_jobs = 2
+checkpoints_dir = "/tmp/checkpoints"
+
+[bridge]
+enabled = false
+heartbeat_interval_secs = 10
+
+[hardware]
+gpu_memory_reserve_mb = 512
+"#;
+        std::fs::write(tmp.path(), toml_content).unwrap();
+        let cfg = IfranConfig::load(tmp.path()).unwrap();
+        assert!(matches!(cfg.storage.backend, StorageBackendKind::Postgres));
+        assert_eq!(
+            cfg.storage.postgres_url.as_deref(),
+            Some("postgres://user:pass@host/db")
+        );
+        assert_eq!(cfg.storage.postgres_pool_size, 16);
+    }
+
+    #[test]
+    fn config_with_redis_fleet_section() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let toml_content = r#"
+[server]
+bind = "127.0.0.1:9000"
+grpc_bind = "127.0.0.1:9001"
+
+[storage]
+models_dir = "/tmp/models"
+database = "/tmp/test.db"
+cache_dir = "/tmp/cache"
+
+[backends]
+default = "llamacpp"
+enabled = ["llamacpp"]
+
+[training]
+executor = "subprocess"
+max_concurrent_jobs = 2
+checkpoints_dir = "/tmp/checkpoints"
+
+[bridge]
+enabled = false
+heartbeat_interval_secs = 10
+
+[hardware]
+gpu_memory_reserve_mb = 512
+
+[fleet]
+enabled = true
+backend = "redis"
+redis_url = "redis://10.0.0.1:6379"
+"#;
+        std::fs::write(tmp.path(), toml_content).unwrap();
+        let cfg = IfranConfig::load(tmp.path()).unwrap();
+        assert!(matches!(cfg.fleet.backend, FleetBackendKind::Redis));
+        assert_eq!(
+            cfg.fleet.redis_url.as_deref(),
+            Some("redis://10.0.0.1:6379")
+        );
+    }
 }

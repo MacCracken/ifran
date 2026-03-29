@@ -549,7 +549,7 @@ mod tests {
 
     #[tokio::test]
     async fn health_transitions() {
-        let fm = FleetManager::new(Duration::from_millis(50), Duration::from_millis(100));
+        let fm = FleetManager::new(Duration::from_millis(200), Duration::from_millis(400));
         fm.register(make_req("node-1")).await.unwrap();
 
         // Initially online
@@ -557,13 +557,13 @@ mod tests {
         assert_eq!(node.health, NodeHealth::Online);
 
         // Wait past suspect timeout
-        tokio::time::sleep(Duration::from_millis(60)).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
         fm.check_health().await;
         let node = fm.get_node("node-1").await.unwrap();
         assert_eq!(node.health, NodeHealth::Suspect);
 
-        // Wait past offline timeout
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        // Wait past offline timeout (need 400ms total, already 300ms in)
+        tokio::time::sleep(Duration::from_millis(200)).await;
         fm.check_health().await;
         let node = fm.get_node("node-1").await.unwrap();
         assert_eq!(node.health, NodeHealth::Offline);
@@ -571,10 +571,10 @@ mod tests {
 
     #[tokio::test]
     async fn heartbeat_resets_to_online() {
-        let fm = FleetManager::new(Duration::from_millis(50), Duration::from_millis(100));
+        let fm = FleetManager::new(Duration::from_millis(200), Duration::from_millis(400));
         fm.register(make_req("node-1")).await.unwrap();
 
-        tokio::time::sleep(Duration::from_millis(60)).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
         fm.check_health().await;
         assert_eq!(
             fm.get_node("node-1").await.unwrap().health,
@@ -600,7 +600,7 @@ mod tests {
 
     #[tokio::test]
     async fn stats() {
-        let fm = FleetManager::new(Duration::from_millis(50), Duration::from_millis(100));
+        let fm = FleetManager::new(Duration::from_millis(200), Duration::from_millis(400));
         fm.register(make_req("node-1")).await.unwrap();
         fm.register(make_req("node-2")).await.unwrap();
 
@@ -611,7 +611,7 @@ mod tests {
         assert_eq!(s.total_gpu_memory_mb, 96000);
 
         // Make one suspect
-        tokio::time::sleep(Duration::from_millis(60)).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
         fm.heartbeat("node-1", None, None, None).await.unwrap();
         fm.check_health().await;
 

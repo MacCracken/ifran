@@ -150,6 +150,14 @@ mod tests {
     }
 
     #[test]
+    fn too_many_requests_helper() {
+        let resp = ApiErrorResponse::too_many_requests("GPU budget exhausted");
+        assert_eq!(resp.status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(resp.body.code, "BUDGET_EXCEEDED");
+        assert!(resp.body.message.contains("GPU budget"));
+    }
+
+    #[test]
     fn with_hint_chaining() {
         let resp = ApiErrorResponse::bad_request("NO_MODEL", "No model loaded")
             .with_hint("Try: POST /models with a model name to load one");

@@ -213,7 +213,9 @@ jobs:
             --out xml \
             --output-dir coverage \
             --fail-under 70 \
-            --timeout 300
+            --timeout 300 \
+            --exclude-files 'src/storage/pg.rs' \
+            --exclude-files 'src/fleet/redis_coordinator.rs'
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

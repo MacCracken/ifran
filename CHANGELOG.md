@@ -37,9 +37,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - **`JobManager` uses trait object** — `store` field changed from `Option<Arc<Mutex<JobStore>>>` (concrete) to `Option<Arc<Mutex<dyn JobStore>>>` (trait object) enabling swappable backends
 
 ### Dependencies
+- `majra` 1.0.2 (upgraded from 1.0.1 — redis 0.27 → 1.x)
 - `tokio-postgres` 0.7 (optional, `postgres` feature)
 - `deadpool-postgres` 0.14 (optional, `postgres` feature)
-- `redis` 0.27 (optional, `redis` feature — matches majra's redis version)
+- `redis` 1.x (optional, `redis` feature)
 
 ---
 

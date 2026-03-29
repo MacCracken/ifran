@@ -244,6 +244,37 @@ mod tests {
     }
 
     #[test]
+    fn set_pending_approval() {
+        let mut job = JobState::new(
+            uuid::Uuid::new_v4(),
+            TenantId::default_tenant(),
+            test_config(),
+            1000,
+        );
+        assert_eq!(job.status, TrainingStatus::Queued);
+        job.set_pending_approval();
+        assert_eq!(job.status, TrainingStatus::PendingApproval);
+        assert!(!job.is_terminal());
+        // Can still transition to Running after approval
+        job.start();
+        assert_eq!(job.status, TrainingStatus::Running);
+    }
+
+    #[test]
+    fn pending_approval_serde_roundtrip() {
+        let mut job = JobState::new(
+            uuid::Uuid::new_v4(),
+            TenantId::default_tenant(),
+            test_config(),
+            100,
+        );
+        job.set_pending_approval();
+        let json = serde_json::to_string(&job).unwrap();
+        let back: JobState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.status, TrainingStatus::PendingApproval);
+    }
+
+    #[test]
     fn add_checkpoint() {
         let mut job = JobState::new(
             uuid::Uuid::new_v4(),
