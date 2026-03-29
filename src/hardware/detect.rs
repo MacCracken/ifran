@@ -116,7 +116,7 @@ pub fn detect() -> Result<SystemHardware> {
     }
 }
 
-/// Get the full `ai-hwaccel` [`AcceleratorRegistry`] for callers that want
+/// Get the full `ai-hwaccel` `AcceleratorRegistry` for callers that want
 /// the richer API (quantization suggestions, sharding plans, profiles, etc.).
 ///
 /// Only available when the `ai-hwaccel` feature is enabled.
