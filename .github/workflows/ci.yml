@@ -169,7 +169,10 @@ jobs:
         run: cargo install cargo-outdated --locked
 
       - name: Run cargo outdated
-        run: cargo outdated --root-deps-only --exit-code 1
+        run: |
+          # sha2 0.10 is intentionally held — hmac 0.13 (needed for sha2 0.11) is pre-release.
+          # Exclude it from the check; fail on any other outdated root dep.
+          cargo outdated --root-deps-only --exit-code 1 --exclude sha2
 
   test:
     name: Tests
