@@ -1110,9 +1110,7 @@ mod tests {
             .unwrap();
         manager.start_job(id, &tenant_a).await.unwrap();
 
-        let result = manager
-            .approve_job(id, &tenant_b, "admin", None)
-            .await;
+        let result = manager.approve_job(id, &tenant_b, "admin", None).await;
         assert!(result.is_err());
     }
 

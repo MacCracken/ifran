@@ -784,7 +784,10 @@ gpu_memory_reserve_mb = 512
         let postgres: StorageBackendKind = serde_json::from_str(r#""postgres""#).unwrap();
         assert!(matches!(postgres, StorageBackendKind::Postgres));
         // Default
-        assert!(matches!(StorageBackendKind::default(), StorageBackendKind::Sqlite));
+        assert!(matches!(
+            StorageBackendKind::default(),
+            StorageBackendKind::Sqlite
+        ));
     }
 
     #[test]
@@ -793,7 +796,10 @@ gpu_memory_reserve_mb = 512
         assert!(matches!(memory, FleetBackendKind::Memory));
         let redis: FleetBackendKind = serde_json::from_str(r#""redis""#).unwrap();
         assert!(matches!(redis, FleetBackendKind::Redis));
-        assert!(matches!(FleetBackendKind::default(), FleetBackendKind::Memory));
+        assert!(matches!(
+            FleetBackendKind::default(),
+            FleetBackendKind::Memory
+        ));
     }
 
     #[test]
