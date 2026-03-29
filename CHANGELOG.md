@@ -5,6 +5,44 @@ All notable changes to Ifran will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.0]
+
+### Added
+
+#### Storage Abstraction
+- **Database-agnostic store traits** — added `JobStore`, `EvalStore`, `PreferenceStore` traits to `storage/traits.rs`, completing all 11 store trait abstractions
+- **Trait implementations** for all 3 new traits on their concrete SQLite stores
+- **PostgreSQL backend** (`postgres` feature) — `PgPool` struct implementing `ModelStore`, `TenantStore`, `JobStore`, `EvalStore`, `PreferenceStore`, `MarketplaceStore` via `tokio-postgres`/`deadpool-postgres`. SQL migrations in `storage/pg_migrations.sql`
+- **Config-driven backend selection** — `storage.backend = "sqlite" | "postgres"` with `storage.postgres_url` and `storage.postgres_pool_size` config fields
+
+#### Redis Fleet Coordination
+- **Redis feature flag** (`redis` feature) — gates `fleet::redis_coordinator` module using majra's Redis-backed primitives
+- **`RedisCoordinator`** wrapping `RedisHeartbeatTracker`, `RedisPubSub`, `RedisRateLimiter` for cross-instance fleet coordination
+- **Config-driven fleet backend** — `fleet.backend = "memory" | "redis"` with `fleet.redis_url` config field
+
+#### Human Approval Gates
+- **`PendingApproval` training status** — new variant in `TrainingStatus` enum for high-risk jobs
+- **Approval gate integration** — `JobManager::start_job()` routes RLHF, DPO, and FullFineTune jobs through `ApprovalGate` before execution
+- **`approve_job()` / `reject_job()`** methods on `JobManager` for resolving pending approvals
+- **3 new REST endpoints** — `POST /training/jobs/{id}/approve`, `POST /training/jobs/{id}/reject`, `GET /training/approvals`
+
+#### Per-Tenant Budget Enforcement
+- **GPU budget check on training start** — `BudgetChecker` integrated into `JobManager::start_job()`, queries hoosh for GPU-hour budgets before spawning training
+- **`BudgetExceeded` error variant** — maps to HTTP 429 Too Many Requests via `ApiErrorResponse::too_many_requests()`
+- **Budget-aware auto-start** — `POST /training/jobs` with `auto_start=true` returns 429 if tenant budget is exhausted
+
+### Changed
+- **`EvalStore` migrated to connection pool** — replaced raw `rusqlite::Connection` with `r2d2::Pool<SqliteConnectionManager>` for `Send+Sync` and consistency with all other stores
+- **`PreferenceStore` migrated to connection pool** — same migration, also improved `add_batch()` to use proper `transaction()` instead of manual `BEGIN`/`COMMIT`
+- **`JobManager` uses trait object** — `store` field changed from `Option<Arc<Mutex<JobStore>>>` (concrete) to `Option<Arc<Mutex<dyn JobStore>>>` (trait object) enabling swappable backends
+
+### Dependencies
+- `tokio-postgres` 0.7 (optional, `postgres` feature)
+- `deadpool-postgres` 0.14 (optional, `postgres` feature)
+- `redis` 0.27 (optional, `redis` feature — matches majra's redis version)
+
+---
+
 ## [1.0.0]
 
 ### Changed

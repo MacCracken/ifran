@@ -117,6 +117,7 @@ pub struct LoraConfig {
 #[serde(rename_all = "snake_case")]
 pub enum TrainingStatus {
     Queued,
+    PendingApproval,
     Preparing,
     Running,
     Paused,

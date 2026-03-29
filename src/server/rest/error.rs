@@ -49,6 +49,17 @@ impl ApiErrorResponse {
         }
     }
 
+    pub fn too_many_requests(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            body: ApiError {
+                code: "BUDGET_EXCEEDED",
+                message: message.into(),
+                hint: None,
+            },
+        }
+    }
+
     pub fn internal(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,

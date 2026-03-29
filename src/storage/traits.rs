@@ -6,6 +6,7 @@
 use crate::types::PagedResult;
 use crate::types::TenantId;
 use crate::types::error::Result;
+use crate::types::eval::{EvalResult, EvalRunId};
 use crate::types::experiment::{
     Direction, ExperimentId, ExperimentProgram, ExperimentStatus, TrialId, TrialResult,
 };
@@ -14,11 +15,14 @@ use crate::types::marketplace::{MarketplaceEntry, MarketplaceQuery};
 use crate::types::model::{ModelId, ModelInfo};
 use crate::types::rag::{ChunkInfo, DocumentId, DocumentInfo, RagPipelineConfig, RagPipelineId};
 use crate::types::rlhf::{AnnotationPair, AnnotationSession, AnnotationStats, Preference};
+use crate::types::training::{TrainingJobId, TrainingStatus};
 use crate::types::versioning::{ModelVersion, ModelVersionId};
 use uuid::Uuid;
 
 use crate::experiment::store::{ExperimentRecord, ExperimentSummary};
+use crate::preference::store::PreferencePair;
 use crate::tenant::store::TenantRecord;
+use crate::train::job::status::JobState;
 
 /// Model catalog store.
 pub trait ModelStore: Send + Sync {
@@ -200,4 +204,35 @@ pub trait VersionStore: Send + Sync {
     ) -> Result<PagedResult<ModelVersion>>;
     fn latest(&self, family: &str, tenant_id: &TenantId) -> Result<ModelVersion>;
     fn get_lineage(&self, id: ModelVersionId, tenant_id: &TenantId) -> Result<Vec<ModelVersion>>;
+}
+
+/// Training job persistence store.
+pub trait JobStore: Send + Sync {
+    fn save_job(&self, job: &JobState) -> Result<()>;
+    fn get_job(&self, id: TrainingJobId) -> Result<Option<JobState>>;
+    fn list_jobs(
+        &self,
+        status_filter: Option<TrainingStatus>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<PagedResult<JobState>>;
+    fn delete_job(&self, id: TrainingJobId) -> Result<()>;
+    fn recover_jobs(&self) -> Result<Vec<JobState>>;
+}
+
+/// Evaluation result store.
+pub trait EvalStore: Send + Sync {
+    fn insert(&self, result: &EvalResult, tenant_id: &TenantId) -> Result<()>;
+    fn get_run(&self, run_id: EvalRunId, tenant_id: &TenantId) -> Result<Vec<EvalResult>>;
+    fn get_by_model(&self, model_name: &str, tenant_id: &TenantId) -> Result<Vec<EvalResult>>;
+    fn list(&self, tenant_id: &TenantId) -> Result<Vec<EvalResult>>;
+}
+
+/// Preference pair store for DPO/RLHF training data.
+pub trait PreferenceStore: Send + Sync {
+    fn add(&self, pair: &PreferencePair, tenant_id: &TenantId) -> Result<()>;
+    fn list(&self, tenant_id: &TenantId, limit: u32) -> Result<Vec<PreferencePair>>;
+    fn export_dpo(&self, tenant_id: &TenantId) -> Result<Vec<serde_json::Value>>;
+    fn count(&self, tenant_id: &TenantId) -> Result<u64>;
+    fn add_batch(&self, pairs: &[PreferencePair], tenant_id: &TenantId) -> Result<u64>;
 }

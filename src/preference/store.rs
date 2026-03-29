@@ -3,7 +3,9 @@
 use crate::types::IfranError;
 use crate::types::TenantId;
 use crate::types::error::Result;
-use rusqlite::{Connection, params};
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -20,7 +22,7 @@ pub struct PreferencePair {
 }
 
 pub struct PreferenceStore {
-    conn: Connection,
+    pool: Pool<SqliteConnectionManager>,
 }
 
 impl PreferenceStore {
@@ -28,27 +30,41 @@ impl PreferenceStore {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let conn = Connection::open(path).map_err(|e| IfranError::StorageError(e.to_string()))?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")
+        let manager = SqliteConnectionManager::file(path).with_init(|conn| {
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            Ok(())
+        });
+        let pool = Pool::builder()
+            .max_size(4)
+            .build(manager)
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
-        let s = Self { conn };
+        let s = Self { pool };
         s.migrate()?;
         Ok(s)
     }
 
     #[cfg(test)]
     pub fn open_in_memory() -> Result<Self> {
-        let conn =
-            Connection::open_in_memory().map_err(|e| IfranError::StorageError(e.to_string()))?;
-        let s = Self { conn };
+        let manager = SqliteConnectionManager::memory().with_init(|conn| {
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            Ok(())
+        });
+        let pool = Pool::builder()
+            .max_size(4)
+            .build(manager)
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let s = Self { pool };
         s.migrate()?;
         Ok(s)
     }
 
     fn migrate(&self) -> Result<()> {
-        self.conn
-            .execute_batch(
-                "CREATE TABLE IF NOT EXISTS preference_pairs (
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS preference_pairs (
                 id           TEXT PRIMARY KEY,
                 tenant_id    TEXT NOT NULL DEFAULT 'default',
                 prompt       TEXT NOT NULL,
@@ -60,36 +76,42 @@ impl PreferenceStore {
             );
             CREATE INDEX IF NOT EXISTS idx_prefs_tenant ON preference_pairs(tenant_id);
             CREATE INDEX IF NOT EXISTS idx_prefs_source ON preference_pairs(source);",
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         Ok(())
     }
 
     /// Add a preference pair.
     pub fn add(&self, pair: &PreferencePair, tenant_id: &TenantId) -> Result<()> {
-        self.conn
-            .execute(
-                "INSERT INTO preference_pairs (id, tenant_id, prompt, chosen, rejected, source, score_delta, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![
-                    pair.id.to_string(),
-                    tenant_id.0,
-                    pair.prompt,
-                    pair.chosen,
-                    pair.rejected,
-                    pair.source,
-                    pair.score_delta,
-                    pair.created_at.to_rfc3339()
-                ],
-            )
+        let conn = self
+            .pool
+            .get()
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute(
+            "INSERT INTO preference_pairs (id, tenant_id, prompt, chosen, rejected, source, score_delta, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                pair.id.to_string(),
+                tenant_id.0,
+                pair.prompt,
+                pair.chosen,
+                pair.rejected,
+                pair.source,
+                pair.score_delta,
+                pair.created_at.to_rfc3339()
+            ],
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         Ok(())
     }
 
     /// List preference pairs for a tenant.
     pub fn list(&self, tenant_id: &TenantId, limit: u32) -> Result<Vec<PreferencePair>> {
-        let mut stmt = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let mut stmt = conn
             .prepare(
                 "SELECT id, prompt, chosen, rejected, source, score_delta, created_at
              FROM preference_pairs WHERE tenant_id = ?1 ORDER BY created_at DESC LIMIT ?2",
@@ -105,8 +127,11 @@ impl PreferenceStore {
 
     /// Export all pairs in DPO format (JSON lines).
     pub fn export_dpo(&self, tenant_id: &TenantId) -> Result<Vec<serde_json::Value>> {
-        let mut stmt = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let mut stmt = conn
             .prepare("SELECT prompt, chosen, rejected FROM preference_pairs WHERE tenant_id = ?1")
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
         let rows = stmt
@@ -125,8 +150,11 @@ impl PreferenceStore {
 
     /// Count pairs for a tenant.
     pub fn count(&self, tenant_id: &TenantId) -> Result<u64> {
-        let c: i64 = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let c: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM preference_pairs WHERE tenant_id = ?1",
                 params![tenant_id.0],
@@ -138,21 +166,57 @@ impl PreferenceStore {
 
     /// Add multiple pairs in a batch, wrapped in a transaction for atomicity.
     pub fn add_batch(&self, pairs: &[PreferencePair], tenant_id: &TenantId) -> Result<u64> {
-        self.conn
-            .execute_batch("BEGIN")
+        let mut conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let tx = conn
+            .transaction()
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
         let mut count = 0u64;
         for pair in pairs {
-            if let Err(e) = self.add(pair, tenant_id) {
-                let _ = self.conn.execute_batch("ROLLBACK");
-                return Err(e);
-            }
+            tx.execute(
+                "INSERT INTO preference_pairs (id, tenant_id, prompt, chosen, rejected, source, score_delta, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    pair.id.to_string(),
+                    tenant_id.0,
+                    pair.prompt,
+                    pair.chosen,
+                    pair.rejected,
+                    pair.source,
+                    pair.score_delta,
+                    pair.created_at.to_rfc3339()
+                ],
+            )
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
             count += 1;
         }
-        self.conn
-            .execute_batch("COMMIT")
+        tx.commit()
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
         Ok(count)
+    }
+}
+
+impl crate::storage::traits::PreferenceStore for PreferenceStore {
+    fn add(&self, pair: &PreferencePair, tenant_id: &TenantId) -> Result<()> {
+        Self::add(self, pair, tenant_id)
+    }
+
+    fn list(&self, tenant_id: &TenantId, limit: u32) -> Result<Vec<PreferencePair>> {
+        Self::list(self, tenant_id, limit)
+    }
+
+    fn export_dpo(&self, tenant_id: &TenantId) -> Result<Vec<serde_json::Value>> {
+        Self::export_dpo(self, tenant_id)
+    }
+
+    fn count(&self, tenant_id: &TenantId) -> Result<u64> {
+        Self::count(self, tenant_id)
+    }
+
+    fn add_batch(&self, pairs: &[PreferencePair], tenant_id: &TenantId) -> Result<u64> {
+        Self::add_batch(self, pairs, tenant_id)
     }
 }
 

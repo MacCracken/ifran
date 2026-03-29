@@ -4,12 +4,14 @@ use crate::types::IfranError;
 use crate::types::TenantId;
 use crate::types::error::Result;
 use crate::types::eval::{BenchmarkKind, EvalResult, EvalRunId};
-use rusqlite::{Connection, params};
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
+use rusqlite::params;
 use uuid::Uuid;
 
 /// Manages eval result storage in SQLite.
 pub struct EvalStore {
-    conn: Connection,
+    pool: Pool<SqliteConnectionManager>,
 }
 
 impl EvalStore {
@@ -18,18 +20,26 @@ impl EvalStore {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let conn = Connection::open(path).map_err(|e| IfranError::StorageError(e.to_string()))?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")
+        let manager = SqliteConnectionManager::file(path).with_init(|conn| {
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            Ok(())
+        });
+        let pool = Pool::builder()
+            .max_size(4)
+            .build(manager)
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
-        let store = Self { conn };
+        let store = Self { pool };
         store.migrate()?;
         Ok(store)
     }
 
     fn migrate(&self) -> Result<()> {
-        self.conn
-            .execute_batch(
-                "CREATE TABLE IF NOT EXISTS eval_results (
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS eval_results (
                     run_id              TEXT NOT NULL,
                     model_name          TEXT NOT NULL,
                     benchmark           TEXT NOT NULL,
@@ -41,49 +51,56 @@ impl EvalStore {
                     PRIMARY KEY (run_id, benchmark)
                 );
                 CREATE INDEX IF NOT EXISTS idx_eval_model ON eval_results(model_name);",
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
         // Add tenant_id column (idempotent — ignore if already exists)
-        let _ = self.conn.execute_batch(
+        let _ = conn.execute_batch(
             "ALTER TABLE eval_results ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';",
         );
-        self.conn
-            .execute_batch("CREATE INDEX IF NOT EXISTS idx_eval_tenant ON eval_results(tenant_id);")
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_eval_tenant ON eval_results(tenant_id);",
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
         Ok(())
     }
 
     /// Insert an eval result.
     pub fn insert(&self, result: &EvalResult, tenant_id: &TenantId) -> Result<()> {
-        self.conn
-            .execute(
-                "INSERT INTO eval_results (run_id, model_name, benchmark, score, details,
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        conn.execute(
+            "INSERT INTO eval_results (run_id, model_name, benchmark, score, details,
                     samples_evaluated, duration_secs, evaluated_at, tenant_id)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                params![
-                    result.run_id.to_string(),
-                    result.model_name,
-                    serde_json::to_string(&result.benchmark)
-                        .unwrap()
-                        .trim_matches('"'),
-                    result.score,
-                    result.details.as_ref().map(|d| d.to_string()),
-                    result.samples_evaluated as i64,
-                    result.duration_secs,
-                    result.evaluated_at.to_rfc3339(),
-                    tenant_id.0,
-                ],
-            )
-            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+            params![
+                result.run_id.to_string(),
+                result.model_name,
+                serde_json::to_string(&result.benchmark)
+                    .unwrap()
+                    .trim_matches('"'),
+                result.score,
+                result.details.as_ref().map(|d| d.to_string()),
+                result.samples_evaluated as i64,
+                result.duration_secs,
+                result.evaluated_at.to_rfc3339(),
+                tenant_id.0,
+            ],
+        )
+        .map_err(|e| IfranError::StorageError(e.to_string()))?;
         Ok(())
     }
 
     /// Get all results for a specific eval run.
     pub fn get_run(&self, run_id: EvalRunId, tenant_id: &TenantId) -> Result<Vec<EvalResult>> {
-        let mut stmt = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let mut stmt = conn
             .prepare("SELECT * FROM eval_results WHERE run_id = ?1 AND tenant_id = ?2")
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
@@ -98,8 +115,11 @@ impl EvalStore {
 
     /// Get all eval results for a model.
     pub fn get_by_model(&self, model_name: &str, tenant_id: &TenantId) -> Result<Vec<EvalResult>> {
-        let mut stmt = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let mut stmt = conn
             .prepare("SELECT * FROM eval_results WHERE model_name = ?1 AND tenant_id = ?2 ORDER BY evaluated_at DESC")
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
@@ -114,8 +134,11 @@ impl EvalStore {
 
     /// List all eval results.
     pub fn list(&self, tenant_id: &TenantId) -> Result<Vec<EvalResult>> {
-        let mut stmt = self
-            .conn
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| IfranError::StorageError(e.to_string()))?;
+        let mut stmt = conn
             .prepare("SELECT * FROM eval_results WHERE tenant_id = ?1 ORDER BY evaluated_at DESC")
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
@@ -126,6 +149,24 @@ impl EvalStore {
             .map_err(|e| IfranError::StorageError(e.to_string()))?;
 
         Ok(results)
+    }
+}
+
+impl crate::storage::traits::EvalStore for EvalStore {
+    fn insert(&self, result: &EvalResult, tenant_id: &TenantId) -> Result<()> {
+        Self::insert(self, result, tenant_id)
+    }
+
+    fn get_run(&self, run_id: EvalRunId, tenant_id: &TenantId) -> Result<Vec<EvalResult>> {
+        Self::get_run(self, run_id, tenant_id)
+    }
+
+    fn get_by_model(&self, model_name: &str, tenant_id: &TenantId) -> Result<Vec<EvalResult>> {
+        Self::get_by_model(self, model_name, tenant_id)
+    }
+
+    fn list(&self, tenant_id: &TenantId) -> Result<Vec<EvalResult>> {
+        Self::list(self, tenant_id)
     }
 }
 
@@ -170,8 +211,12 @@ mod tests {
     use chrono::Utc;
 
     fn test_store() -> EvalStore {
-        let conn = Connection::open_in_memory().unwrap();
-        let store = EvalStore { conn };
+        let manager = SqliteConnectionManager::memory().with_init(|conn| {
+            conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            Ok(())
+        });
+        let pool = Pool::builder().max_size(4).build(manager).unwrap();
+        let store = EvalStore { pool };
         store.migrate().unwrap();
         store
     }

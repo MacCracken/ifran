@@ -57,6 +57,9 @@ pub enum IfranError {
     #[error("Unauthorized: {0}")]
     Unauthorized(String),
 
+    #[error("Budget exceeded: {0}")]
+    BudgetExceeded(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -140,6 +143,7 @@ mod tests {
             IfranError::ValidationError("x".into()),
             IfranError::TenantNotFound("x".into()),
             IfranError::Unauthorized("x".into()),
+            IfranError::BudgetExceeded("x".into()),
             IfranError::Other("x".into()),
         ];
         for e in errors {

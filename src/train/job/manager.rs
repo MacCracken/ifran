@@ -1,12 +1,14 @@
 //! Training job manager — creates, tracks, and manages training job lifecycles.
 
+use crate::budget::checker::BudgetChecker;
+use crate::storage::traits::JobStore;
+use crate::train::approval::gate::{ApprovalGate, ApprovalId};
 use crate::train::executor::{ExecutorKind, TrainingExecutor};
 use crate::train::job::status::JobState;
-use crate::train::job::store::JobStore;
 use crate::types::IfranError;
 use crate::types::TenantId;
 use crate::types::error::Result;
-use crate::types::training::{TrainingJobConfig, TrainingJobId, TrainingStatus};
+use crate::types::training::{TrainingJobConfig, TrainingJobId, TrainingMethod, TrainingStatus};
 use chrono::Utc;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -14,12 +16,38 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
+/// Returns true if the training method requires human approval before starting.
+#[must_use]
+#[inline]
+fn requires_approval(method: TrainingMethod) -> bool {
+    matches!(
+        method,
+        TrainingMethod::Rlhf | TrainingMethod::Dpo | TrainingMethod::FullFineTune
+    )
+}
+
+/// Estimate GPU hours from a training config for budget enforcement.
+#[must_use]
+fn estimate_gpu_hours(config: &TrainingJobConfig) -> f64 {
+    let samples = config.dataset.max_samples.unwrap_or(10_000) as f64;
+    let epochs = config.hyperparams.epochs.max(1) as f64;
+    let batch_size = config.hyperparams.batch_size.max(1) as f64;
+    let steps = (samples / batch_size) * epochs;
+    // Rough estimate: ~0.001 GPU-hours per step for a 7B model
+    // This is intentionally conservative; real usage is reported after completion
+    steps * 0.001
+}
+
 /// Manages all training jobs.
 pub struct JobManager {
     jobs: Arc<RwLock<HashMap<TrainingJobId, JobState>>>,
     executor: Arc<dyn TrainingExecutor>,
     max_concurrent: usize,
-    store: Option<Arc<Mutex<JobStore>>>,
+    store: Option<Arc<Mutex<dyn JobStore>>>,
+    approval_gate: Arc<Mutex<ApprovalGate>>,
+    /// Maps job IDs to their approval request IDs.
+    approval_map: Arc<RwLock<HashMap<TrainingJobId, ApprovalId>>>,
+    budget_checker: Option<Arc<BudgetChecker>>,
 }
 
 impl JobManager {
@@ -35,15 +63,18 @@ impl JobManager {
             executor,
             max_concurrent,
             store: None,
+            approval_gate: Arc::new(Mutex::new(ApprovalGate::new())),
+            approval_map: Arc::new(RwLock::new(HashMap::new())),
+            budget_checker: None,
         }
     }
 
-    /// Create a JobManager backed by a persistent SQLite store.
+    /// Create a JobManager backed by a persistent store.
     pub fn new_with_store(
         executor_kind: ExecutorKind,
         trainer_image: Option<String>,
         max_concurrent: usize,
-        store: JobStore,
+        store: impl JobStore + 'static,
     ) -> Self {
         let executor = Self::make_executor(executor_kind, trainer_image);
 
@@ -52,7 +83,21 @@ impl JobManager {
             executor,
             max_concurrent,
             store: Some(Arc::new(Mutex::new(store))),
+            approval_gate: Arc::new(Mutex::new(ApprovalGate::new())),
+            approval_map: Arc::new(RwLock::new(HashMap::new())),
+            budget_checker: None,
         }
+    }
+
+    /// Set the budget checker for GPU hour enforcement.
+    pub fn set_budget_checker(&mut self, checker: Arc<BudgetChecker>) {
+        self.budget_checker = Some(checker);
+    }
+
+    /// Get a reference to the approval gate.
+    #[must_use]
+    pub fn approval_gate(&self) -> &Arc<Mutex<ApprovalGate>> {
+        &self.approval_gate
     }
 
     fn make_executor(
@@ -134,7 +179,32 @@ impl JobManager {
     }
 
     /// Start a queued job. The caller must provide the tenant_id to verify ownership.
+    ///
+    /// High-risk methods (RLHF, DPO, FullFineTune) enter `PendingApproval` status
+    /// instead of starting immediately. Use `approve_job()` to proceed.
     pub async fn start_job(&self, id: TrainingJobId, tenant_id: &TenantId) -> Result<()> {
+        // Budget check before acquiring write lock (async call)
+        {
+            let jobs = self.jobs.read().await;
+            let state = jobs
+                .get(&id)
+                .ok_or_else(|| IfranError::TrainingError(format!("Job {id} not found")))?;
+            if &state.tenant_id != tenant_id {
+                return Err(IfranError::TrainingError(format!("Job {id} not found")));
+            }
+            if let Some(checker) = &self.budget_checker {
+                let gpu_hours = estimate_gpu_hours(&state.config);
+                let status = checker.check_budget(tenant_id, gpu_hours).await?;
+                if !status.allowed {
+                    return Err(IfranError::BudgetExceeded(
+                        status
+                            .reason
+                            .unwrap_or_else(|| "GPU budget exceeded".into()),
+                    ));
+                }
+            }
+        }
+
         let mut jobs = self.jobs.write().await;
 
         // Check running count inside the write lock to prevent race condition
@@ -166,6 +236,26 @@ impl JobManager {
             )));
         }
 
+        // High-risk methods require human approval before execution
+        if requires_approval(state.config.method) {
+            state.set_pending_approval();
+            self.persist(state);
+            let approval_req = self
+                .approval_gate
+                .lock()
+                .map_err(|e| {
+                    IfranError::TrainingError(format!("Failed to lock approval gate: {e}"))
+                })?
+                .request_approval(
+                    &format!("training-{id}"),
+                    "job_start",
+                    &state.config.base_model,
+                );
+            self.approval_map.write().await.insert(id, approval_req.id);
+            info!(job_id = %id, method = ?state.config.method, "Job requires approval before starting");
+            return Ok(());
+        }
+
         state.start();
         self.persist(state);
 
@@ -194,6 +284,124 @@ impl JobManager {
             }
         });
 
+        Ok(())
+    }
+
+    /// Approve a pending-approval job and start it.
+    pub async fn approve_job(
+        &self,
+        id: TrainingJobId,
+        tenant_id: &TenantId,
+        reviewer: &str,
+        comment: Option<&str>,
+    ) -> Result<()> {
+        // Resolve the approval request
+        let approval_id = {
+            let map = self.approval_map.read().await;
+            *map.get(&id).ok_or_else(|| {
+                IfranError::TrainingError(format!("No pending approval for job {id}"))
+            })?
+        };
+
+        self.approval_gate
+            .lock()
+            .map_err(|e| IfranError::TrainingError(format!("Failed to lock approval gate: {e}")))?
+            .approve(approval_id, reviewer, comment);
+
+        // Transition the job from PendingApproval → Running
+        let mut jobs = self.jobs.write().await;
+
+        let running_count = jobs
+            .values()
+            .filter(|j| j.status == TrainingStatus::Running)
+            .count();
+        if running_count >= self.max_concurrent {
+            return Err(IfranError::TrainingError(format!(
+                "Max concurrent jobs ({}) reached",
+                self.max_concurrent
+            )));
+        }
+
+        let state = jobs
+            .get_mut(&id)
+            .ok_or_else(|| IfranError::TrainingError(format!("Job {id} not found")))?;
+
+        if &state.tenant_id != tenant_id {
+            return Err(IfranError::TrainingError(format!("Job {id} not found")));
+        }
+
+        if state.status != TrainingStatus::PendingApproval {
+            return Err(IfranError::TrainingError(format!(
+                "Job {id} is {:?}, not PendingApproval",
+                state.status
+            )));
+        }
+
+        state.start();
+        self.persist(state);
+        info!(job_id = %id, reviewer, "Approved and started training job");
+
+        let config = state.config.clone();
+        let jobs_ref = self.jobs.clone();
+        let executor = self.executor.clone();
+        let store = self.store.clone();
+
+        tokio::spawn(async move {
+            let result = executor.run(&config, id).await;
+            let mut jobs = jobs_ref.write().await;
+            if let Some(state) = jobs.get_mut(&id) {
+                match result {
+                    Ok(()) => state.complete(),
+                    Err(e) => state.fail(e.to_string()),
+                }
+                if let Some(store) = &store {
+                    if let Ok(store) = store.lock() {
+                        let _ = store.save_job(state);
+                    }
+                }
+            }
+        });
+
+        // Clean up approval map
+        self.approval_map.write().await.remove(&id);
+        Ok(())
+    }
+
+    /// Reject a pending-approval job.
+    pub async fn reject_job(
+        &self,
+        id: TrainingJobId,
+        tenant_id: &TenantId,
+        reviewer: &str,
+        comment: Option<&str>,
+    ) -> Result<()> {
+        let approval_id = {
+            let map = self.approval_map.read().await;
+            *map.get(&id).ok_or_else(|| {
+                IfranError::TrainingError(format!("No pending approval for job {id}"))
+            })?
+        };
+
+        self.approval_gate
+            .lock()
+            .map_err(|e| IfranError::TrainingError(format!("Failed to lock approval gate: {e}")))?
+            .reject(approval_id, reviewer, comment);
+
+        let mut jobs = self.jobs.write().await;
+        let state = jobs
+            .get_mut(&id)
+            .ok_or_else(|| IfranError::TrainingError(format!("Job {id} not found")))?;
+
+        if &state.tenant_id != tenant_id {
+            return Err(IfranError::TrainingError(format!("Job {id} not found")));
+        }
+
+        let reason = comment.unwrap_or("Approval rejected");
+        state.fail(format!("Approval rejected by {reviewer}: {reason}"));
+        self.persist(state);
+        info!(job_id = %id, reviewer, "Rejected training job");
+
+        self.approval_map.write().await.remove(&id);
         Ok(())
     }
 

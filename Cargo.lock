@@ -1338,7 +1338,7 @@ dependencies = [
 
 [[package]]
 name = "ifran"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "ai-hwaccel",
  "anyhow",
@@ -1349,6 +1349,7 @@ dependencies = [
  "chrono",
  "clap",
  "criterion",
+ "deadpool-postgres",
  "futures",
  "hex",
  "hmac",
@@ -1368,6 +1369,7 @@ dependencies = [
  "r2d2_sqlite",
  "rand 0.10.0",
  "rand_core 0.10.0",
+ "redis",
  "reqwest 0.13.2",
  "rusqlite",
  "serde",
@@ -1376,6 +1378,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-postgres",
  "tokio-stream",
  "tokio-test",
  "tokio-util",
@@ -2083,8 +2086,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "54b858f82211e84682fecd373f68e1ceae642d8d751a1ebd13f33de6257b3e20"
 dependencies = [
  "bytes",
+ "chrono",
  "fallible-iterator 0.2.0",
  "postgres-protocol",
+ "serde_core",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]

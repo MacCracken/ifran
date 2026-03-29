@@ -71,6 +71,9 @@ pub fn build(state: AppState) -> Router {
             get(training::list_checkpoints),
         )
         .route("/training/jobs/{id}/metrics", get(training::get_metrics))
+        .route("/training/jobs/{id}/approve", post(training::approve_job))
+        .route("/training/jobs/{id}/reject", post(training::reject_job))
+        .route("/training/approvals", get(training::list_approvals))
         // Distributed Training
         .route(
             "/training/distributed/jobs",

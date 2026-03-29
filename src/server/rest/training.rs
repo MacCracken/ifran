@@ -65,22 +65,29 @@ pub async fn create_job(
         })?;
 
     if req.auto_start {
-        if let Err(e) = state.job_manager.start_job(id, &tenant_id).await {
-            tracing::warn!(job_id = %id, error = %e, "Auto-start failed for training job");
-        }
+        match state.job_manager.start_job(id, &tenant_id).await {
+            Ok(()) => {
+                // Emit local training event
+                state.training_event_bus.emit(TrainingEvent::JobStarted {
+                    job_id: id.to_string(),
+                    model: base_model,
+                    timestamp: chrono::Utc::now(),
+                });
 
-        // Emit local training event
-        state.training_event_bus.emit(TrainingEvent::JobStarted {
-            job_id: id.to_string(),
-            model: base_model,
-            timestamp: chrono::Utc::now(),
-        });
-
-        // Also report to SY bridge if connected
-        if let Some(client) = &state.bridge_client {
-            let _ = client
-                .report_progress(&id.to_string(), "running", 0, 0.0)
-                .await;
+                // Also report to SY bridge if connected
+                if let Some(client) = &state.bridge_client {
+                    let _ = client
+                        .report_progress(&id.to_string(), "running", 0, 0.0)
+                        .await;
+                }
+            }
+            Err(crate::types::IfranError::BudgetExceeded(reason)) => {
+                return Err(ApiErrorResponse::too_many_requests(reason)
+                    .with_hint("Wait for current jobs to finish or increase GPU budget"));
+            }
+            Err(e) => {
+                tracing::warn!(job_id = %id, error = %e, "Auto-start failed for training job");
+            }
         }
     }
 
@@ -293,6 +300,107 @@ pub async fn get_metrics(
         progress_percent: job.progress_percent(),
         checkpoints,
     }))
+}
+
+/// Response body for an approval request.
+#[derive(Debug, Serialize)]
+pub struct ApprovalResponse {
+    pub id: String,
+    pub pipeline_name: String,
+    pub stage: String,
+    pub artifact_ref: String,
+    pub status: String,
+    pub reviewer: Option<String>,
+    pub comment: Option<String>,
+    pub created_at: String,
+    pub resolved_at: Option<String>,
+}
+
+/// Request body for approving or rejecting a job.
+#[derive(Debug, Deserialize)]
+pub struct ApprovalAction {
+    pub reviewer: String,
+    pub comment: Option<String>,
+}
+
+/// GET /training/approvals — list pending approval requests.
+pub async fn list_approvals(
+    State(state): State<AppState>,
+    Extension(_tenant_id): Extension<TenantId>,
+) -> Result<Json<Vec<ApprovalResponse>>, ApiErrorResponse> {
+    let gate = state
+        .job_manager
+        .approval_gate()
+        .lock()
+        .map_err(|e| ApiErrorResponse::internal(e.to_string()))?;
+    let pending: Vec<ApprovalResponse> = gate
+        .pending()
+        .into_iter()
+        .map(|r| ApprovalResponse {
+            id: r.id.to_string(),
+            pipeline_name: r.pipeline_name.clone(),
+            stage: r.stage.clone(),
+            artifact_ref: r.artifact_ref.clone(),
+            status: format!("{:?}", r.status),
+            reviewer: r.reviewer.clone(),
+            comment: r.comment.clone(),
+            created_at: r.created_at.to_rfc3339(),
+            resolved_at: r.resolved_at.map(|t| t.to_rfc3339()),
+        })
+        .collect();
+    Ok(Json(pending))
+}
+
+/// POST /training/jobs/:id/approve — approve a pending-approval job.
+pub async fn approve_job(
+    State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
+    Path(id): Path<TrainingJobId>,
+    Json(action): Json<ApprovalAction>,
+) -> Result<Json<JobResponse>, ApiErrorResponse> {
+    state
+        .job_manager
+        .approve_job(id, &tenant_id, &action.reviewer, action.comment.as_deref())
+        .await
+        .map_err(|e| ApiErrorResponse::bad_request("APPROVAL_FAILED", e.to_string()))?;
+
+    let job = state
+        .job_manager
+        .get_job(id, &tenant_id)
+        .await
+        .map_err(|e| ApiErrorResponse::internal(e.to_string()))?;
+
+    // Emit start event after approval
+    state
+        .training_event_bus
+        .emit(crate::training_events::TrainingEvent::JobStarted {
+            job_id: id.to_string(),
+            model: job.config.base_model.clone(),
+            timestamp: chrono::Utc::now(),
+        });
+
+    Ok(Json(job_to_response(&job)))
+}
+
+/// POST /training/jobs/:id/reject — reject a pending-approval job.
+pub async fn reject_job(
+    State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
+    Path(id): Path<TrainingJobId>,
+    Json(action): Json<ApprovalAction>,
+) -> Result<Json<JobResponse>, ApiErrorResponse> {
+    state
+        .job_manager
+        .reject_job(id, &tenant_id, &action.reviewer, action.comment.as_deref())
+        .await
+        .map_err(|e| ApiErrorResponse::bad_request("REJECTION_FAILED", e.to_string()))?;
+
+    let job = state
+        .job_manager
+        .get_job(id, &tenant_id)
+        .await
+        .map_err(|e| ApiErrorResponse::internal(e.to_string()))?;
+    Ok(Json(job_to_response(&job)))
 }
 
 fn job_to_response(job: &crate::train::job::status::JobState) -> JobResponse {

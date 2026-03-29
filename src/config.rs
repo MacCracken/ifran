@@ -26,11 +26,33 @@ pub struct ServerConfig {
     pub ws_bind: Option<String>,
 }
 
+/// Storage backend selection.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StorageBackendKind {
+    #[default]
+    Sqlite,
+    Postgres,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageConfig {
     pub models_dir: PathBuf,
     pub database: PathBuf,
     pub cache_dir: PathBuf,
+    /// Storage backend: "sqlite" (default) or "postgres".
+    #[serde(default)]
+    pub backend: StorageBackendKind,
+    /// PostgreSQL connection URL (required when backend = "postgres").
+    #[serde(default)]
+    pub postgres_url: Option<String>,
+    /// PostgreSQL connection pool size (default: 8).
+    #[serde(default = "default_pg_pool_size")]
+    pub postgres_pool_size: u32,
+}
+
+fn default_pg_pool_size() -> u32 {
+    8
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,12 +96,27 @@ fn default_telemetry_interval() -> u64 {
     10
 }
 
+/// Fleet coordination backend selection.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FleetBackendKind {
+    #[default]
+    Memory,
+    Redis,
+}
+
 /// Fleet management configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FleetConfig {
     /// Enable fleet management.
     #[serde(default)]
     pub enabled: bool,
+    /// Fleet coordination backend: "memory" (default) or "redis".
+    #[serde(default)]
+    pub backend: FleetBackendKind,
+    /// Redis connection URL (required when backend = "redis").
+    #[serde(default)]
+    pub redis_url: Option<String>,
     /// Seconds without heartbeat before a node becomes Suspect.
     #[serde(default = "default_suspect_timeout")]
     pub suspect_timeout_secs: u64,
@@ -105,6 +142,8 @@ impl Default for FleetConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            backend: FleetBackendKind::default(),
+            redis_url: None,
             suspect_timeout_secs: default_suspect_timeout(),
             offline_timeout_secs: default_offline_timeout(),
             health_check_interval_secs: default_health_check_interval(),
@@ -217,6 +256,9 @@ impl Default for IfranConfig {
                 models_dir: ifran_dir.join("models"),
                 database: ifran_dir.join("ifran.db"),
                 cache_dir: ifran_dir.join("cache"),
+                backend: StorageBackendKind::default(),
+                postgres_url: None,
+                postgres_pool_size: default_pg_pool_size(),
             },
             backends: BackendsConfig {
                 default: "llamacpp".into(),
@@ -248,6 +290,18 @@ impl Default for IfranConfig {
 impl IfranConfig {
     /// Validate configuration for logical consistency.
     pub fn validate(&self) -> crate::types::error::Result<()> {
+        if matches!(self.storage.backend, StorageBackendKind::Postgres)
+            && self.storage.postgres_url.is_none()
+        {
+            return Err(crate::types::IfranError::ConfigError(
+                "storage.postgres_url is required when backend = \"postgres\"".into(),
+            ));
+        }
+        if matches!(self.fleet.backend, FleetBackendKind::Redis) && self.fleet.redis_url.is_none() {
+            return Err(crate::types::IfranError::ConfigError(
+                "fleet.redis_url is required when fleet.backend = \"redis\"".into(),
+            ));
+        }
         if self.security.multi_tenant && !self.security.auth_required {
             // In multi-tenant mode, auth is always enforced via tenant keys,
             // but warn if auth_required is false (it's ignored in multi-tenant).

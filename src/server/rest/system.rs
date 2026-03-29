@@ -212,6 +212,9 @@ mod tests {
                 models_dir: tmp.path().join("models"),
                 database: tmp.path().join("test.db"),
                 cache_dir: tmp.path().join("cache"),
+                backend: Default::default(),
+                postgres_url: None,
+                postgres_pool_size: 8,
             },
             backends: crate::config::BackendsConfig {
                 default: "llamacpp".into(),

@@ -47,6 +47,10 @@ impl JobState {
         }
     }
 
+    pub fn set_pending_approval(&mut self) {
+        self.status = TrainingStatus::PendingApproval;
+    }
+
     pub fn start(&mut self) {
         self.status = TrainingStatus::Running;
         self.started_at = Some(Utc::now());

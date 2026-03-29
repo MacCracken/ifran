@@ -225,6 +225,33 @@ impl JobStore {
     }
 }
 
+impl crate::storage::traits::JobStore for JobStore {
+    fn save_job(&self, job: &JobState) -> Result<()> {
+        Self::save_job(self, job)
+    }
+
+    fn get_job(&self, id: TrainingJobId) -> Result<Option<JobState>> {
+        Self::get_job(self, id)
+    }
+
+    fn list_jobs(
+        &self,
+        status_filter: Option<TrainingStatus>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<PagedResult<JobState>> {
+        Self::list_jobs(self, status_filter, limit, offset)
+    }
+
+    fn delete_job(&self, id: TrainingJobId) -> Result<()> {
+        Self::delete_job(self, id)
+    }
+
+    fn recover_jobs(&self) -> Result<Vec<JobState>> {
+        Self::recover_jobs(self)
+    }
+}
+
 fn row_to_job_state(row: &rusqlite::Row) -> rusqlite::Result<JobState> {
     let id_str: String = row.get(0)?;
     let tenant_id_str: String = row.get(1)?;
