@@ -1,6 +1,6 @@
 .PHONY: build release test test-unit test-integration test-coverage \
        clean dev lint fmt format-check check \
-       security-scan docs version-sync \
+       security-scan docs bench bench-history version-sync \
        ci-build ci-test ci-docs \
        docker-build docker-dev docker-release
 
@@ -9,10 +9,10 @@ VERSION := $(shell cat VERSION)
 # === Build ===
 
 build:
-	cargo build --workspace
+	cargo build --all-features
 
 release:
-	cargo build --release --workspace
+	cargo build --release --all-features
 
 clean:
 	cargo clean
@@ -20,45 +20,54 @@ clean:
 # === Development ===
 
 dev:
-	cargo watch -x 'run --package ifran-api'
+	cargo run --bin ifran-server --all-features
 
 # === Quality ===
 
 fmt:
-	cargo fmt --all
+	cargo fmt
 
 format-check:
-	cargo fmt --all -- --check
+	cargo fmt -- --check
 
 lint:
-	cargo clippy --workspace -- -D warnings
+	cargo clippy --all-features --all-targets -- -D warnings
 
 check: format-check lint test
 
 # === Testing ===
 
 test:
-	cargo test --workspace
+	cargo test --all-features
 
 test-unit:
-	cargo test --workspace --lib
+	cargo test --all-features --lib
 
 test-integration:
-	cargo test --workspace --test '*'
+	cargo test --all-features --test '*'
 
 test-coverage:
 	cargo tarpaulin --all-features --out xml --output-dir coverage/ \
 		--fail-under 70 --skip-clean
 
+# === Benchmarks ===
+
+bench:
+	cargo bench --all-features
+
+bench-history:
+	./scripts/bench-history.sh
+
 # === Security ===
 
 security-scan:
 	cargo audit
+	cargo deny check
 
 # === Documentation ===
 
 docs:
-	cargo doc --workspace --no-deps
+	RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps
 
 # === CI Targets ===
 
@@ -70,7 +79,6 @@ ci-docs: docs
 
 docker-build:
 	docker build -t ifran:$(VERSION) -f docker/Dockerfile .
-	docker build -t ifran-trainer:$(VERSION) -f docker/Dockerfile.trainer .
 
 docker-dev:
 	docker compose -f docker/docker-compose.yml up --build

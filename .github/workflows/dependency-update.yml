@@ -37,7 +37,7 @@ jobs:
         run: cargo update
 
       - name: Run tests with updated dependencies
-        run: cargo test --workspace
+        run: cargo test --all-features
 
       - name: Create pull request
         uses: peter-evans/create-pull-request@v6

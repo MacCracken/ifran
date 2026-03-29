@@ -53,11 +53,11 @@ jobs:
 
       - name: Build release (native)
         if: matrix.use-cross == false
-        run: cargo build --workspace --release --target ${{ matrix.target }}
+        run: cargo build --all-features --release --target ${{ matrix.target }}
 
       - name: Build release (cross)
         if: matrix.use-cross == true
-        run: cross build --workspace --release --target ${{ matrix.target }}
+        run: cross build --all-features --release --target ${{ matrix.target }}
 
       - name: Create release tarball
         run: |
@@ -68,7 +68,7 @@ jobs:
           mkdir -p "${TARBALL_NAME}"
 
           cp target/${{ matrix.target }}/release/ifran "${TARBALL_NAME}/"
-          cp target/${{ matrix.target }}/release/ifran-api "${TARBALL_NAME}/"
+          cp target/${{ matrix.target }}/release/ifran-server "${TARBALL_NAME}/"
           cp LICENSE "${TARBALL_NAME}/"
           cp README.md "${TARBALL_NAME}/"
 
@@ -173,7 +173,7 @@ jobs:
             COMMIT_COUNT=$(git rev-list --count --no-merges HEAD 2>/dev/null || echo "?")
             FILES_CHANGED="?"
           fi
-          TEST_COUNT=$(grep -r '#\[test\]' crates/ --include='*.rs' | wc -l || echo "?")
+          TEST_COUNT=$(grep -r '#\[test\]' src/ tests/ --include='*.rs' | wc -l || echo "?")
 
           cat > changelog.md << EOF
           ## Ifran ${VERSION}
@@ -327,13 +327,13 @@ jobs:
           # Extract amd64 binaries
           tar xzf artifacts/amd64/ifran-*-linux-amd64.tar.gz
           cp ifran-*-linux-amd64/ifran bin/amd64/ifran
-          cp ifran-*-linux-amd64/ifran-api bin/amd64/ifran-api
+          cp ifran-*-linux-amd64/ifran-server bin/amd64/ifran-server
           chmod +x bin/amd64/*
 
           # Extract arm64 binaries
           tar xzf artifacts/arm64/ifran-*-linux-arm64.tar.gz
           cp ifran-*-linux-arm64/ifran bin/arm64/ifran
-          cp ifran-*-linux-arm64/ifran-api bin/arm64/ifran-api
+          cp ifran-*-linux-arm64/ifran-server bin/arm64/ifran-server
           chmod +x bin/arm64/*
 
       - name: Set up QEMU

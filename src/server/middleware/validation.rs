@@ -10,7 +10,7 @@ const MAX_INPUT_CHARS: usize = 50_000;
 
 /// Reject prompts that exceed the configured maximum length.
 ///
-/// A hard cap of [`MAX_INPUT_CHARS`] is always enforced regardless of what the
+/// A hard cap of 50,000 characters is always enforced regardless of what the
 /// caller passes as `max_len`.
 pub fn validate_prompt_length(prompt: &str, max_len: usize) -> Result<(), (StatusCode, String)> {
     let effective_limit = max_len.min(MAX_INPUT_CHARS);

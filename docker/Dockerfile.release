@@ -4,8 +4,8 @@
 # cross-arch builds, reducing build time from 30+ minutes to ~1 minute.
 #
 # Expects binaries staged into bin/<arch>/ in the build context:
-#   bin/amd64/ifran, bin/amd64/ifran-api
-#   bin/arm64/ifran, bin/arm64/ifran-api
+#   bin/amd64/ifran, bin/amd64/ifran-server
+#   bin/arm64/ifran, bin/arm64/ifran-server
 #
 # Base: AGNOS (agnosticos) — our AI/ML operating system layer.
 # Provides GLIBC 2.41+ (Debian trixie), seccomp, landlock, and
@@ -31,7 +31,7 @@ RUN mkdir -p /var/lib/ifran/models /var/lib/ifran/checkpoints /var/lib/ifran/cac
     chown -R ifran:ifran /var/lib/ifran
 
 # Copy arch-specific pre-built binaries
-COPY bin/${TARGETARCH}/ifran-api /usr/local/bin/ifran-server
+COPY bin/${TARGETARCH}/ifran-server /usr/local/bin/ifran-server
 COPY bin/${TARGETARCH}/ifran /usr/local/bin/ifran
 
 USER ifran

@@ -1,4 +1,4 @@
-FROM rust:1.85-bookworm
+FROM rust:1.89-bookworm
 
 RUN apt-get update && apt-get install -y \
     protobuf-compiler \
@@ -12,4 +12,4 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /workspace
 VOLUME ["/workspace"]
 
-CMD ["cargo", "watch", "-x", "run --package ifran-api"]
+CMD ["cargo", "watch", "-x", "run --bin ifran-server --all-features"]

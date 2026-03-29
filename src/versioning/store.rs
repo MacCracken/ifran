@@ -226,7 +226,7 @@ impl VersionStore {
     ///
     /// Walks the parent chain from the given version back to the root.
     /// Cycle detection via a visited set and a hard depth limit of
-    /// [`MAX_LINEAGE_DEPTH`] prevent unbounded traversal.
+    /// 1,000 entries prevent unbounded traversal.
     pub fn get_lineage(
         &self,
         id: ModelVersionId,

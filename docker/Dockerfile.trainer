@@ -7,11 +7,11 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /trainer
 
 # Install Python dependencies (cached layer)
-COPY crates/ifran-train/src/scripts/requirements.txt .
+COPY scripts/train/requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Copy all training scripts
-COPY crates/ifran-train/src/scripts/*.py /trainer/scripts/
+COPY scripts/train/*.py /trainer/scripts/
 
 # Create workspace directories for checkpoints, datasets, and configs
 RUN mkdir -p /workspace/checkpoints /workspace/datasets /workspace/configs

@@ -11,12 +11,13 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy manifests first for dependency caching
-COPY Cargo.toml Cargo.lock ./
-COPY crates/ crates/
+COPY Cargo.toml Cargo.lock build.rs ./
 COPY proto/ proto/
+COPY src/ src/
+COPY benches/ benches/
 
 # Build release binaries
-RUN cargo build --release --package ifran-api --package ifran-cli
+RUN cargo build --release --all-features
 
 # Runtime stage — AGNOS base OS (AI/ML operating system layer)
 FROM ghcr.io/maccracken/agnosticos:latest
@@ -38,7 +39,7 @@ RUN groupadd -g 1002 ifran && \
 RUN mkdir -p /var/lib/ifran/models /var/lib/ifran/checkpoints /var/lib/ifran/cache && \
     chown -R ifran:ifran /var/lib/ifran
 
-COPY --from=builder /build/target/release/ifran-api /usr/local/bin/ifran-server
+COPY --from=builder /build/target/release/ifran-server /usr/local/bin/ifran-server
 COPY --from=builder /build/target/release/ifran /usr/local/bin/ifran
 
 USER ifran

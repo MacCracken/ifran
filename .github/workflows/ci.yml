@@ -41,13 +41,13 @@ jobs:
           cache-prefix: build-${{ matrix.target }}
           install-cross: ${{ matrix.use-cross }}
 
-      - name: Build workspace (native)
+      - name: Build (native)
         if: matrix.use-cross == false
-        run: cargo build --workspace --release --target ${{ matrix.target }}
+        run: cargo build --all-features --release --target ${{ matrix.target }}
 
-      - name: Build workspace (cross)
+      - name: Build (cross)
         if: matrix.use-cross == true
-        run: cross build --workspace --release --target ${{ matrix.target }}
+        run: cross build --all-features --release --target ${{ matrix.target }}
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -55,7 +55,7 @@ jobs:
           name: binaries-${{ matrix.target }}
           path: |
             target/${{ matrix.target }}/release/ifran
-            target/${{ matrix.target }}/release/ifran-api
+            target/${{ matrix.target }}/release/ifran-server
           retention-days: 7
 
   fmt:
@@ -72,23 +72,12 @@ jobs:
           cache-prefix: fmt
 
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        run: cargo fmt -- --check
 
   clippy:
-    name: Clippy (${{ matrix.package }})
+    name: Clippy
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        package:
-          - ifran-types
-          - ifran-core
-          - ifran-backends
-          - ifran-train
-          - ifran-api
-          - ifran-bridge
-          - ifran-cli
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -96,10 +85,10 @@ jobs:
       - name: Setup Rust environment
         uses: ./.github/actions/setup-rust-env
         with:
-          cache-prefix: clippy-${{ matrix.package }}
+          cache-prefix: clippy
 
       - name: Run Clippy
-        run: cargo clippy -p ${{ matrix.package }} --all-targets -- -D warnings
+        run: cargo clippy --all-features --all-targets -- -D warnings
 
   audit:
     name: Security Audit
@@ -183,20 +172,9 @@ jobs:
         run: cargo outdated --root-deps-only --exit-code 1
 
   test:
-    name: Test (${{ matrix.package }})
+    name: Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        package:
-          - ifran-types
-          - ifran-core
-          - ifran-backends
-          - ifran-train
-          - ifran-api
-          - ifran-bridge
-          - ifran-cli
+    timeout-minutes: 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -204,10 +182,10 @@ jobs:
       - name: Setup Rust environment
         uses: ./.github/actions/setup-rust-env
         with:
-          cache-prefix: test-${{ matrix.package }}
+          cache-prefix: test
 
       - name: Run tests
-        run: cargo test -p ${{ matrix.package }}
+        run: cargo test --all-features
 
   coverage:
     name: Coverage
@@ -258,7 +236,7 @@ jobs:
           cache-prefix: bench
 
       - name: Run benchmarks
-        run: cargo test --workspace --release -- --ignored 2>/dev/null || echo "No benchmarks defined yet"
+        run: cargo bench --all-features
 
   docs:
     name: Documentation
@@ -289,7 +267,7 @@ jobs:
           cache-prefix: docs
 
       - name: Build documentation
-        run: cargo doc --workspace --no-deps
+        run: cargo doc --all-features --no-deps
         env:
           RUSTDOCFLAGS: "-D warnings"
 
@@ -327,10 +305,8 @@ jobs:
             fi
             sleep 1
           done
-          # Verify endpoints
           curl -sf http://localhost:8420/health | grep -q "ok"
           echo "GET /health: ok"
-          # /ready may return 503 in bare container (no backends configured) — just check it responds
           READY_CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8420/ready)
           echo "GET /ready: HTTP ${READY_CODE}"
           if [ "$READY_CODE" != "200" ] && [ "$READY_CODE" != "503" ]; then
