@@ -41,6 +41,10 @@ Current: **1,785 tests**, 72.2% coverage. CI threshold: **70%**.
 
 ## 1.1.0 — Coverage & Hardening
 
+### Pre-1.0.1 — Dependency Fix (Blocking SY Integration)
+
+- [ ] **Feature-gate rusqlite behind `sqlite` feature** — `rusqlite 0.39` requires `libsqlite3-sys 0.37` which conflicts with consumers using sqlx (ships `libsqlite3-sys 0.30`). Extract store trait interfaces so modules compile without sqlite, then gate all 13 store modules + r2d2 behind `sqlite = ["dep:rusqlite", "dep:r2d2"]`. Add `sqlite` to default features. Library consumers use `ifran = { default-features = false }` to avoid the conflict. Without this, ifran cannot be added as a crate dependency to projects using sqlx.
+
 ### Sprint 1 — Coverage to 75% absolute
 
 - [ ] **Extract CLI execute() logic into testable functions** — `pull::execute()`, `list::execute()`, `serve::execute()` each contain 30-50 lines of pure logic (path construction, config resolution, output formatting) that can be extracted and tested. ~200 lines recoverable.
