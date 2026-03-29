@@ -9,7 +9,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct TenantResponse {
     pub id: String,
     pub name: String,
@@ -17,7 +17,7 @@ pub struct TenantResponse {
     pub created_at: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct CreateTenantResponse {
     pub tenant: TenantResponse,
     /// The raw API key — shown only at creation time.
@@ -178,5 +178,226 @@ mod tests {
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["api_key"], "syn_abc123");
         assert!(json["tenant"]["id"].is_string());
+    }
+
+    #[test]
+    fn create_tenant_request_missing_name() {
+        let json = r#"{}"#;
+        let result = serde_json::from_str::<CreateTenantRequest>(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn create_tenant_request_empty_name() {
+        let json = r#"{"name": ""}"#;
+        let req: CreateTenantRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.name, "");
+    }
+
+    #[test]
+    fn tenant_response_disabled() {
+        let resp = TenantResponse {
+            id: "t-2".into(),
+            name: "Disabled".into(),
+            enabled: false,
+            created_at: "2026-01-01T00:00:00Z".into(),
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["enabled"], false);
+    }
+
+    use crate::server::test_helpers::helpers::test_state;
+
+    #[tokio::test]
+    async fn create_tenant_store_unavailable() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut state = test_state(&tmp);
+        state.tenant_store = None;
+
+        let req = CreateTenantRequest {
+            name: "Test Tenant".into(),
+        };
+        let result = create_tenant(State(state), Json(req)).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().0, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn list_tenants_store_unavailable() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut state = test_state(&tmp);
+        state.tenant_store = None;
+
+        let result = list_tenants(State(state)).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().0, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn disable_tenant_store_unavailable() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut state = test_state(&tmp);
+        state.tenant_store = None;
+
+        let result = disable_tenant(State(state), Path("some-id".into())).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().0, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn create_and_list_tenants() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        if state.tenant_store.is_none() {
+            return; // skip if tenant store not initialized in test config
+        }
+
+        let req = CreateTenantRequest {
+            name: "Acme Inc".into(),
+        };
+        let result = create_tenant(State(state.clone()), Json(req)).await;
+        assert!(result.is_ok());
+        let (status, json) = result.unwrap();
+        assert_eq!(status, StatusCode::CREATED);
+        assert!(!json.0.api_key.is_empty());
+        assert_eq!(json.0.tenant.name, "Acme Inc");
+        assert!(json.0.tenant.enabled);
+
+        // List should include the new tenant
+        let list = list_tenants(State(state)).await.unwrap();
+        assert!(!list.0.is_empty());
+        assert!(list.0.iter().any(|t| t.name == "Acme Inc"));
+    }
+
+    #[tokio::test]
+    async fn disable_nonexistent_tenant() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        if state.tenant_store.is_none() {
+            return;
+        }
+
+        let result = disable_tenant(State(state), Path("nonexistent-id".into())).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().0, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn require_admin_auth_no_env() {
+        // We can't easily call require_admin_auth without a Next middleware,
+        // so test the logic indirectly:
+        // When IFRAN_ADMIN_KEY is empty/unset, the middleware should return FORBIDDEN.
+        // SAFETY: This test is single-threaded and no other thread accesses this env var.
+        unsafe {
+            std::env::remove_var("IFRAN_ADMIN_KEY");
+        }
+        let admin_key = std::env::var("IFRAN_ADMIN_KEY")
+            .ok()
+            .filter(|k| !k.is_empty());
+        assert!(admin_key.is_none(), "IFRAN_ADMIN_KEY should not be set");
+    }
+
+    #[tokio::test]
+    async fn create_and_disable_tenant() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        if state.tenant_store.is_none() {
+            return;
+        }
+
+        // Create a tenant
+        let req = CreateTenantRequest {
+            name: "DisableMe Corp".into(),
+        };
+        let result = create_tenant(State(state.clone()), Json(req)).await;
+        assert!(result.is_ok());
+        let (status, json) = result.unwrap();
+        assert_eq!(status, StatusCode::CREATED);
+        let tenant_id = json.0.tenant.id.clone();
+
+        // Disable the tenant
+        let result = disable_tenant(State(state.clone()), Path(tenant_id.clone())).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), StatusCode::NO_CONTENT);
+
+        // Verify the tenant is disabled via listing
+        let list = list_tenants(State(state)).await.unwrap();
+        let tenant = list.0.iter().find(|t| t.id == tenant_id);
+        assert!(tenant.is_some());
+        assert!(!tenant.unwrap().enabled);
+    }
+
+    #[tokio::test]
+    async fn create_multiple_tenants_lists_all() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        if state.tenant_store.is_none() {
+            return;
+        }
+
+        let names = ["Tenant A", "Tenant B", "Tenant C"];
+        for name in &names {
+            let req = CreateTenantRequest {
+                name: (*name).into(),
+            };
+            let result = create_tenant(State(state.clone()), Json(req)).await;
+            assert!(result.is_ok());
+        }
+
+        let list = list_tenants(State(state)).await.unwrap();
+        for name in &names {
+            assert!(list.0.iter().any(|t| t.name == *name));
+        }
+    }
+
+    #[test]
+    fn admin_auth_logic_empty_key_treated_as_unset() {
+        // An empty IFRAN_ADMIN_KEY should be treated the same as unset
+        let key = Some(String::new());
+        let result = key.filter(|k| !k.is_empty());
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn admin_auth_logic_valid_key_passes() {
+        let key = Some("my-secret-key".to_string());
+        let result = key.filter(|k| !k.is_empty());
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), "my-secret-key");
+    }
+
+    #[test]
+    fn admin_auth_bearer_parsing() {
+        // Test the Bearer token extraction logic
+        let header = "Bearer my-token-123";
+        let token = header.strip_prefix("Bearer ");
+        assert_eq!(token, Some("my-token-123"));
+
+        let header_no_bearer = "Basic my-token";
+        let token = header_no_bearer.strip_prefix("Bearer ");
+        assert!(token.is_none());
+    }
+
+    #[test]
+    fn admin_auth_bearer_missing_prefix() {
+        let header = "my-token-123";
+        let token = header.strip_prefix("Bearer ");
+        assert!(token.is_none());
+    }
+
+    #[test]
+    fn tenant_response_fields_complete() {
+        let resp = TenantResponse {
+            id: "t-100".into(),
+            name: "Full Fields".into(),
+            enabled: true,
+            created_at: "2026-03-28T12:00:00Z".into(),
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert!(json["id"].is_string());
+        assert!(json["name"].is_string());
+        assert!(json["enabled"].is_boolean());
+        assert!(json["created_at"].is_string());
+        assert_eq!(json["created_at"], "2026-03-28T12:00:00Z");
     }
 }

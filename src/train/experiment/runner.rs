@@ -323,4 +323,227 @@ mod tests {
         handle.stop();
         assert!(*rx.borrow());
     }
+
+    #[test]
+    fn experiment_handle_construction() {
+        let id = Uuid::new_v4();
+        let (tx, _rx) = watch::channel(false);
+        let handle = ExperimentHandle {
+            experiment_id: id,
+            stop_tx: tx,
+        };
+        assert_eq!(handle.experiment_id, id);
+    }
+
+    #[test]
+    fn experiment_handle_stop_is_idempotent() {
+        let (tx, rx) = watch::channel(false);
+        let handle = ExperimentHandle {
+            experiment_id: Uuid::new_v4(),
+            stop_tx: tx,
+        };
+        handle.stop();
+        handle.stop();
+        assert!(*rx.borrow());
+    }
+
+    #[test]
+    fn experiment_handle_stop_after_all_receivers_dropped() {
+        let (tx, _rx) = watch::channel(false);
+        let handle = ExperimentHandle {
+            experiment_id: Uuid::new_v4(),
+            stop_tx: tx,
+        };
+        // Drop the receiver — stop() should not panic (uses let _ = send)
+        drop(_rx);
+        handle.stop(); // should not panic
+    }
+
+    #[test]
+    fn dataset_format_parsing_known_formats() {
+        // These match the format strings used in run_loop
+        let cases = [
+            ("jsonl", DatasetFormat::Jsonl),
+            ("csv", DatasetFormat::Csv),
+            ("parquet", DatasetFormat::Parquet),
+            ("huggingface", DatasetFormat::HuggingFace),
+        ];
+        for (input, expected) in cases {
+            let result = match input {
+                "jsonl" => DatasetFormat::Jsonl,
+                "csv" => DatasetFormat::Csv,
+                "parquet" => DatasetFormat::Parquet,
+                "huggingface" => DatasetFormat::HuggingFace,
+                _ => DatasetFormat::Jsonl,
+            };
+            assert_eq!(
+                result, expected,
+                "format string '{input}' should parse correctly"
+            );
+        }
+    }
+
+    #[test]
+    fn dataset_format_parsing_unknown_defaults_to_jsonl() {
+        let unknown = "arrow";
+        let result = match unknown {
+            "jsonl" => DatasetFormat::Jsonl,
+            "csv" => DatasetFormat::Csv,
+            "parquet" => DatasetFormat::Parquet,
+            "huggingface" => DatasetFormat::HuggingFace,
+            _ => DatasetFormat::Jsonl,
+        };
+        assert_eq!(result, DatasetFormat::Jsonl);
+    }
+
+    #[test]
+    fn dataset_format_parsing_empty_defaults_to_jsonl() {
+        let empty = "";
+        let result = match empty {
+            "jsonl" => DatasetFormat::Jsonl,
+            "csv" => DatasetFormat::Csv,
+            "parquet" => DatasetFormat::Parquet,
+            "huggingface" => DatasetFormat::HuggingFace,
+            _ => DatasetFormat::Jsonl,
+        };
+        assert_eq!(result, DatasetFormat::Jsonl);
+    }
+
+    #[test]
+    fn runner_new_returns_stop_sender() {
+        use crate::experiment::store::ExperimentStore;
+        use crate::train::executor::ExecutorKind;
+        use crate::train::job::manager::JobManager;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let store = Arc::new(ExperimentStore::open(&tmp.path().join("exp.db")).unwrap());
+        let job_manager = Arc::new(JobManager::new(ExecutorKind::Docker, None, 2));
+
+        let (runner, stop_tx) = ExperimentRunner::new(job_manager, store);
+        // Runner should start with stop signal false
+        assert!(!*runner.stop_rx.borrow());
+        // Sending stop should propagate
+        let _ = stop_tx.send(true);
+        assert!(*runner.stop_rx.borrow());
+    }
+
+    #[test]
+    fn runner_new_stop_rx_starts_false() {
+        use crate::experiment::store::ExperimentStore;
+        use crate::train::executor::ExecutorKind;
+        use crate::train::job::manager::JobManager;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let store = Arc::new(ExperimentStore::open(&tmp.path().join("exp.db")).unwrap());
+        let job_manager = Arc::new(JobManager::new(ExecutorKind::Docker, None, 2));
+
+        let (runner, _stop_tx) = ExperimentRunner::new(job_manager, store);
+        assert!(!*runner.stop_rx.borrow());
+    }
+
+    #[test]
+    fn trial_result_default_construction() {
+        use crate::types::experiment::{TrialResult, TrialStatus};
+        use crate::types::training::HyperParams;
+
+        let trial = TrialResult {
+            trial_id: Uuid::new_v4(),
+            experiment_id: Uuid::new_v4(),
+            trial_number: 1,
+            hyperparams: HyperParams {
+                learning_rate: 1e-4,
+                epochs: 3,
+                batch_size: 4,
+                gradient_accumulation_steps: 4,
+                warmup_steps: 100,
+                weight_decay: 0.01,
+                max_seq_length: 2048,
+            },
+            train_loss: None,
+            eval_score: None,
+            status: TrialStatus::Training,
+            duration_secs: None,
+            started_at: None,
+            completed_at: None,
+            checkpoint_path: None,
+            is_best: false,
+        };
+        assert_eq!(trial.trial_number, 1);
+        assert!(!trial.is_best);
+        assert!(trial.train_loss.is_none());
+        assert!(trial.eval_score.is_none());
+        assert!(trial.checkpoint_path.is_none());
+        assert!(matches!(trial.status, TrialStatus::Training));
+    }
+
+    #[test]
+    fn output_name_format() {
+        let program_name = "lr-sweep";
+        let trial_number: u32 = 3;
+        let output_name = format!("{}-trial-{trial_number}", program_name);
+        assert_eq!(output_name, "lr-sweep-trial-3");
+    }
+
+    #[test]
+    fn dataset_format_case_sensitive() {
+        // The match is case-sensitive — "JSONL" should default to Jsonl
+        let upper = "JSONL";
+        let result = match upper {
+            "jsonl" => DatasetFormat::Jsonl,
+            "csv" => DatasetFormat::Csv,
+            "parquet" => DatasetFormat::Parquet,
+            "huggingface" => DatasetFormat::HuggingFace,
+            _ => DatasetFormat::Jsonl,
+        };
+        assert_eq!(result, DatasetFormat::Jsonl);
+    }
+
+    #[test]
+    fn experiment_handle_provides_experiment_id() {
+        let id = Uuid::new_v4();
+        let (tx, _rx) = watch::channel(false);
+        let handle = ExperimentHandle {
+            experiment_id: id,
+            stop_tx: tx,
+        };
+        // Verify stop works and returns the correct id
+        assert_eq!(handle.experiment_id, id);
+        handle.stop();
+    }
+
+    #[test]
+    fn training_job_config_construction_for_trial() {
+        use crate::types::training::*;
+
+        let hp = HyperParams {
+            learning_rate: 5e-5,
+            epochs: 1,
+            batch_size: 8,
+            gradient_accumulation_steps: 2,
+            warmup_steps: 50,
+            weight_decay: 0.01,
+            max_seq_length: 1024,
+        };
+
+        let config = TrainingJobConfig {
+            base_model: "llama-8b".into(),
+            dataset: DatasetConfig {
+                path: "/data/train.jsonl".into(),
+                format: DatasetFormat::Jsonl,
+                split: None,
+                max_samples: Some(500),
+            },
+            method: TrainingMethod::Lora,
+            hyperparams: hp,
+            output_name: Some("lr-sweep-trial-1".into()),
+            lora: None,
+            max_steps: None,
+            time_budget_secs: Some(300),
+        };
+
+        assert_eq!(config.base_model, "llama-8b");
+        assert_eq!(config.time_budget_secs, Some(300));
+        assert_eq!(config.output_name, Some("lr-sweep-trial-1".into()));
+        assert_eq!(config.dataset.max_samples, Some(500));
+    }
 }

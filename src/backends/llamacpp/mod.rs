@@ -585,6 +585,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn allocate_port_wraps_at_max() {
+        let backend = LlamaCppBackend::new(None);
+        // Set port to MAX_PORT - 1
+        {
+            let mut port = backend.next_port.write().await;
+            *port = MAX_PORT - 1;
+        }
+        let p1 = backend.allocate_port().await;
+        assert_eq!(p1, MAX_PORT - 1);
+        let p2 = backend.allocate_port().await;
+        assert_eq!(p2, MAX_PORT);
+        // Next allocation should wrap back to BASE_PORT
+        let p3 = backend.allocate_port().await;
+        assert_eq!(p3, BASE_PORT);
+        // And continue incrementing from there
+        let p4 = backend.allocate_port().await;
+        assert_eq!(p4, BASE_PORT + 1);
+    }
+
+    #[test]
+    fn capabilities_include_rocm() {
+        let backend = LlamaCppBackend::new(None);
+        let caps = backend.capabilities();
+        assert!(caps.accelerators.contains(&AcceleratorType::Rocm));
+    }
+
+    #[test]
+    fn capabilities_locality_is_local() {
+        let backend = LlamaCppBackend::new(None);
+        let caps = backend.capabilities();
+        assert_eq!(caps.locality, BackendLocality::Local);
+    }
+
+    #[tokio::test]
+    async fn infer_stream_model_not_loaded() {
+        let backend = LlamaCppBackend::new(None);
+        let req = InferenceRequest {
+            prompt: "Hello".into(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: None,
+            sensitivity: None,
+        };
+        let result = backend
+            .infer_stream(&ModelHandle("nonexistent".into()), req)
+            .await;
+        assert!(matches!(result, Err(IfranError::ModelNotFound(_))));
+    }
+
+    #[tokio::test]
     async fn unload_kills_process() {
         let backend = LlamaCppBackend::new(None);
         insert_mock_instance(&backend, "llamacpp-kill-test", 9999).await;

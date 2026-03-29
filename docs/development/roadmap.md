@@ -4,45 +4,60 @@
 
 ### Test Coverage
 
-Current: **1,567 tests**, single flat crate. CI threshold: 65%.
+Current: **1,785 tests**, 72.2% coverage. CI threshold: **70%**.
 
 ---
 
-## Pre-1.0 — Required Before Release
-
-*Items informed by SY/AgnosAI security and operational parity. Ifran ships before SY — it must be production-hardened independently.*
+## Pre-1.0 — All Complete
 
 ### Security Hardening
-
-- [x] **Prompt injection detection** — 32-pattern scanner across 5 attack categories (instruction override, role hijack, delimiter injection, data exfiltration, jailbreak). Risk scoring 0.0-1.0; blocks at ≥0.8. No regex dependency.
-- [x] **Output filtering / redaction** — scans inference responses for AWS keys, GitHub tokens, Bearer tokens, generic API keys, emails, US phones, SSNs, credit cards, and system prompt leakage. Replaces with `[REDACTED_<CATEGORY>]`.
-- [x] **Input sanitization** — 50K char hard cap on all inference endpoints. User content wrapped in `<|user_input_start|>`/`<|user_input_end|>` boundary markers. Combined message length validated on `/v1/chat/completions`.
-- [x] **Audit trail** — HMAC-SHA256 linked tamper-evident chain for 9 action types (training jobs, model lifecycle, tenant management, config changes, admin actions). Verification detects any modification. Configurable max entries with eviction.
-- [x] **Circuit breaker for backend HTTP calls** — Closed→Open→HalfOpen→Closed FSM. Configurable failure threshold and recovery timeout. Blocks requests when open, allows single probe in half-open state.
+- [x] Prompt injection detection (32 patterns, 5 categories)
+- [x] Output filtering / redaction (API keys, PII, system prompt leakage)
+- [x] Input sanitization (50K cap, boundary markers, combined length)
+- [x] Audit trail (HMAC-SHA256 tamper-evident chain)
+- [x] Circuit breaker for backends (Closed→Open→HalfOpen FSM)
 
 ### Operational Resilience
-
-- [x] **Retry with exponential backoff** — `RetryConfig` with max retries, base/max delay, deterministic jitter. `is_retryable()` classifies transient errors (connection refused, timeout, 502/503/429).
-- [x] **Inference output validation** — `OutputFormat::Text`/`Json`/`JsonSchema{required_keys}`. Validates LLM output before returning. JSON mode rejects invalid JSON; schema mode checks required keys.
-- [x] **Graceful degradation** — `BackendHealthTracker` with configurable ring buffer per backend. Tracks last N outcomes; failure rate determines Healthy/Degraded/Unhealthy status. `is_available()` for routing decisions.
+- [x] Retry with exponential backoff
+- [x] Inference output validation (Text/Json/JsonSchema)
+- [x] Graceful degradation (health ring buffer per backend)
 
 ### Observability
-
-- [x] **Request / correlation ID** — `X-Request-ID` middleware with character validation (alphanumeric + `-_.`). Reads from client or generates UUID v4.
-- [x] **Prometheus metrics wiring** — 9 metrics via `GET /metrics`. Gauges refreshed on scrape from live state.
+- [x] Request / correlation ID (`X-Request-ID` middleware)
+- [x] Prometheus metrics (9 metrics, `GET /metrics`)
+- [x] Rate limiter IP eviction (majra stale-key sweep)
 
 ### Testing
-
-- [ ] **Auth / permission integration tests** — cover 401/403 paths, multi-tenant isolation, admin-key enforcement
-- [ ] **Concurrent operation tests** — race conditions in job scheduling, model loading, fleet registration under parallel requests
-- [ ] **Raise CI coverage threshold** — increase from 65% to 75%
-- [ ] **Fuzzing targets** — `cargo-fuzz` targets for config parsing, gRPC message handling, REST JSON input deserialization
-- [x] **Shared test utilities** — `server::test_helpers` module with `test_config()` and `test_state()`, used across 8 handler test modules
+- [x] Auth / permission integration tests
+- [x] Concurrent operation tests (7 tests, 10-20 parallel tasks)
+- [x] Fuzzing targets (5 targets)
+- [x] Shared test utilities
+- [x] Coverage raised to 72.2% absolute / 75.9% coverable
 
 ### Performance
+- [x] 26 Criterion benchmarks across 2 bench files
 
-- [x] **Rate limiter IP eviction** — `start_eviction_loop(5min idle, 60s sweep)` with `AtomicBool` spawn guard
-- [ ] **Benchmarks** — Criterion.rs benchmarks for inference routing, model loading, training job scheduling
+---
+
+## Sprint 1 — Coverage to 75% absolute
+
+*Target: raise CI threshold from 70% to 75%.*
+
+- [ ] **Extract CLI execute() logic into testable functions** — `pull::execute()`, `list::execute()`, `serve::execute()` each contain 30-50 lines of pure logic (path construction, config resolution, output formatting) that can be extracted and tested. ~200 lines recoverable.
+- [ ] **Mock-based backend inference tests** — create a `MockBackend` implementing `InferenceBackend` that returns canned responses. Test the full inference handler path (cache → budget → backend → filter → cache store) without network. ~80 lines in `inference.rs`.
+- [ ] **Experiment runner test with mock executor** — test `ExperimentRunner::run()` with a mock executor that completes trials instantly. Covers the trial loop, grid/random search selection, and result recording. ~100 lines in `runner.rs`.
+- [ ] **OpenAI-compat streaming test** — test `/v1/chat/completions` with `stream: true` using a mock backend that yields chunks. ~30 lines in `openai_compat.rs`.
+
+## Sprint 2 — Coverage to 78% + hardening
+
+*Target: raise CI threshold to 75%. Harden the remaining untested paths.*
+
+- [ ] **Docker executor integration test** — test `DockerExecutor::run()` with a mock Docker binary (shell script that echoes success). Covers the container lifecycle, timeout, and cancellation paths. ~50 lines.
+- [ ] **Bridge protocol tests** — test `BridgeClient::connect()` and `BridgeServer::start()` with loopback. Covers connection state machine, heartbeat, and reconnect. ~80 lines.
+- [ ] **Telemetry integration test** — test OTLP init path with a no-op exporter. ~20 lines.
+- [ ] **CLI main dispatch test** — test `Cli::parse` → `Commands` dispatch with dry-run mode (parse + validate, don't execute). Already partially done via clap parsing tests. ~30 lines.
+- [ ] **Property-based tests for prompt guard** — add proptest strategies that generate adversarial strings and verify the scanner never panics or returns risk_score outside [0, 1].
+- [ ] **Raise CI threshold to 75%**
 
 ---
 

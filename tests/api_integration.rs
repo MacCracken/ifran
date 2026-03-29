@@ -60,21 +60,10 @@ fn test_app() -> (axum::Router, tempfile::TempDir) {
     (app, tmp)
 }
 
-/// Build a test router with single-tenant auth enabled via IFRAN_API_KEY.
-fn test_app_with_auth(api_key: &str) -> (axum::Router, tempfile::TempDir) {
-    unsafe { std::env::set_var("IFRAN_API_KEY", api_key) };
-    let tmp = tempfile::TempDir::new().unwrap();
-    let mut config = test_config(&tmp);
-    config.security.auth_required = true;
-    let state = AppState::new(config).unwrap();
-    let app = ifran::server::router::build(state);
-    (app, tmp)
-}
-
 /// Build a test router with multi-tenant auth enabled.
+/// Multi-tenant mode does NOT use the IFRAN_API_KEY env var — it resolves
+/// keys via TenantStore, so it's safe for parallel tests.
 fn test_app_multi_tenant() -> (axum::Router, tempfile::TempDir) {
-    // Clear single-tenant key so multi-tenant path is used
-    unsafe { std::env::remove_var("IFRAN_API_KEY") };
     let tmp = tempfile::TempDir::new().unwrap();
     let mut config = test_config(&tmp);
     config.security.multi_tenant = true;
@@ -2306,4 +2295,123 @@ async fn version_lineage_chain() {
     assert_eq!(chain.len(), 2);
     assert_eq!(chain[0]["version_tag"], "v2");
     assert_eq!(chain[1]["version_tag"], "v1");
+}
+
+// -- Auth & Permission Tests --
+
+// 1. Auth bypass on probe endpoints (uses multi-tenant to avoid env var races)
+
+#[tokio::test]
+async fn health_accessible_without_auth() {
+    let (app, _tmp) = test_app_multi_tenant();
+    // No Authorization header — should still get 200
+    let resp = app
+        .oneshot(Request::get("/health").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn ready_accessible_without_auth() {
+    let (app, _tmp) = test_app_multi_tenant();
+    let resp = app
+        .oneshot(Request::get("/ready").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    // ready returns 200 or 503 depending on DB state — just verify it's not 401
+    assert_ne!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn metrics_accessible_without_auth() {
+    let (app, _tmp) = test_app_multi_tenant();
+    let resp = app
+        .oneshot(Request::get("/metrics").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_ne!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+// Single-tenant auth token extraction and constant-time comparison are tested
+// via unit tests in src/server/middleware/auth.rs. Integration tests for
+// single-tenant auth are intentionally omitted because they require setting
+// the IFRAN_API_KEY process-wide env var, which races with parallel tests.
+
+// 3. Multi-tenant auth
+
+#[tokio::test]
+async fn multi_tenant_rejects_without_token() {
+    let (app, _tmp) = test_app_multi_tenant();
+
+    let resp = app
+        .oneshot(Request::get("/models").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn multi_tenant_rejects_unknown_key() {
+    let (app, _tmp) = test_app_multi_tenant();
+    let resp = app
+        .oneshot(
+            Request::get("/models")
+                .header("authorization", "Bearer unknown-tenant-key")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+// 4. Open access mode (no key configured)
+
+#[tokio::test]
+async fn open_access_when_no_key_configured() {
+    // Ensure no key is set
+    let (app, _tmp) = test_app();
+    let resp = app
+        .oneshot(Request::get("/models").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+// 5. Request ID propagation
+
+#[tokio::test]
+async fn request_id_generated_when_missing() {
+    let (app, _tmp) = test_app();
+    let resp = app
+        .oneshot(Request::get("/health").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let request_id = resp.headers().get("x-request-id");
+    assert!(request_id.is_some());
+    // Should be a valid UUID
+    let id_str = request_id.unwrap().to_str().unwrap();
+    assert!(uuid::Uuid::parse_str(id_str).is_ok());
+}
+
+#[tokio::test]
+async fn request_id_echoed_from_client() {
+    let (app, _tmp) = test_app();
+    let resp = app
+        .oneshot(
+            Request::get("/health")
+                .header("x-request-id", "my-custom-id-123")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let request_id = resp
+        .headers()
+        .get("x-request-id")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert_eq!(request_id, "my-custom-id-123");
 }

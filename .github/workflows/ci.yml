@@ -228,10 +228,10 @@ jobs:
 
       - name: Run coverage
         run: |
-          cargo tarpaulin --workspace \
+          cargo tarpaulin --all-features \
             --out xml \
             --output-dir coverage \
-            --fail-under 65 \
+            --fail-under 70 \
             --timeout 300
 
       - name: Upload coverage to Codecov

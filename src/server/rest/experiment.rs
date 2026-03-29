@@ -275,4 +275,436 @@ mod tests {
         assert_eq!(req.program.name, "lr-sweep");
         assert_eq!(req.program.time_budget_secs, 300);
     }
+
+    #[test]
+    fn create_request_missing_required_fields() {
+        // Missing "name" which is required by ExperimentProgram
+        let json = r#"{
+            "base_model": "llama-8b",
+            "dataset_path": "/data/train.jsonl",
+            "method": "lora",
+            "time_budget_secs": 300,
+            "objective": {"metric": "perplexity", "direction": "minimize"},
+            "search": {"strategy": "grid"},
+            "search_space": [],
+            "base_hyperparams": {
+                "learning_rate": 0.0002,
+                "epochs": 3,
+                "batch_size": 4,
+                "gradient_accumulation_steps": 4,
+                "warmup_steps": 100,
+                "weight_decay": 0.01,
+                "max_seq_length": 2048
+            }
+        }"#;
+        let result = serde_json::from_str::<CreateExperimentRequest>(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn experiment_response_serializes() {
+        let resp = ExperimentResponse {
+            id: uuid::Uuid::nil(),
+            name: "test-exp".into(),
+            status: ExperimentStatus::Completed,
+            best_score: Some(1.23),
+            trials: vec![TrialResponse {
+                trial_id: "t-1".into(),
+                trial_number: 0,
+                status: "completed".into(),
+                train_loss: Some(0.5),
+                eval_score: Some(1.23),
+                duration_secs: Some(60.0),
+                learning_rate: 1e-4,
+                is_best: true,
+            }],
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["name"], "test-exp");
+        assert_eq!(json["status"], "completed");
+        assert_eq!(json["best_score"], 1.23);
+        assert_eq!(json["trials"].as_array().unwrap().len(), 1);
+        assert_eq!(json["trials"][0]["is_best"], true);
+    }
+
+    #[test]
+    fn experiment_status_values() {
+        let item_running = ExperimentListItem {
+            id: uuid::Uuid::new_v4(),
+            name: "r".into(),
+            status: ExperimentStatus::Running,
+            best_score: None,
+        };
+        let item_stopped = ExperimentListItem {
+            id: uuid::Uuid::new_v4(),
+            name: "s".into(),
+            status: ExperimentStatus::Stopped,
+            best_score: None,
+        };
+        let item_failed = ExperimentListItem {
+            id: uuid::Uuid::new_v4(),
+            name: "f".into(),
+            status: ExperimentStatus::Failed,
+            best_score: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&item_running).unwrap()["status"],
+            "running"
+        );
+        assert_eq!(
+            serde_json::to_value(&item_stopped).unwrap()["status"],
+            "stopped"
+        );
+        assert_eq!(
+            serde_json::to_value(&item_failed).unwrap()["status"],
+            "failed"
+        );
+    }
+
+    use crate::server::test_helpers::helpers::test_state;
+
+    #[tokio::test]
+    async fn list_experiments_store_unavailable() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut state = test_state(&tmp);
+        state.experiment_store = None;
+
+        let query = ListExperimentsQuery {
+            page: PaginationQuery {
+                limit: super::super::pagination::DEFAULT_LIMIT,
+                offset: 0,
+            },
+            status: None,
+        };
+        let result = list_experiments(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Query(query),
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().0, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn get_experiment_store_unavailable() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut state = test_state(&tmp);
+        state.experiment_store = None;
+
+        let result = get_experiment(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path(uuid::Uuid::new_v4()),
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().0, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn get_experiment_not_found() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        // experiment_store might be Some — the experiment simply doesn't exist
+        if state.experiment_store.is_some() {
+            let result = get_experiment(
+                State(state),
+                Extension(TenantId::default_tenant()),
+                Path(uuid::Uuid::new_v4()),
+            )
+            .await;
+            assert!(result.is_err());
+            assert_eq!(result.unwrap_err().0, StatusCode::NOT_FOUND);
+        }
+    }
+
+    #[tokio::test]
+    async fn create_experiment_store_unavailable() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut state = test_state(&tmp);
+        state.experiment_store = None;
+
+        let json = r#"{
+            "name": "test",
+            "base_model": "m",
+            "dataset_path": "/d.jsonl",
+            "method": "lora",
+            "time_budget_secs": 60,
+            "objective": {"metric": "perplexity", "direction": "minimize"},
+            "search": {"strategy": "grid"},
+            "search_space": [{"name": "learning_rate", "values": [0.0001]}],
+            "base_hyperparams": {
+                "learning_rate": 0.0002,
+                "epochs": 1,
+                "batch_size": 4,
+                "gradient_accumulation_steps": 1,
+                "warmup_steps": 0,
+                "weight_decay": 0.0,
+                "max_seq_length": 512
+            }
+        }"#;
+        let req: CreateExperimentRequest = serde_json::from_str(json).unwrap();
+        let result = create_experiment(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Json(req),
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().0, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn get_leaderboard_store_unavailable() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut state = test_state(&tmp);
+        state.experiment_store = None;
+
+        let result = get_leaderboard(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path(uuid::Uuid::new_v4()),
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().0, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn stop_experiment_no_handle() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        let id = uuid::Uuid::new_v4();
+        // Should succeed even if experiment doesn't exist (idempotent)
+        let result = stop_experiment(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path(id),
+        )
+        .await;
+        assert!(result.is_ok());
+        let json = result.unwrap().0;
+        assert_eq!(json["status"], "stopped");
+    }
+
+    #[tokio::test]
+    async fn stop_experiment_returns_id_in_response() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        let id = uuid::Uuid::new_v4();
+
+        let result = stop_experiment(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Path(id),
+        )
+        .await;
+        assert!(result.is_ok());
+        let json = result.unwrap().0;
+        assert_eq!(json["id"], id.to_string());
+        assert_eq!(json["status"], "stopped");
+    }
+
+    #[test]
+    fn trial_to_response_completed() {
+        use crate::types::experiment::{TrialResult, TrialStatus};
+        use crate::types::training::HyperParams;
+
+        let trial = TrialResult {
+            trial_id: uuid::Uuid::new_v4(),
+            experiment_id: uuid::Uuid::new_v4(),
+            trial_number: 2,
+            hyperparams: HyperParams {
+                learning_rate: 5e-5,
+                epochs: 3,
+                batch_size: 4,
+                gradient_accumulation_steps: 4,
+                warmup_steps: 100,
+                weight_decay: 0.01,
+                max_seq_length: 2048,
+            },
+            train_loss: Some(0.35),
+            eval_score: Some(4.12),
+            status: TrialStatus::Completed,
+            duration_secs: Some(180.5),
+            started_at: Some(chrono::Utc::now()),
+            completed_at: Some(chrono::Utc::now()),
+            checkpoint_path: Some("/checkpoints/trial-2".into()),
+            is_best: true,
+        };
+
+        let resp = trial_to_response(&trial);
+        assert_eq!(resp.trial_number, 2);
+        assert_eq!(resp.train_loss, Some(0.35));
+        assert_eq!(resp.eval_score, Some(4.12));
+        assert_eq!(resp.duration_secs, Some(180.5));
+        assert!((resp.learning_rate - 5e-5).abs() < f64::EPSILON);
+        assert!(resp.is_best);
+        assert!(resp.status.contains("completed"));
+    }
+
+    #[test]
+    fn trial_to_response_failed() {
+        use crate::types::experiment::{TrialResult, TrialStatus};
+        use crate::types::training::HyperParams;
+
+        let trial = TrialResult {
+            trial_id: uuid::Uuid::new_v4(),
+            experiment_id: uuid::Uuid::new_v4(),
+            trial_number: 5,
+            hyperparams: HyperParams {
+                learning_rate: 1e-3,
+                epochs: 1,
+                batch_size: 8,
+                gradient_accumulation_steps: 1,
+                warmup_steps: 0,
+                weight_decay: 0.0,
+                max_seq_length: 512,
+            },
+            train_loss: None,
+            eval_score: None,
+            status: TrialStatus::Failed,
+            duration_secs: Some(10.0),
+            started_at: Some(chrono::Utc::now()),
+            completed_at: Some(chrono::Utc::now()),
+            checkpoint_path: None,
+            is_best: false,
+        };
+
+        let resp = trial_to_response(&trial);
+        assert_eq!(resp.trial_number, 5);
+        assert!(resp.train_loss.is_none());
+        assert!(resp.eval_score.is_none());
+        assert!(!resp.is_best);
+        assert!(resp.status.contains("failed"));
+    }
+
+    #[test]
+    fn trial_to_response_training() {
+        use crate::types::experiment::{TrialResult, TrialStatus};
+        use crate::types::training::HyperParams;
+
+        let trial = TrialResult {
+            trial_id: uuid::Uuid::new_v4(),
+            experiment_id: uuid::Uuid::new_v4(),
+            trial_number: 1,
+            hyperparams: HyperParams {
+                learning_rate: 2e-4,
+                epochs: 3,
+                batch_size: 4,
+                gradient_accumulation_steps: 4,
+                warmup_steps: 100,
+                weight_decay: 0.01,
+                max_seq_length: 2048,
+            },
+            train_loss: None,
+            eval_score: None,
+            status: TrialStatus::Training,
+            duration_secs: None,
+            started_at: Some(chrono::Utc::now()),
+            completed_at: None,
+            checkpoint_path: None,
+            is_best: false,
+        };
+
+        let resp = trial_to_response(&trial);
+        assert!(resp.status.contains("training"));
+        assert!(resp.duration_secs.is_none());
+    }
+
+    #[test]
+    fn experiment_response_empty_trials() {
+        let resp = ExperimentResponse {
+            id: uuid::Uuid::nil(),
+            name: "empty-exp".into(),
+            status: ExperimentStatus::Running,
+            best_score: None,
+            trials: vec![],
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["name"], "empty-exp");
+        assert_eq!(json["status"], "running");
+        assert!(json["best_score"].is_null());
+        assert!(json["trials"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn experiment_list_item_no_score() {
+        let item = ExperimentListItem {
+            id: uuid::Uuid::new_v4(),
+            name: "no-score".into(),
+            status: ExperimentStatus::Completed,
+            best_score: None,
+        };
+        let json = serde_json::to_value(&item).unwrap();
+        assert_eq!(json["status"], "completed");
+        assert!(json["best_score"].is_null());
+    }
+
+    #[tokio::test]
+    async fn get_leaderboard_not_found() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        if state.experiment_store.is_some() {
+            let result = get_leaderboard(
+                State(state),
+                Extension(TenantId::default_tenant()),
+                Path(uuid::Uuid::new_v4()),
+            )
+            .await;
+            assert!(result.is_err());
+            assert_eq!(result.unwrap_err().0, StatusCode::NOT_FOUND);
+        }
+    }
+
+    #[tokio::test]
+    async fn list_experiments_with_store() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        if state.experiment_store.is_none() {
+            return;
+        }
+
+        let query = ListExperimentsQuery {
+            page: PaginationQuery {
+                limit: super::super::pagination::DEFAULT_LIMIT,
+                offset: 0,
+            },
+            status: None,
+        };
+        let result = list_experiments(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Query(query),
+        )
+        .await;
+        assert!(result.is_ok());
+        // Empty store should return empty list
+        assert!(result.unwrap().0.data.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_experiments_with_status_filter() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        if state.experiment_store.is_none() {
+            return;
+        }
+
+        let query = ListExperimentsQuery {
+            page: PaginationQuery {
+                limit: super::super::pagination::DEFAULT_LIMIT,
+                offset: 0,
+            },
+            status: Some(ExperimentStatus::Running),
+        };
+        let result = list_experiments(
+            State(state),
+            Extension(TenantId::default_tenant()),
+            Query(query),
+        )
+        .await;
+        assert!(result.is_ok());
+    }
 }

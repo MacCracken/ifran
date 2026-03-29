@@ -216,6 +216,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn record_success_while_closed_stays_closed() {
+        let cb = CircuitBreaker::new(3, Duration::from_secs(5));
+        cb.record_success().await;
+        assert_eq!(cb.state().await, CircuitState::Closed);
+        assert_eq!(cb.failure_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn failure_below_threshold_stays_closed() {
+        let cb = CircuitBreaker::new(5, Duration::from_secs(5));
+        for _ in 0..4 {
+            cb.record_failure().await;
+        }
+        assert_eq!(cb.state().await, CircuitState::Closed);
+        assert_eq!(cb.failure_count(), 4);
+    }
+
+    #[tokio::test]
+    async fn debug_format_does_not_panic() {
+        let cb = CircuitBreaker::new(3, Duration::from_secs(5));
+        cb.record_failure().await;
+        let debug = format!("{cb:?}");
+        assert!(debug.contains("CircuitBreaker"));
+        assert!(debug.contains("failure_threshold"));
+    }
+
+    #[tokio::test]
     async fn success_resets_failure_count() {
         let cb = CircuitBreaker::new(3, Duration::from_secs(5));
         cb.record_failure().await;

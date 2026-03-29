@@ -210,4 +210,261 @@ mod tests {
         assert_eq!(resp.text, "");
         assert_eq!(resp.usage.total_tokens, 0);
     }
+
+    #[test]
+    fn parse_response_empty_choices_array() {
+        let json = serde_json::json!({
+            "choices": [],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3}
+        });
+        let resp = parse_openai_response(&json).unwrap();
+        // choices[0] is null -> falls back to defaults
+        assert_eq!(resp.text, "");
+        assert!(matches!(resp.finish_reason, FinishReason::Stop));
+        assert_eq!(resp.usage.total_tokens, 3);
+    }
+
+    #[test]
+    fn parse_response_null_content() {
+        let json = serde_json::json!({
+            "choices": [{"message": {"content": null}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        });
+        let resp = parse_openai_response(&json).unwrap();
+        assert_eq!(resp.text, "");
+    }
+
+    #[test]
+    fn parse_response_null_finish_reason() {
+        let json = serde_json::json!({
+            "choices": [{"message": {"content": "hi"}, "finish_reason": null}],
+            "usage": {}
+        });
+        let resp = parse_openai_response(&json).unwrap();
+        assert_eq!(resp.text, "hi");
+        // null finish_reason falls to _ arm -> Stop
+        assert!(matches!(resp.finish_reason, FinishReason::Stop));
+    }
+
+    #[test]
+    fn parse_response_unknown_finish_reason() {
+        let json = serde_json::json!({
+            "choices": [{"message": {"content": "x"}, "finish_reason": "content_filter"}],
+            "usage": {}
+        });
+        let resp = parse_openai_response(&json).unwrap();
+        // Unknown finish_reason maps to Stop (default)
+        assert!(matches!(resp.finish_reason, FinishReason::Stop));
+    }
+
+    #[test]
+    fn parse_response_missing_usage_entirely() {
+        let json = serde_json::json!({
+            "choices": [{"message": {"content": "hello"}, "finish_reason": "stop"}]
+        });
+        let resp = parse_openai_response(&json).unwrap();
+        assert_eq!(resp.text, "hello");
+        assert_eq!(resp.usage.prompt_tokens, 0);
+        assert_eq!(resp.usage.completion_tokens, 0);
+        assert_eq!(resp.usage.total_tokens, 0);
+    }
+
+    #[test]
+    fn parse_response_missing_message_key() {
+        let json = serde_json::json!({
+            "choices": [{"finish_reason": "stop"}],
+            "usage": {}
+        });
+        let resp = parse_openai_response(&json).unwrap();
+        assert_eq!(resp.text, "");
+    }
+
+    #[test]
+    fn build_messages_with_stop_sequences() {
+        // stop_sequences don't affect message building, but verify the
+        // request structure is handled correctly
+        let req = InferenceRequest {
+            prompt: "Count to 3".into(),
+            max_tokens: Some(100),
+            temperature: Some(0.5),
+            top_p: Some(0.9),
+            top_k: None,
+            stop_sequences: Some(vec!["\n".into(), "END".into()]),
+            system_prompt: Some("You are a counter.".into()),
+            sensitivity: None,
+        };
+        let msgs = build_openai_messages(&req);
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0]["role"], "system");
+        assert_eq!(msgs[1]["content"], "Count to 3");
+    }
+
+    #[test]
+    fn build_messages_empty_prompt() {
+        let req = InferenceRequest {
+            prompt: String::new(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: None,
+            sensitivity: None,
+        };
+        let msgs = build_openai_messages(&req);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["content"], "");
+    }
+
+    #[test]
+    fn build_messages_empty_system_prompt() {
+        let req = InferenceRequest {
+            prompt: "Hi".into(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: Some(String::new()),
+            sensitivity: None,
+        };
+        let msgs = build_openai_messages(&req);
+        // Even empty system prompt is included when Some
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0]["content"], "");
+    }
+
+    #[test]
+    fn parse_response_multiple_choices_uses_first() {
+        let json = serde_json::json!({
+            "choices": [
+                {"message": {"content": "first"}, "finish_reason": "stop"},
+                {"message": {"content": "second"}, "finish_reason": "stop"}
+            ],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10}
+        });
+        let resp = parse_openai_response(&json).unwrap();
+        assert_eq!(resp.text, "first");
+    }
+
+    #[test]
+    fn parse_response_integer_content_returns_empty() {
+        // content is a number, not a string — as_str() returns None
+        let json = serde_json::json!({
+            "choices": [{"message": {"content": 42}, "finish_reason": "stop"}],
+            "usage": {}
+        });
+        let resp = parse_openai_response(&json).unwrap();
+        assert_eq!(resp.text, "");
+    }
+
+    #[test]
+    fn parse_response_partial_usage() {
+        // Only prompt_tokens present
+        let json = serde_json::json!({
+            "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 5}
+        });
+        let resp = parse_openai_response(&json).unwrap();
+        assert_eq!(resp.usage.prompt_tokens, 5);
+        assert_eq!(resp.usage.completion_tokens, 0);
+        assert_eq!(resp.usage.total_tokens, 0);
+    }
+
+    #[test]
+    fn sse_delta_content_parsing() {
+        // Test the core parsing logic used inside stream_openai_sse
+        let json_str = r#"{"choices":[{"delta":{"content":"Hello"}}]}"#;
+        let json: serde_json::Value = serde_json::from_str(json_str).unwrap();
+        let text = json["choices"][0]["delta"]["content"]
+            .as_str()
+            .unwrap_or("");
+        assert_eq!(text, "Hello");
+    }
+
+    #[test]
+    fn sse_line_parsing_data_prefix() {
+        let line = "data: {\"choices\":[{\"delta\":{\"content\":\"test\"}}]}";
+        let data = line.strip_prefix("data: ");
+        assert!(data.is_some());
+        let json: serde_json::Value = serde_json::from_str(data.unwrap()).unwrap();
+        let text = json["choices"][0]["delta"]["content"]
+            .as_str()
+            .unwrap_or("");
+        assert_eq!(text, "test");
+    }
+
+    #[test]
+    fn sse_line_parsing_done_signal() {
+        let line = "data: [DONE]";
+        let data = line.strip_prefix("data: ").unwrap();
+        assert_eq!(data, "[DONE]");
+    }
+
+    #[test]
+    fn sse_line_parsing_non_data_line_ignored() {
+        let line = "event: ping";
+        let data = line.strip_prefix("data: ");
+        assert!(data.is_none());
+    }
+
+    #[test]
+    fn sse_line_parsing_empty_content() {
+        let line = "data: {\"choices\":[{\"delta\":{\"content\":\"\"}}]}";
+        let data = line.strip_prefix("data: ").unwrap();
+        let json: serde_json::Value = serde_json::from_str(data).unwrap();
+        let text = json["choices"][0]["delta"]["content"]
+            .as_str()
+            .unwrap_or("");
+        assert_eq!(text, "");
+    }
+
+    #[test]
+    fn sse_line_parsing_missing_delta() {
+        let line = "data: {\"choices\":[{}]}";
+        let data = line.strip_prefix("data: ").unwrap();
+        let json: serde_json::Value = serde_json::from_str(data).unwrap();
+        let text = json["choices"][0]["delta"]["content"]
+            .as_str()
+            .unwrap_or("");
+        assert_eq!(text, "");
+    }
+
+    #[test]
+    fn sse_line_parsing_invalid_json_skipped() {
+        let line = "data: not-valid-json";
+        let data = line.strip_prefix("data: ").unwrap();
+        let result = serde_json::from_str::<serde_json::Value>(data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn build_messages_long_prompt() {
+        let long_prompt = "x".repeat(10_000);
+        let req = InferenceRequest {
+            prompt: long_prompt.clone(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            system_prompt: None,
+            sensitivity: None,
+        };
+        let msgs = build_openai_messages(&req);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["content"].as_str().unwrap().len(), 10_000);
+    }
+
+    #[test]
+    fn parse_response_large_token_counts() {
+        let json = serde_json::json!({
+            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 100000, "completion_tokens": 50000, "total_tokens": 150000}
+        });
+        let resp = parse_openai_response(&json).unwrap();
+        assert_eq!(resp.usage.prompt_tokens, 100_000);
+        assert_eq!(resp.usage.completion_tokens, 50_000);
+        assert_eq!(resp.usage.total_tokens, 150_000);
+    }
 }

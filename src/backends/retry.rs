@@ -138,6 +138,74 @@ mod tests {
     }
 
     #[test]
+    fn retryable_connection_refused_case_variants() {
+        // lowercase
+        assert!(RetryConfig::is_retryable("connection refused"));
+        // Capitalized (e.g., from OS-level errors)
+        assert!(RetryConfig::is_retryable("Connection refused"));
+        // Embedded in longer message
+        assert!(RetryConfig::is_retryable(
+            "tcp Connection refused to 127.0.0.1:8080"
+        ));
+        assert!(RetryConfig::is_retryable(
+            "error: connection refused by peer"
+        ));
+    }
+
+    #[test]
+    fn retryable_timeout_variants() {
+        assert!(RetryConfig::is_retryable("operation timed out after 30s"));
+        assert!(RetryConfig::is_retryable("read timeout"));
+        assert!(RetryConfig::is_retryable("connect timeout while waiting"));
+    }
+
+    #[test]
+    fn retryable_http_status_codes_in_messages() {
+        assert!(RetryConfig::is_retryable("got 502 from upstream"));
+        assert!(RetryConfig::is_retryable("server returned 503"));
+        assert!(RetryConfig::is_retryable("rate limit 429 exceeded"));
+    }
+
+    #[test]
+    fn non_retryable_similar_looking_errors() {
+        // 500 is not retryable
+        assert!(!RetryConfig::is_retryable("HTTP 500 Internal Server Error"));
+        // 401 is not retryable
+        assert!(!RetryConfig::is_retryable("HTTP 401 Unauthorized"));
+        // Generic connection message without "refused" or "error"
+        assert!(!RetryConfig::is_retryable("connection established"));
+    }
+
+    #[test]
+    fn retryable_empty_string() {
+        assert!(!RetryConfig::is_retryable(""));
+    }
+
+    #[test]
+    fn delay_for_attempt_one_is_roughly_double_base() {
+        let cfg = RetryConfig {
+            max_retries: 5,
+            base_delay: Duration::from_millis(100),
+            max_delay: Duration::from_secs(60),
+        };
+        let d = cfg.delay_for_attempt(1).as_millis();
+        // 200ms base * 2^1 = 200ms, +/- 25% jitter -> [150, 250]
+        assert!(d >= 150, "got {d}");
+        assert!(d <= 250, "got {d}");
+    }
+
+    #[test]
+    fn delay_with_zero_base() {
+        let cfg = RetryConfig {
+            max_retries: 3,
+            base_delay: Duration::from_millis(0),
+            max_delay: Duration::from_secs(5),
+        };
+        let d = cfg.delay_for_attempt(0);
+        assert_eq!(d.as_millis(), 0);
+    }
+
+    #[test]
     fn very_high_attempt_does_not_overflow() {
         let cfg = RetryConfig::default();
         // Should not panic

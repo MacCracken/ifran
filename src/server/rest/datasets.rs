@@ -46,7 +46,7 @@ fn default_prompt_field() -> String {
 }
 
 /// Response for an auto-labeling job.
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct AutoLabelJobResponse {
     pub job_id: AutoLabelJobId,
     pub status: AutoLabelStatus,
@@ -238,7 +238,7 @@ fn default_text_field_name() -> String {
 }
 
 /// Response for an augmentation operation.
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct AugmentResponse {
     pub original_count: usize,
     pub augmented_count: usize,
@@ -315,7 +315,7 @@ pub struct ValidateDatasetRequest {
 }
 
 /// Response for dataset validation.
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct ValidateDatasetResponse {
     pub valid: bool,
     pub total_rows: usize,
@@ -367,7 +367,7 @@ fn default_preview_limit() -> usize {
 }
 
 /// Response for dataset preview.
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct PreviewDatasetResponse {
     pub samples: Vec<serde_json::Value>,
     pub has_more: bool,
@@ -582,5 +582,348 @@ mod tests {
         assert_eq!(json["has_more"], true);
         assert_eq!(json["format"], "jsonl");
         assert_eq!(json["samples"].as_array().unwrap().len(), 2);
+    }
+
+    // --- validate_path tests ---
+
+    #[test]
+    fn validate_path_rejects_dot_dot() {
+        let err = validate_path("/data/../etc/passwd").unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert!(err.1.contains(".."));
+    }
+
+    #[test]
+    fn validate_path_accepts_normal() {
+        assert!(validate_path("/data/train.jsonl").is_ok());
+        assert!(validate_path("relative/path.jsonl").is_ok());
+    }
+
+    #[test]
+    fn validate_path_rejects_embedded_dot_dot() {
+        assert!(validate_path("foo/..bar").is_err());
+        assert!(validate_path("a/../b").is_err());
+    }
+
+    // --- CreateAutoLabelRequest edge cases ---
+
+    #[test]
+    fn auto_label_request_missing_required_fields() {
+        let json = r#"{"source_path": "/data.jsonl"}"#;
+        let result = serde_json::from_str::<CreateAutoLabelRequest>(json);
+        assert!(result.is_err(), "model_name is required");
+    }
+
+    #[test]
+    fn auto_label_request_all_optional_fields() {
+        let json = r#"{
+            "source_path": "/data.jsonl",
+            "model_name": "test",
+            "label_field": "label",
+            "prompt_field": "input",
+            "system_prompt": "classify",
+            "output_path": "/out.jsonl",
+            "max_tokens": 128,
+            "temperature": 0.5
+        }"#;
+        let req: CreateAutoLabelRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.label_field, "label");
+        assert_eq!(req.prompt_field, "input");
+        assert_eq!(req.output_path, Some("/out.jsonl".into()));
+        assert_eq!(req.max_tokens, Some(128));
+        assert_eq!(req.temperature, Some(0.5));
+    }
+
+    // --- AugmentRequest edge cases ---
+
+    #[test]
+    fn augment_request_defaults() {
+        let json = r#"{
+            "input_path": "/data.jsonl",
+            "strategies": ["synonym_replacement"]
+        }"#;
+        let req: AugmentRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.augment_factor, 1);
+        assert_eq!(req.text_field, "text");
+        assert!(req.output_path.is_none());
+        assert!(req.word_probability.is_none());
+        assert!(req.seed.is_none());
+    }
+
+    #[test]
+    fn augment_request_missing_strategies() {
+        let json = r#"{"input_path": "/data.jsonl"}"#;
+        let result = serde_json::from_str::<AugmentRequest>(json);
+        assert!(result.is_err(), "strategies is required");
+    }
+
+    #[test]
+    fn augment_request_empty_strategies() {
+        let json = r#"{"input_path": "/data.jsonl", "strategies": []}"#;
+        let req: AugmentRequest = serde_json::from_str(json).unwrap();
+        assert!(req.strategies.is_empty());
+    }
+
+    // --- ValidateDatasetRequest edge cases ---
+
+    #[test]
+    fn validate_request_missing_format() {
+        let json = r#"{"path": "/data.jsonl"}"#;
+        let result = serde_json::from_str::<ValidateDatasetRequest>(json);
+        assert!(result.is_err(), "format is required");
+    }
+
+    // --- PreviewDatasetRequest edge cases ---
+
+    #[test]
+    fn preview_request_custom_limit() {
+        let json = r#"{"path": "/data.csv", "format": "csv", "limit": 25}"#;
+        let req: PreviewDatasetRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.limit, 25);
+        assert_eq!(req.format, crate::types::training::DatasetFormat::Csv);
+    }
+
+    // --- Handler tests using test_state ---
+
+    use crate::server::test_helpers::helpers::test_state;
+
+    #[tokio::test]
+    async fn list_auto_label_jobs_empty() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        let page = super::super::pagination::PaginationQuery {
+            limit: super::super::pagination::DEFAULT_LIMIT,
+            offset: 0,
+        };
+        let result = list_auto_label_jobs(State(state), Query(page)).await;
+        assert!(result.0.data.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_auto_label_job_not_found() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        let fake_id = uuid::Uuid::new_v4();
+        let result = get_auto_label_job(State(state), Path(fake_id)).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().0, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn create_auto_label_rejects_path_traversal() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        let req = CreateAutoLabelRequest {
+            source_path: "/data/../etc/passwd".into(),
+            model_name: "test".into(),
+            label_field: "expected".into(),
+            prompt_field: "prompt".into(),
+            system_prompt: None,
+            output_path: None,
+            max_tokens: None,
+            temperature: None,
+        };
+        let result = create_auto_label(State(state), Json(req)).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().0, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn create_auto_label_rejects_output_path_traversal() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        let req = CreateAutoLabelRequest {
+            source_path: "/data/clean.jsonl".into(),
+            model_name: "test".into(),
+            label_field: "expected".into(),
+            prompt_field: "prompt".into(),
+            system_prompt: None,
+            output_path: Some("/tmp/../etc/shadow".into()),
+            max_tokens: None,
+            temperature: None,
+        };
+        let result = create_auto_label(State(state), Json(req)).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().0, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn augment_rejects_path_traversal() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        let req = AugmentRequest {
+            input_path: "/data/../secrets".into(),
+            output_path: None,
+            strategies: vec![],
+            augment_factor: 1,
+            text_field: "text".into(),
+            word_probability: None,
+            seed: None,
+        };
+        let result = augment_dataset(State(state), Json(req)).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().0, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn augment_rejects_factor_too_high() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        let req = AugmentRequest {
+            input_path: "/data/ok.jsonl".into(),
+            output_path: None,
+            strategies: vec![],
+            augment_factor: 200,
+            text_field: "text".into(),
+            word_probability: None,
+            seed: None,
+        };
+        let result = augment_dataset(State(state), Json(req)).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert!(err.1.contains("augment_factor"));
+    }
+
+    #[tokio::test]
+    async fn augment_rejects_factor_zero() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        let req = AugmentRequest {
+            input_path: "/data/ok.jsonl".into(),
+            output_path: None,
+            strategies: vec![],
+            augment_factor: 0,
+            text_field: "text".into(),
+            word_probability: None,
+            seed: None,
+        };
+        let result = augment_dataset(State(state), Json(req)).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().0, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn validate_rejects_path_traversal() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        let req = ValidateDatasetRequest {
+            path: "/data/../etc/passwd".into(),
+            format: crate::types::training::DatasetFormat::Jsonl,
+        };
+        let result = validate_dataset(State(state), Json(req)).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().0, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn preview_rejects_path_traversal() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        let req = PreviewDatasetRequest {
+            path: "../../etc/passwd".into(),
+            format: crate::types::training::DatasetFormat::Jsonl,
+            limit: 5,
+        };
+        let result = preview_dataset(State(state), Json(req)).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().0, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn validate_nonexistent_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        let req = ValidateDatasetRequest {
+            path: "/nonexistent/file.jsonl".into(),
+            format: crate::types::training::DatasetFormat::Jsonl,
+        };
+        let result = validate_dataset(State(state), Json(req)).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn preview_nonexistent_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        let req = PreviewDatasetRequest {
+            path: "/nonexistent/file.jsonl".into(),
+            format: crate::types::training::DatasetFormat::Jsonl,
+            limit: 5,
+        };
+        let result = preview_dataset(State(state), Json(req)).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn preview_jsonl_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        let file_path = tmp.path().join("test.jsonl");
+        std::fs::write(
+            &file_path,
+            "{\"text\":\"hello\"}\n{\"text\":\"world\"}\n{\"text\":\"foo\"}\n",
+        )
+        .unwrap();
+        let req = PreviewDatasetRequest {
+            path: file_path.to_string_lossy().to_string(),
+            format: crate::types::training::DatasetFormat::Jsonl,
+            limit: 2,
+        };
+        let result = preview_dataset(State(state), Json(req)).await.unwrap();
+        assert_eq!(result.0.samples.len(), 2);
+        assert!(result.0.has_more);
+        assert_eq!(result.0.samples[0]["text"], "hello");
+    }
+
+    #[tokio::test]
+    async fn preview_csv_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        let file_path = tmp.path().join("test.csv");
+        std::fs::write(&file_path, "name,age\nAlice,30\nBob,25\n").unwrap();
+        let req = PreviewDatasetRequest {
+            path: file_path.to_string_lossy().to_string(),
+            format: crate::types::training::DatasetFormat::Csv,
+            limit: 10,
+        };
+        let result = preview_dataset(State(state), Json(req)).await.unwrap();
+        assert_eq!(result.0.samples.len(), 2);
+        assert!(!result.0.has_more);
+        assert_eq!(result.0.samples[0]["name"], "Alice");
+        assert_eq!(result.0.samples[0]["age"], "30");
+    }
+
+    #[tokio::test]
+    async fn preview_csv_empty_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        let file_path = tmp.path().join("empty.csv");
+        std::fs::write(&file_path, "").unwrap();
+        let req = PreviewDatasetRequest {
+            path: file_path.to_string_lossy().to_string(),
+            format: crate::types::training::DatasetFormat::Csv,
+            limit: 5,
+        };
+        let result = preview_dataset(State(state), Json(req)).await.unwrap();
+        assert!(result.0.samples.is_empty());
+    }
+
+    #[tokio::test]
+    async fn preview_limit_clamped() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = test_state(&tmp);
+        let file_path = tmp.path().join("big.jsonl");
+        // Write 60 lines but request limit=100 (should be clamped to 50)
+        let content: String = (0..60).map(|i| format!("{{\"i\":{i}}}\n")).collect();
+        std::fs::write(&file_path, &content).unwrap();
+        let req = PreviewDatasetRequest {
+            path: file_path.to_string_lossy().to_string(),
+            format: crate::types::training::DatasetFormat::Jsonl,
+            limit: 100,
+        };
+        let result = preview_dataset(State(state), Json(req)).await.unwrap();
+        assert_eq!(result.0.samples.len(), 50);
+        assert!(result.0.has_more);
     }
 }

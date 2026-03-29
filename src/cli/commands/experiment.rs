@@ -3,6 +3,35 @@ use crate::types::experiment::ExperimentId;
 /// Autonomous experiment commands — run hyperparameter sweeps, view leaderboards.
 use std::sync::Arc;
 
+/// Format an optional f64 value to 4 decimal places, or "—" if absent.
+#[must_use]
+fn format_optional_f64(value: Option<f64>) -> String {
+    value
+        .map(|v| format!("{v:.4}"))
+        .unwrap_or_else(|| "\u{2014}".into())
+}
+
+/// Format an optional duration in seconds (no decimals), or "—" if absent.
+#[must_use]
+fn format_optional_duration(secs: Option<f64>) -> String {
+    secs.map(|d| format!("{d:.0}"))
+        .unwrap_or_else(|| "\u{2014}".into())
+}
+
+/// Format a best-trial marker: "*" if best, empty string otherwise.
+#[must_use]
+fn format_best_marker(is_best: bool) -> &'static str {
+    if is_best { "*" } else { "" }
+}
+
+/// Format a score display for the experiment list: "X.XXXX" or "—".
+#[must_use]
+fn format_score_display(score: Option<f64>) -> String {
+    score
+        .map(|s| format!("{s:.4}"))
+        .unwrap_or_else(|| "\u{2014}".into())
+}
+
 /// Run an experiment from a TOML program file.
 pub async fn run(program_path: &str) -> Result<()> {
     use crate::config::IfranConfig;
@@ -115,9 +144,7 @@ pub async fn list() -> Result<()> {
     eprintln!("{:<36}  {:<20}  {:<10}  BEST SCORE", "ID", "NAME", "STATUS");
     eprintln!("{}", "-".repeat(80));
     for (id, name, status, best_score) in paged.items {
-        let score_str = best_score
-            .map(|s| format!("{s:.4}"))
-            .unwrap_or_else(|| "—".into());
+        let score_str = format_score_display(best_score);
         eprintln!("{:<36}  {:<20}  {:<10?}  {}", id, name, status, score_str);
     }
 
@@ -165,19 +192,10 @@ pub async fn status(id: Option<&str>) -> Result<()> {
             "#", "STATUS", "TRAIN LOSS", "EVAL SCORE", "SECS",
         );
         for t in &trials {
-            let loss_str = t
-                .train_loss
-                .map(|l| format!("{l:.4}"))
-                .unwrap_or_else(|| "—".into());
-            let score_str = t
-                .eval_score
-                .map(|s| format!("{s:.4}"))
-                .unwrap_or_else(|| "—".into());
-            let dur_str = t
-                .duration_secs
-                .map(|d| format!("{d:.0}"))
-                .unwrap_or_else(|| "—".into());
-            let best_str = if t.is_best { "*" } else { "" };
+            let loss_str = format_optional_f64(t.train_loss);
+            let score_str = format_optional_f64(t.eval_score);
+            let dur_str = format_optional_duration(t.duration_secs);
+            let best_str = format_best_marker(t.is_best);
             eprintln!(
                 "  {:<4}  {:<10?}  {:<12}  {:<12}  {:<8}  {}",
                 t.trial_number, t.status, loss_str, score_str, dur_str, best_str
@@ -229,18 +247,9 @@ pub async fn leaderboard(id: &str, limit: usize) -> Result<()> {
     );
     eprintln!("{}", "-".repeat(56));
     for (rank, t) in trials.iter().enumerate() {
-        let score_str = t
-            .eval_score
-            .map(|s| format!("{s:.4}"))
-            .unwrap_or_else(|| "—".into());
-        let loss_str = t
-            .train_loss
-            .map(|l| format!("{l:.4}"))
-            .unwrap_or_else(|| "—".into());
-        let dur_str = t
-            .duration_secs
-            .map(|d| format!("{d:.0}"))
-            .unwrap_or_else(|| "—".into());
+        let score_str = format_optional_f64(t.eval_score);
+        let loss_str = format_optional_f64(t.train_loss);
+        let dur_str = format_optional_duration(t.duration_secs);
         eprintln!(
             "{:<4}  {:<12}  {:<12}  {:<12.2e}  {:<8}",
             rank + 1,
@@ -273,4 +282,67 @@ pub async fn stop(id: &str) -> Result<()> {
     eprintln!("Note: Running trials will complete before the experiment fully stops.");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_optional_f64_some() {
+        assert_eq!(format_optional_f64(Some(0.1234)), "0.1234");
+        assert_eq!(format_optional_f64(Some(0.0)), "0.0000");
+        assert_eq!(format_optional_f64(Some(1.23456789)), "1.2346");
+    }
+
+    #[test]
+    fn format_optional_f64_none() {
+        let result = format_optional_f64(None);
+        assert_eq!(result, "\u{2014}"); // em dash
+    }
+
+    #[test]
+    fn format_optional_duration_some() {
+        assert_eq!(format_optional_duration(Some(120.0)), "120");
+        assert_eq!(format_optional_duration(Some(0.5)), "0");
+        assert_eq!(format_optional_duration(Some(3600.0)), "3600");
+    }
+
+    #[test]
+    fn format_optional_duration_none() {
+        let result = format_optional_duration(None);
+        assert_eq!(result, "\u{2014}");
+    }
+
+    #[test]
+    fn format_best_marker_true() {
+        assert_eq!(format_best_marker(true), "*");
+    }
+
+    #[test]
+    fn format_best_marker_false() {
+        assert_eq!(format_best_marker(false), "");
+    }
+
+    #[test]
+    fn format_score_display_some() {
+        assert_eq!(format_score_display(Some(0.9512)), "0.9512");
+        assert_eq!(format_score_display(Some(0.0)), "0.0000");
+    }
+
+    #[test]
+    fn format_score_display_none() {
+        let result = format_score_display(None);
+        assert_eq!(result, "\u{2014}");
+    }
+
+    #[test]
+    fn format_optional_f64_negative() {
+        assert_eq!(format_optional_f64(Some(-0.5)), "-0.5000");
+    }
+
+    #[test]
+    fn format_optional_duration_large() {
+        assert_eq!(format_optional_duration(Some(86400.0)), "86400");
+    }
 }

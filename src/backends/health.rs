@@ -336,6 +336,63 @@ mod tests {
     }
 
     #[test]
+    fn ring_size_zero_clamped_to_one() {
+        let config = HealthConfig {
+            ring_size: 0,
+            degraded_threshold: 0.3,
+            unhealthy_threshold: 0.6,
+        };
+        let mut ring = HealthRing::new(config);
+        // ring_size is clamped to 1, so single failure -> 100% failure rate
+        ring.record(false);
+        assert!((ring.failure_rate() - 1.0).abs() < f64::EPSILON);
+        assert_eq!(ring.status(), HealthStatus::Unhealthy);
+    }
+
+    #[test]
+    fn ring_partial_fill_only_counts_recorded() {
+        let config = HealthConfig {
+            ring_size: 10,
+            degraded_threshold: 0.3,
+            unhealthy_threshold: 0.6,
+        };
+        let mut ring = HealthRing::new(config);
+        // Record only 2 entries: 1 fail, 1 success -> 1/2 = 0.5
+        ring.record(false);
+        ring.record(true);
+        assert!((ring.failure_rate() - 0.5).abs() < f64::EPSILON);
+        assert_eq!(ring.status(), HealthStatus::Degraded);
+    }
+
+    #[test]
+    fn ring_wrapping_overwrites_oldest() {
+        let config = HealthConfig {
+            ring_size: 3,
+            degraded_threshold: 0.3,
+            unhealthy_threshold: 0.6,
+        };
+        let mut ring = HealthRing::new(config);
+        // Fill: [F, F, F] -> 3/3 = 1.0 -> unhealthy
+        ring.record(false);
+        ring.record(false);
+        ring.record(false);
+        assert_eq!(ring.status(), HealthStatus::Unhealthy);
+        assert!(ring.filled);
+
+        // Wrap: overwrite index 0 with S -> [S, F, F] -> 2/3 = 0.67 -> unhealthy
+        ring.record(true);
+        assert!((ring.failure_rate() - 2.0 / 3.0).abs() < f64::EPSILON);
+
+        // Overwrite index 1 with S -> [S, S, F] -> 1/3 = 0.33 -> degraded
+        ring.record(true);
+        assert_eq!(ring.status(), HealthStatus::Degraded);
+
+        // Overwrite index 2 with S -> [S, S, S] -> 0/3 = 0.0 -> healthy
+        ring.record(true);
+        assert_eq!(ring.status(), HealthStatus::Healthy);
+    }
+
+    #[test]
     fn health_status_display() {
         assert_eq!(HealthStatus::Healthy.to_string(), "Healthy");
         assert_eq!(HealthStatus::Degraded.to_string(), "Degraded");

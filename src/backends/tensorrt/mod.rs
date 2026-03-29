@@ -344,4 +344,122 @@ mod tests {
         assert_eq!(msgs[0]["content"], "You are helpful");
         assert_eq!(msgs[1]["role"], "user");
     }
+
+    #[test]
+    fn backend_locality_is_local() {
+        let backend = TensorRtBackend::new(None);
+        assert!(matches!(
+            backend.capabilities().locality,
+            BackendLocality::Local
+        ));
+    }
+
+    #[tokio::test]
+    async fn health_check_unreachable_returns_false() {
+        // Point at a port that's (almost certainly) not listening
+        let backend = TensorRtBackend::new(Some("http://127.0.0.1:1".into()));
+        let result = backend.health_check().await;
+        assert!(result.is_ok());
+        assert!(!result.unwrap(), "unreachable backend should return false");
+    }
+
+    #[tokio::test]
+    async fn infer_unloaded_model_fails() {
+        let backend = TensorRtBackend::new(None);
+        let handle = ModelHandle("nonexistent".into());
+        let req = InferenceRequest {
+            prompt: "test".into(),
+            system_prompt: None,
+            max_tokens: Some(10),
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            sensitivity: None,
+        };
+        let result = backend.infer(&handle, &req).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn infer_stream_unloaded_model_fails() {
+        let backend = TensorRtBackend::new(None);
+        let handle = ModelHandle("nonexistent".into());
+        let req = InferenceRequest {
+            prompt: "test".into(),
+            system_prompt: None,
+            max_tokens: Some(10),
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            sensitivity: None,
+        };
+        let result = backend.infer_stream(&handle, req).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn loaded_map_tracks_models() {
+        let backend = TensorRtBackend::new(None);
+        assert!(backend.loaded.read().await.is_empty());
+
+        let manifest = ModelManifest {
+            context_length: None,
+            gpu_layers: None,
+            tensor_split: None,
+            info: crate::types::model::ModelInfo {
+                id: uuid::Uuid::new_v4(),
+                name: "test-model".into(),
+                repo_id: Some("org/test".into()),
+                format: ModelFormat::TensorRt,
+                quant: crate::types::model::QuantLevel::None,
+                size_bytes: 100,
+                parameter_count: None,
+                architecture: None,
+                license: None,
+                local_path: "/tmp/test.engine".into(),
+                sha256: None,
+                pulled_at: chrono::Utc::now(),
+            },
+        };
+        let device = DeviceConfig {
+            accelerator: AcceleratorType::Cuda,
+            device_ids: vec![0],
+            memory_limit_mb: None,
+        };
+
+        let handle = backend.load_model(&manifest, &device).await.unwrap();
+        assert_eq!(backend.loaded.read().await.len(), 1);
+
+        backend.unload_model(handle).await.unwrap();
+        assert!(backend.loaded.read().await.is_empty());
+    }
+
+    #[test]
+    fn parse_response_with_usage() {
+        let json = serde_json::json!({
+            "choices": [{"message": {"content": "answer"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}
+        });
+        let resp = parse_openai_response(&json).unwrap();
+        assert_eq!(resp.text, "answer");
+        assert_eq!(resp.usage.prompt_tokens, 10);
+        assert_eq!(resp.usage.completion_tokens, 20);
+        assert_eq!(resp.usage.total_tokens, 30);
+    }
+
+    #[test]
+    fn handle_id_format_with_slashes() {
+        // Models with org/name should have slashes replaced
+        let model_name = "meta-llama/Llama-3-8B";
+        let handle_id = format!("tensorrt-{}", model_name.replace('/', "-"));
+        assert_eq!(handle_id, "tensorrt-meta-llama-Llama-3-8B");
+    }
+
+    #[test]
+    fn max_context_length_is_128k() {
+        let backend = TensorRtBackend::new(None);
+        assert_eq!(backend.capabilities().max_context_length, Some(131072));
+    }
 }

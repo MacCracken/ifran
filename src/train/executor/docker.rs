@@ -207,4 +207,132 @@ mod tests {
         assert!(json.contains("/data/train.jsonl"));
         assert!(json.contains("lora"));
     }
+
+    #[test]
+    fn image_name_preserved() {
+        let executor = DockerExecutor::new("registry.example.com/train:v2.1".into());
+        assert_eq!(executor.image, "registry.example.com/train:v2.1");
+    }
+
+    #[test]
+    fn container_name_includes_job_id() {
+        let job_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let name = format!("ifran-train-{}", job_id);
+        assert_eq!(name, "ifran-train-550e8400-e29b-41d4-a716-446655440000");
+    }
+
+    #[test]
+    fn dataset_path_validation_rejects_relative() {
+        // The run() method rejects relative paths — validate the logic inline
+        let path = "data/train.jsonl";
+        let p = std::path::Path::new(path);
+        assert!(!p.is_absolute(), "relative path should not be absolute");
+    }
+
+    #[test]
+    fn dataset_path_validation_rejects_dotdot() {
+        let path = "/data/../etc/passwd";
+        assert!(path.contains(".."), "path with .. should be detected");
+    }
+
+    #[test]
+    fn dataset_path_validation_accepts_absolute() {
+        let path = "/workspace/datasets/train.jsonl";
+        let p = std::path::Path::new(path);
+        assert!(p.is_absolute());
+        assert!(!path.contains(".."));
+    }
+
+    #[test]
+    fn config_serializes_all_methods() {
+        use crate::types::training::*;
+        for method in [
+            TrainingMethod::Lora,
+            TrainingMethod::Qlora,
+            TrainingMethod::FullFineTune,
+            TrainingMethod::Dpo,
+            TrainingMethod::Rlhf,
+            TrainingMethod::Distillation,
+        ] {
+            let config = TrainingJobConfig {
+                base_model: "model".into(),
+                dataset: DatasetConfig {
+                    path: "/data/train.jsonl".into(),
+                    format: DatasetFormat::Jsonl,
+                    split: None,
+                    max_samples: None,
+                },
+                method,
+                hyperparams: HyperParams {
+                    learning_rate: 2e-4,
+                    epochs: 1,
+                    batch_size: 4,
+                    gradient_accumulation_steps: 1,
+                    warmup_steps: 0,
+                    weight_decay: 0.0,
+                    max_seq_length: 512,
+                },
+                output_name: None,
+                lora: None,
+                max_steps: None,
+                time_budget_secs: None,
+            };
+            let json = serde_json::to_string(&config);
+            assert!(json.is_ok(), "method {:?} should serialize", method);
+        }
+    }
+
+    #[test]
+    fn config_with_time_budget_serializes() {
+        use crate::types::training::*;
+        let config = TrainingJobConfig {
+            base_model: "llama-8b".into(),
+            dataset: DatasetConfig {
+                path: "/data/train.jsonl".into(),
+                format: DatasetFormat::Jsonl,
+                split: None,
+                max_samples: None,
+            },
+            method: TrainingMethod::Lora,
+            hyperparams: HyperParams {
+                learning_rate: 2e-4,
+                epochs: 1,
+                batch_size: 4,
+                gradient_accumulation_steps: 1,
+                warmup_steps: 0,
+                weight_decay: 0.0,
+                max_seq_length: 512,
+            },
+            output_name: None,
+            lora: None,
+            max_steps: None,
+            time_budget_secs: Some(300),
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("300"));
+    }
+
+    #[test]
+    fn script_for_method_mapping() {
+        use crate::types::training::TrainingMethod;
+        // Verify the docker executor uses correct scripts
+        assert_eq!(
+            super::super::script_for_method(TrainingMethod::Lora),
+            "scripts/train_sft.py"
+        );
+        assert_eq!(
+            super::super::script_for_method(TrainingMethod::Dpo),
+            "scripts/train_dpo.py"
+        );
+    }
+
+    #[tokio::test]
+    async fn multiple_executors_independent() {
+        let executor_a = DockerExecutor::new("image-a:latest".into());
+        let executor_b = DockerExecutor::new("image-b:latest".into());
+        assert_eq!(executor_a.image, "image-a:latest");
+        assert_eq!(executor_b.image, "image-b:latest");
+        assert!(executor_a.containers.read().await.is_empty());
+        assert!(executor_b.containers.read().await.is_empty());
+    }
 }

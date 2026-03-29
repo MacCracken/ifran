@@ -47,8 +47,8 @@ test-integration:
 	cargo test --workspace --test '*'
 
 test-coverage:
-	cargo tarpaulin --workspace --out xml --output-dir coverage/ \
-		--fail-under 65 --skip-clean
+	cargo tarpaulin --all-features --out xml --output-dir coverage/ \
+		--fail-under 70 --skip-clean
 
 # === Security ===
 
