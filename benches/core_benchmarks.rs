@@ -1,4 +1,5 @@
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 
 fn bench_cosine_similarity(c: &mut Criterion) {
     let a: Vec<f32> = (0..768).map(|i| (i as f32 * 0.01).sin()).collect();
