@@ -39,28 +39,36 @@ Current: **1,785 tests**, 72.2% coverage. CI threshold: **70%**.
 
 ---
 
-## 1.1.0 — Coverage & Hardening
+## 1.0.1 — Patch (Blocking SY Integration)
 
-### Pre-1.0.1 — Dependency Fix (Blocking SY Integration)
+- [ ] **Feature-gate rusqlite behind `sqlite` feature** — `rusqlite 0.39` requires `libsqlite3-sys 0.37` which conflicts with consumers using sqlx (`libsqlite3-sys 0.30`). Extract store trait interfaces (`StoreTrait` with `SqliteStore` impl) so modules compile without sqlite. Gate all 13 store modules + r2d2/r2d2_sqlite behind `sqlite = ["dep:rusqlite", "dep:r2d2", "dep:r2d2_sqlite"]`. Add `sqlite` to default features. Library consumers use `ifran = { default-features = false }` to avoid the conflict.
 
-- [ ] **Feature-gate rusqlite behind `sqlite` feature** — `rusqlite 0.39` requires `libsqlite3-sys 0.37` which conflicts with consumers using sqlx (ships `libsqlite3-sys 0.30`). Extract store trait interfaces so modules compile without sqlite, then gate all 13 store modules + r2d2 behind `sqlite = ["dep:rusqlite", "dep:r2d2"]`. Add `sqlite` to default features. Library consumers use `ifran = { default-features = false }` to avoid the conflict. Without this, ifran cannot be added as a crate dependency to projects using sqlx.
+---
 
-### Sprint 1 — Coverage to 75% absolute
+## 1.1.0 — P0 Items
 
-- [ ] **Extract CLI execute() logic into testable functions** — `pull::execute()`, `list::execute()`, `serve::execute()` each contain 30-50 lines of pure logic (path construction, config resolution, output formatting) that can be extracted and tested. ~200 lines recoverable.
-- [ ] **Mock-based backend inference tests** — create a `MockBackend` implementing `InferenceBackend` that returns canned responses. Test the full inference handler path (cache → budget → backend → filter → cache store) without network. ~80 lines in `inference.rs`.
-- [ ] **Experiment runner test with mock executor** — test `ExperimentRunner::run()` with a mock executor that completes trials instantly. Covers the trial loop, grid/random search selection, and result recording. ~100 lines in `runner.rs`.
-- [ ] **OpenAI-compat streaming test** — test `/v1/chat/completions` with `stream: true` using a mock backend that yields chunks. ~30 lines in `openai_compat.rs`.
-- [ ] **Raise CI threshold to 75%**
+### Storage Abstraction (P0)
 
-### Sprint 2 — Coverage to 78% + hardening
+- [ ] **Database-agnostic store traits** — extract `trait JobStore`, `trait EvalStore`, `trait TenantStore`, etc. from the 13 concrete SQLite implementations. Each trait defines CRUD operations; `SqliteStore` is the default impl. This enables PostgreSQL backends (see below), testing with in-memory stores, and library consumption without sqlite.
+- [ ] **PostgreSQL backend** — implement store traits against PostgreSQL via sqlx. Required for production multi-instance deployments (SQLite doesn't support concurrent writes from multiple processes). See ADR-010.
+- [ ] **Redis backend for fleet coordination** — replace in-memory fleet registry with Redis pub/sub for multi-instance node discovery and heartbeat propagation. See ADR-010.
 
-- [ ] **Docker executor integration test** — test `DockerExecutor::run()` with a mock Docker binary (shell script that echoes success). Covers the container lifecycle, timeout, and cancellation paths. ~50 lines.
-- [ ] **Bridge protocol tests** — test `BridgeClient::connect()` and `BridgeServer::start()` with loopback. Covers connection state machine, heartbeat, and reconnect. ~80 lines.
-- [ ] **Telemetry integration test** — test OTLP init path with a no-op exporter. ~20 lines.
-- [ ] **CLI main dispatch test** — test `Cli::parse` → `Commands` dispatch with dry-run mode (parse + validate, don't execute). ~30 lines.
-- [ ] **Property-based tests for prompt guard** — proptest strategies generating adversarial strings; verify scanner never panics or returns risk_score outside [0, 1].
+### Testing & Coverage
+
+- [ ] **Extract CLI execute() logic into testable functions** — ~200 lines recoverable
+- [ ] **Mock-based backend inference tests** — `MockBackend` implementing `InferenceBackend`. ~80 lines
+- [ ] **Experiment runner test with mock executor** — ~100 lines
+- [ ] **OpenAI-compat streaming test** — `/v1/chat/completions` with `stream: true`. ~30 lines
+- [ ] **Docker executor integration test** — mock Docker binary. ~50 lines
+- [ ] **Bridge protocol tests** — loopback connect/heartbeat/reconnect. ~80 lines
+- [ ] **Property-based tests for prompt guard** — proptest adversarial strings
 - [ ] **Raise CI threshold to 78%**
+
+### Operational
+
+- [ ] **Human approval gates** — for high-risk training jobs (RLHF data, production model deployment)
+- [ ] **Per-tenant token budget enforcement** — currently global only
+- [ ] **Tanur frontend integration** — API contract validation against tanur's expected endpoints
 
 ---
 
@@ -70,7 +78,3 @@ Current: **1,785 tests**, 72.2% coverage. CI threshold: **70%**.
 - Experiment DSL documentation and guide
 - Advanced features guide (auto-labeling, data augmentation, A/B testing, drift detection)
 - Marketplace and RAG user guides
-- Redis backend for multi-instance fleet coordination (see ADR-010)
-- PostgreSQL backend for durable workflow persistence (see ADR-010)
-- Human approval gates for high-risk training jobs (RLHF data, production model deployment)
-- Token budget enforcement per tenant (currently global only)
