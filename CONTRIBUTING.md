@@ -57,7 +57,7 @@ main (stable releases)
       └── docs/update-architecture
 ```
 
-- **main** -- always releasable; tags correspond to CalVer releases.
+- **main** -- always releasable; tags correspond to semver releases.
 - **develop** -- integration branch where feature branches merge.
 - **feature/\*** -- new functionality branched from develop.
 
@@ -167,10 +167,10 @@ cargo tarpaulin --workspace --out html
 
 ## Release Process
 
-Ifran uses **Calendar Versioning** (CalVer):
+Ifran uses **Semantic Versioning** (semver):
 
-- Format: `YYYY.M.D` for releases (e.g., `2026.3.9`)
-- Format: `YYYY.M.D-N` for same-day patch releases (e.g., `2026.3.9-1`)
+- Format: `MAJOR.MINOR.PATCH` for releases (e.g., `1.0.0`)
+- Format: `MAJOR.MINOR.PATCH-pre` for pre-releases (e.g., `1.1.0-rc1`)
 
 Releases are created through the `release-automation` GitHub Actions workflow, which handles:
 

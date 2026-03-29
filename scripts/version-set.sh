@@ -2,24 +2,26 @@
 # Update the project version across all version sources.
 #
 # Usage:
-#   ./scripts/version-set.sh 2026.3.18
-#   ./scripts/version-set.sh        # defaults to CalVer today: YYYY.M.D
+#   ./scripts/version-set.sh 1.2.0
+#   ./scripts/version-set.sh 1.2.0-rc1
 #
 # Updates: VERSION, Cargo.toml (workspace), Cargo.lock
 
 set -euo pipefail
 
-# Default to today's date in CalVer format
-if [[ $# -ge 1 ]]; then
-    VERSION="$1"
-else
-    VERSION="$(date +%Y.%-m.%-d)"
+if [[ $# -lt 1 ]]; then
+    echo "Usage: $0 <version>"
+    echo "  e.g., $0 1.2.0"
+    echo "  e.g., $0 1.2.0-rc1"
+    exit 1
 fi
 
-# Validate CalVer format
-if [[ ! "$VERSION" =~ ^[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}(-[0-9]+)?$ ]]; then
-    echo "ERROR: Invalid CalVer format: '${VERSION}'"
-    echo "Expected: YYYY.M.D or YYYY.M.D-N (e.g., 2026.3.18 or 2026.3.18-1)"
+VERSION="$1"
+
+# Validate semver format (MAJOR.MINOR.PATCH with optional pre-release)
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+    echo "ERROR: Invalid version format: '${VERSION}'"
+    echo "Expected: MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-pre (e.g., 1.2.0 or 1.2.0-rc1)"
     exit 1
 fi
 

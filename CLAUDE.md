@@ -6,7 +6,7 @@
 - **Type**: Flat crate with binaries (`ifran-server`, `ifran`)
 - **License**: AGPL-3.0-only
 - **MSRV**: 1.89
-- **Version**: CalVer (YYYY.M.D)
+- **Version**: Semver (MAJOR.MINOR.PATCH)
 
 
 ## Development Process

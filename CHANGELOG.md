@@ -3,9 +3,9 @@
 All notable changes to Ifran will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-Versioning follows CalVer: YYYY.M.D / YYYY.M.D-N for patches.
+Versioning follows [Semantic Versioning](https://semver.org/).
 
-## [2026.3.28]
+## [1.0.0]
 
 ### Changed
 

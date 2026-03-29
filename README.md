@@ -134,7 +134,7 @@ cargo test --workspace
 
 ## Versioning
 
-CalVer: `YYYY.M.D` for releases, `YYYY.M.D-N` for patches.
+Semver: `MAJOR.MINOR.PATCH` for releases, with optional pre-release suffix (e.g., `1.0.0-rc1`).
 
 ## License
 

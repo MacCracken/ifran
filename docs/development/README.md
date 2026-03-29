@@ -52,9 +52,7 @@ See `deploy/ifran.toml.example` for all options.
 
 ## Versioning
 
-CalVer format: `YYYY.M.D` for releases, `YYYY.M.D-N` for patches.
-
-Matches the convention used by Agnosticos and SecureYeoman.
+Semver format: `MAJOR.MINOR.PATCH` for releases, with optional pre-release suffix.
 
 ## CI/CD
 

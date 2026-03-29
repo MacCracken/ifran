@@ -1,6 +1,6 @@
 # Ifran Development Roadmap
 
-> Versioning: CalVer `YYYY.M.D` / `YYYY.M.D-N` for patches
+> Versioning: Semver `MAJOR.MINOR.PATCH`
 
 ### Test Coverage
 

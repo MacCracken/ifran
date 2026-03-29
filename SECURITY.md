@@ -4,7 +4,7 @@
 
 | Version       | Supported |
 | ------------- | --------- |
-| Latest CalVer | Yes       |
+| Latest release | Yes       |
 
 ## Reporting a Vulnerability
 

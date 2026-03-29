@@ -1,19 +1,20 @@
-# ADR-005: CalVer Versioning
+# ADR-005: Semver Versioning
 
-**Status**: Accepted
+**Status**: Superseded (was CalVer, now Semver)
 **Date**: 2026-03-09
+**Updated**: 2026-03-28
 
 ## Context
 
-Consistent versioning across the project ecosystem (Agnosticos, SecureYeoman, Ifran) reduces confusion and aligns release tracking.
+Consistent versioning across the project ecosystem reduces confusion and aligns release tracking. CalVer was previously used but caused issues with crates.io compatibility and standard Cargo tooling expectations.
 
 ## Decision
 
-Use Calendar Versioning: `YYYY.M.D` for releases, `YYYY.M.D-N` for patches (where N is a patch counter). Matches the convention in Agnosticos and SecureYeoman.
+Use Semantic Versioning: `MAJOR.MINOR.PATCH` for releases, with optional pre-release suffix (e.g., `1.0.0-rc1`). The VERSION file at repo root is the single source of truth.
 
 ## Consequences
 
-- Version immediately communicates release date
-- No ambiguity about "major" vs "minor" — every release is date-stamped
-- Patch releases use `-N` suffix for same-day hotfixes
+- Compatible with crates.io and Cargo semver expectations
+- Clear signaling of breaking changes via major version bumps
+- Pre-release versions use standard semver suffixes
 - VERSION file at repo root is the single source of truth

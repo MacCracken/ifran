@@ -62,9 +62,7 @@ jobs:
       - name: Create release tarball
         run: |
           VERSION=${{ steps.setup.outputs.project-version }}
-          # Convert CalVer YYYY.M.D[-N] to compact YYYYMMDD[N]
-          COMPACT_DATE=$(echo "$VERSION" | awk -F'[.-]' '{s=sprintf("%04d%02d%02d", $1, $2, $3); if ($4) s=s $4; print s}')
-          TARBALL_NAME="ifran-${COMPACT_DATE}-linux-${{ matrix.arch }}"
+          TARBALL_NAME="ifran-${VERSION}-linux-${{ matrix.arch }}"
           mkdir -p "${TARBALL_NAME}"
 
           cp target/${{ matrix.target }}/release/ifran "${TARBALL_NAME}/"
