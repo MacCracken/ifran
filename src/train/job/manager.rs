@@ -89,11 +89,6 @@ impl JobManager {
         }
     }
 
-    /// Set the budget checker for GPU hour enforcement.
-    pub fn set_budget_checker(&mut self, checker: Arc<BudgetChecker>) {
-        self.budget_checker = Some(checker);
-    }
-
     /// Get a reference to the approval gate.
     #[must_use]
     pub fn approval_gate(&self) -> &Arc<Mutex<ApprovalGate>> {
@@ -123,42 +118,6 @@ impl JobManager {
                 }
             }
         }
-    }
-
-    /// Recover non-terminal jobs from the store after a process restart.
-    /// Jobs that were Running or Preparing are marked as Failed since the
-    /// process crashed while they were in-flight.
-    pub async fn recover(&self) -> Result<usize> {
-        let store = match &self.store {
-            Some(s) => s,
-            None => return Ok(0),
-        };
-
-        let mut recovered = {
-            let store = store
-                .lock()
-                .map_err(|e| IfranError::StorageError(format!("Failed to lock job store: {e}")))?;
-            store.recover_jobs()?
-        };
-
-        let mut count = 0;
-        let mut jobs = self.jobs.write().await;
-
-        for job in &mut recovered {
-            if job.status == TrainingStatus::Running || job.status == TrainingStatus::Preparing {
-                job.fail("Process crashed \u{2014} job interrupted".into());
-                self.persist(job);
-            }
-            info!(job_id = %job.id, status = ?job.status, "Recovered job from store");
-            jobs.insert(job.id, job.clone());
-            count += 1;
-        }
-
-        if count > 0 {
-            info!(count, "Recovered jobs from persistent store");
-        }
-
-        Ok(count)
     }
 
     /// Create and enqueue a new training job.

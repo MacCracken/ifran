@@ -119,3 +119,13 @@ timestamp,label,benchmark,time_ns,time_unit
 2026-03-28T21:02:03Z,post-pre1.0-work,score_exact_match_1000,19165,ns
 2026-03-28T21:02:03Z,post-pre1.0-work,score_contains_match_1000,6734,ns
 2026-03-28T21:02:03Z,post-pre1.0-work,score_mmlu_500,157994,ns
+2026-03-30T21:35:20Z,a5efb20,cosine_similarity_768d,1707,ns
+2026-03-30T21:35:20Z,a5efb20,cosine_similarity_1536d,3478,ns
+2026-03-30T21:35:20Z,a5efb20,estimate_gguf_7b,4,ns
+2026-03-30T21:35:20Z,a5efb20,estimate_gguf_70b,4,ns
+2026-03-30T21:35:20Z,a5efb20,cache_insert_100,17424,ns
+2026-03-30T21:35:20Z,a5efb20,cache_insert_with_eviction,23192,ns
+2026-03-30T21:35:20Z,a5efb20,cache_touch_hit,40,ns
+2026-03-30T21:35:20Z,a5efb20,score_exact_match_1000,9299,ns
+2026-03-30T21:35:20Z,a5efb20,score_contains_match_1000,4270,ns
+2026-03-30T21:35:20Z,a5efb20,score_mmlu_500,65685,ns

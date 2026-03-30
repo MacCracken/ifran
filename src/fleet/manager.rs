@@ -8,7 +8,7 @@ use crate::types::training::TrainingJobId;
 use chrono::{DateTime, Utc};
 use majra::fleet::{FleetQueue, FleetQueueConfig, FleetQueueStats};
 use majra::heartbeat::{HeartbeatConfig, HeartbeatTracker, Status};
-use majra::queue::{Priority, ResourcePool, ResourceReq, TaskId};
+use majra::queue::ResourcePool;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -327,41 +327,6 @@ impl FleetManager {
         }
     }
 
-    /// Evict nodes that have been offline longer than `2 * offline_timeout`.
-    /// Returns the number of evicted nodes.
-    pub async fn evict_offline(&self) -> usize {
-        let eviction_threshold = self.offline_timeout * 2;
-        let now = Utc::now();
-        let mut meta = self.meta.write().await;
-        let mut tracker = self.tracker.write().await;
-        let before = meta.len();
-
-        let mut evicted_ids = Vec::new();
-        meta.retain(|id, m| {
-            let elapsed = now
-                .signed_duration_since(m.last_heartbeat)
-                .to_std()
-                .unwrap_or(Duration::MAX);
-            if elapsed >= eviction_threshold {
-                tracing::info!(node_id = %id, elapsed_secs = elapsed.as_secs(), "evicting offline node from fleet");
-                evicted_ids.push(id.clone());
-                false
-            } else {
-                true
-            }
-        });
-
-        for id in &evicted_ids {
-            tracker.deregister(id);
-        }
-
-        let evicted = before - meta.len();
-        if evicted > 0 {
-            tracing::info!(count = evicted, "evicted offline nodes from fleet");
-        }
-        evicted
-    }
-
     /// List all registered nodes.
     #[must_use]
     pub async fn list_nodes(&self) -> Vec<FleetNode> {
@@ -447,26 +412,6 @@ impl FleetManager {
         }
 
         stats
-    }
-
-    /// Submit a training job to the fleet queue.
-    ///
-    /// Routes the job to the least-loaded node that satisfies the GPU
-    /// requirements. Returns `(node_id, task_id)` if a suitable node
-    /// was found, or `None` if no node can handle the request.
-    pub async fn submit_job(
-        &self,
-        job_id: TrainingJobId,
-        gpu_count: u32,
-        vram_mb: u64,
-    ) -> Option<(String, TaskId)> {
-        let req = ResourceReq { gpu_count, vram_mb };
-        self.fleet_queue
-            .write()
-            .await
-            .submit(Priority::Normal, job_id, Some(req))
-            .await
-            .map(|(node_id, task_id)| (node_id.to_string(), task_id))
     }
 
     /// Rebalance the fleet queue via work-stealing.

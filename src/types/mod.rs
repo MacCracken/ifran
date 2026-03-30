@@ -1,4 +1,3 @@
-pub mod ab_test;
 pub mod backend;
 pub mod dataset;
 
@@ -14,7 +13,6 @@ pub mod ifran_proto {
     tonic::include_proto!("ifran");
 }
 pub mod distributed;
-pub mod drift;
 pub mod error;
 pub mod eval;
 pub mod experiment;

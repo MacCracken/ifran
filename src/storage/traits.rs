@@ -7,6 +7,7 @@ use crate::types::PagedResult;
 use crate::types::TenantId;
 use crate::types::error::Result;
 use crate::types::eval::{EvalResult, EvalRunId};
+#[cfg(feature = "sqlite")]
 use crate::types::experiment::{
     Direction, ExperimentId, ExperimentProgram, ExperimentStatus, TrialId, TrialResult,
 };

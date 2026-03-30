@@ -58,12 +58,6 @@ fn default_include_sources() -> bool {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RagResult {
-    pub answer: String,
-    pub sources: Vec<RagSource>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RagSource {
     pub document_id: DocumentId,
     pub chunk_content: String,
@@ -163,34 +157,6 @@ mod tests {
         assert_eq!(back.pipeline_id, id);
         assert!(back.top_k.is_none());
         assert!(back.include_sources); // default
-    }
-
-    #[test]
-    fn rag_result_serde_roundtrip() {
-        let result = RagResult {
-            answer: "Rust is a systems programming language.".into(),
-            sources: vec![
-                RagSource {
-                    document_id: Uuid::new_v4(),
-                    chunk_content: "Rust is a systems language...".into(),
-                    score: 0.95,
-                },
-                RagSource {
-                    document_id: Uuid::new_v4(),
-                    chunk_content: "Rust focuses on safety...".into(),
-                    score: 0.87,
-                },
-            ],
-        };
-        let json = serde_json::to_string(&result).unwrap();
-        let back: RagResult = serde_json::from_str(&json).unwrap();
-        assert_eq!(result.answer, back.answer);
-        assert_eq!(result.sources.len(), back.sources.len());
-        assert_eq!(result.sources[0].score, back.sources[0].score);
-        assert_eq!(
-            result.sources[1].chunk_content,
-            back.sources[1].chunk_content
-        );
     }
 
     #[test]

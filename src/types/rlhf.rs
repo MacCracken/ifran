@@ -49,12 +49,6 @@ pub struct AnnotationStats {
     pub remaining: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AnnotationExport {
-    pub session_id: Uuid,
-    pub pairs: Vec<AnnotationPair>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,16 +174,5 @@ mod tests {
         assert_eq!(back.total_pairs, 100);
         assert_eq!(back.annotated_count, 42);
         assert_eq!(back.remaining, 58);
-    }
-
-    #[test]
-    fn annotation_export_serde_roundtrip() {
-        let export = AnnotationExport {
-            session_id: Uuid::new_v4(),
-            pairs: vec![],
-        };
-        let json = serde_json::to_string(&export).unwrap();
-        let back: AnnotationExport = serde_json::from_str(&json).unwrap();
-        assert!(back.pairs.is_empty());
     }
 }

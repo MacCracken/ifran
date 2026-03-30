@@ -26,16 +26,6 @@ pub struct ModelVersion {
     pub created_at: DateTime<Utc>,
 }
 
-/// Comparison between two model versions.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VersionComparison {
-    pub base_version: ModelVersionId,
-    pub compare_version: ModelVersionId,
-    /// Eval score delta (compare - base). Positive means improvement.
-    pub score_delta: Option<f64>,
-    pub metadata: serde_json::Value,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -57,18 +47,5 @@ mod tests {
         let back: ModelVersion = serde_json::from_str(&json).unwrap();
         assert_eq!(back.model_family, "llama-3.1-8b");
         assert_eq!(back.version_tag, "v2-lora");
-    }
-
-    #[test]
-    fn version_comparison_serde() {
-        let c = VersionComparison {
-            base_version: Uuid::new_v4(),
-            compare_version: Uuid::new_v4(),
-            score_delta: Some(0.05),
-            metadata: serde_json::json!({"benchmark": "mmlu"}),
-        };
-        let json = serde_json::to_string(&c).unwrap();
-        let back: VersionComparison = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.score_delta, Some(0.05));
     }
 }

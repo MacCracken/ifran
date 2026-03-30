@@ -7,6 +7,20 @@
 pub mod circuit_breaker;
 pub mod cost;
 pub mod health;
+#[cfg(any(
+    feature = "llamacpp",
+    feature = "vllm",
+    feature = "ollama",
+    feature = "tensorrt",
+    feature = "tpu",
+    feature = "metal",
+    feature = "vulkan",
+    feature = "gaudi",
+    feature = "inferentia",
+    feature = "oneapi",
+    feature = "qualcomm",
+    feature = "xdna",
+))]
 pub(crate) mod openai_compat;
 pub mod retry;
 pub mod router;

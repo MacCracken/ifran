@@ -153,31 +153,6 @@ fn bench_sanitize(c: &mut Criterion) {
     });
 }
 
-// -- Output validation --
-fn bench_output_validation(c: &mut Criterion) {
-    let valid_json = r#"{"name": "test", "score": 0.95, "labels": ["a", "b"]}"#;
-    let invalid_json = "This is not JSON at all, just plain text output from the model.";
-    let format = ifran::server::middleware::output_validation::OutputFormat::Json;
-
-    c.bench_function("output_validation_valid_json", |b| {
-        b.iter(|| {
-            ifran::server::middleware::output_validation::validate_output(
-                black_box(valid_json),
-                black_box(&format),
-            )
-        });
-    });
-
-    c.bench_function("output_validation_invalid_json", |b| {
-        b.iter(|| {
-            ifran::server::middleware::output_validation::validate_output(
-                black_box(invalid_json),
-                black_box(&format),
-            )
-        });
-    });
-}
-
 criterion_group!(
     benches,
     bench_prompt_guard,
@@ -187,6 +162,5 @@ criterion_group!(
     bench_audit_chain,
     bench_retry,
     bench_sanitize,
-    bench_output_validation,
 );
 criterion_main!(benches);

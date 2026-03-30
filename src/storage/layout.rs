@@ -16,7 +16,6 @@
 //!         └── metadata.json
 //! ```
 
-use crate::types::IfranError;
 use crate::types::error::Result;
 use std::path::{Path, PathBuf};
 
@@ -29,13 +28,6 @@ impl StorageLayout {
     /// Create a layout rooted at the given directory (e.g. `~/.ifran`).
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
-    }
-
-    /// Create a layout using the default `~/.ifran` path.
-    pub fn default_location() -> Result<Self> {
-        let home = std::env::var("HOME")
-            .map_err(|_| IfranError::StorageError("HOME environment variable not set".into()))?;
-        Ok(Self::new(PathBuf::from(home).join(".ifran")))
     }
 
     /// Root directory (e.g. `~/.ifran`).

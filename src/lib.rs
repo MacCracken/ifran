@@ -34,11 +34,9 @@ pub mod types;
 pub mod audit;
 
 // -- Core domain modules --
-pub mod ab_test;
 pub mod budget;
 pub mod config;
 pub mod dataset;
-pub mod drift;
 pub mod eval;
 pub mod experiment;
 pub mod fleet;
@@ -51,7 +49,6 @@ pub mod pull;
 pub mod rag;
 pub mod registry;
 pub mod rlhf;
-pub mod scoring;
 pub mod storage;
 pub mod tenant;
 pub mod training_events;

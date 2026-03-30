@@ -5,13 +5,8 @@
 //! checks memory budgets before loading and maintains a mapping of
 //! model IDs to backend handles.
 
-use crate::hardware::detect;
-use crate::lifecycle::memory;
-use crate::types::IfranError;
 use crate::types::TenantId;
-use crate::types::backend::{AcceleratorType, DeviceConfig};
-use crate::types::error::Result;
-use crate::types::model::{ModelId, ModelManifest};
+use crate::types::model::ModelId;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -30,7 +25,7 @@ pub struct LoadedModel {
 /// Manages model loading/unloading across backends.
 pub struct ModelManager {
     loaded: Arc<RwLock<HashMap<ModelId, LoadedModel>>>,
-    gpu_reserve_mb: u64,
+    _gpu_reserve_mb: u64,
 }
 
 impl ModelManager {
@@ -40,54 +35,8 @@ impl ModelManager {
     pub fn new(gpu_reserve_mb: u64) -> Self {
         Self {
             loaded: Arc::new(RwLock::new(HashMap::new())),
-            gpu_reserve_mb,
+            _gpu_reserve_mb: gpu_reserve_mb,
         }
-    }
-
-    /// Check memory budget and record a model as loaded.
-    ///
-    /// This performs the budget check but does NOT call backend.load_model() —
-    /// that's the caller's responsibility. This separation allows the manager
-    /// to be backend-agnostic.
-    pub async fn prepare_load(&self, manifest: &ModelManifest) -> Result<DeviceConfig> {
-        let hardware = detect::detect()?;
-
-        let total_layers = 32; // TODO: read from GGUF metadata
-        let estimate =
-            memory::estimate_gguf(manifest.info.size_bytes, manifest.gpu_layers, total_layers);
-
-        memory::check_budget(&hardware, &estimate, self.gpu_reserve_mb)?;
-
-        // Determine device config based on available hardware
-        let (accelerator, device_ids) = if hardware.has_gpu() {
-            let kind = hardware.best_accelerator().ok_or_else(|| {
-                IfranError::HardwareError(
-                    "GPU detected but no accelerator type could be determined".into(),
-                )
-            })?;
-            let acc = match kind {
-                detect::AcceleratorKind::Cuda => AcceleratorType::Cuda,
-                detect::AcceleratorKind::Rocm => AcceleratorType::Rocm,
-                detect::AcceleratorKind::Metal => AcceleratorType::Metal,
-                detect::AcceleratorKind::Vulkan => AcceleratorType::Vulkan,
-                detect::AcceleratorKind::Tpu => AcceleratorType::Tpu,
-                detect::AcceleratorKind::Gaudi => AcceleratorType::Gaudi,
-                detect::AcceleratorKind::Inferentia => AcceleratorType::Inferentia,
-                detect::AcceleratorKind::OneApi => AcceleratorType::OneApi,
-                detect::AcceleratorKind::QualcommAi => AcceleratorType::QualcommAi,
-                detect::AcceleratorKind::AmdXdna => AcceleratorType::AmdXdna,
-            };
-            let ids: Vec<u32> = hardware.gpus.iter().map(|g| g.index as u32).collect();
-            (acc, ids)
-        } else {
-            (AcceleratorType::Cpu, vec![])
-        };
-
-        Ok(DeviceConfig {
-            accelerator,
-            device_ids,
-            memory_limit_mb: Some(estimate.vram_mb + estimate.ram_mb),
-        })
     }
 
     /// Register a model as loaded.

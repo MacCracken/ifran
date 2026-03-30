@@ -23,16 +23,6 @@ pub enum RegistrySource {
     },
 }
 
-/// Status of an active download.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DownloadStatus {
-    pub source: RegistrySource,
-    pub total_bytes: Option<u64>,
-    pub downloaded_bytes: u64,
-    pub speed_bytes_per_sec: u64,
-    pub state: DownloadState,
-}
-
 /// Download state machine.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -42,7 +32,6 @@ pub enum DownloadState {
     Verifying,
     Complete,
     Failed,
-    Paused,
 }
 
 #[cfg(test)]
@@ -98,29 +87,11 @@ mod tests {
             DownloadState::Verifying,
             DownloadState::Complete,
             DownloadState::Failed,
-            DownloadState::Paused,
         ];
         for s in &states {
             let json = serde_json::to_string(s).unwrap();
             let back: DownloadState = serde_json::from_str(&json).unwrap();
             assert_eq!(*s, back);
         }
-    }
-
-    #[test]
-    fn download_status_serde() {
-        let status = DownloadStatus {
-            source: RegistrySource::HuggingFace {
-                repo_id: "test".into(),
-            },
-            total_bytes: Some(1_000_000),
-            downloaded_bytes: 500_000,
-            speed_bytes_per_sec: 10_000,
-            state: DownloadState::Downloading,
-        };
-        let json = serde_json::to_string(&status).unwrap();
-        let back: DownloadStatus = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.downloaded_bytes, 500_000);
-        assert_eq!(back.state, DownloadState::Downloading);
     }
 }

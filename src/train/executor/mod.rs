@@ -1,5 +1,4 @@
 pub mod docker;
-pub mod native;
 pub mod subprocess;
 
 use crate::types::error::Result;

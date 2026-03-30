@@ -3,8 +3,6 @@ pub mod cache;
 pub mod db;
 pub mod encryption;
 pub mod layout;
-#[cfg(feature = "postgres")]
-pub mod pg;
 pub mod traits;
 
 #[inline]

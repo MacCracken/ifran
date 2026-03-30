@@ -26,33 +26,11 @@ pub struct ServerConfig {
     pub ws_bind: Option<String>,
 }
 
-/// Storage backend selection.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum StorageBackendKind {
-    #[default]
-    Sqlite,
-    Postgres,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageConfig {
     pub models_dir: PathBuf,
     pub database: PathBuf,
     pub cache_dir: PathBuf,
-    /// Storage backend: "sqlite" (default) or "postgres".
-    #[serde(default)]
-    pub backend: StorageBackendKind,
-    /// PostgreSQL connection URL (required when backend = "postgres").
-    #[serde(default)]
-    pub postgres_url: Option<String>,
-    /// PostgreSQL connection pool size (default: 8).
-    #[serde(default = "default_pg_pool_size")]
-    pub postgres_pool_size: u32,
-}
-
-fn default_pg_pool_size() -> u32 {
-    8
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,27 +74,12 @@ fn default_telemetry_interval() -> u64 {
     10
 }
 
-/// Fleet coordination backend selection.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FleetBackendKind {
-    #[default]
-    Memory,
-    Redis,
-}
-
 /// Fleet management configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FleetConfig {
     /// Enable fleet management.
     #[serde(default)]
     pub enabled: bool,
-    /// Fleet coordination backend: "memory" (default) or "redis".
-    #[serde(default)]
-    pub backend: FleetBackendKind,
-    /// Redis connection URL (required when backend = "redis").
-    #[serde(default)]
-    pub redis_url: Option<String>,
     /// Seconds without heartbeat before a node becomes Suspect.
     #[serde(default = "default_suspect_timeout")]
     pub suspect_timeout_secs: u64,
@@ -142,8 +105,6 @@ impl Default for FleetConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            backend: FleetBackendKind::default(),
-            redis_url: None,
             suspect_timeout_secs: default_suspect_timeout(),
             offline_timeout_secs: default_offline_timeout(),
             health_check_interval_secs: default_health_check_interval(),
@@ -256,9 +217,6 @@ impl Default for IfranConfig {
                 models_dir: ifran_dir.join("models"),
                 database: ifran_dir.join("ifran.db"),
                 cache_dir: ifran_dir.join("cache"),
-                backend: StorageBackendKind::default(),
-                postgres_url: None,
-                postgres_pool_size: default_pg_pool_size(),
             },
             backends: BackendsConfig {
                 default: "llamacpp".into(),
@@ -290,18 +248,6 @@ impl Default for IfranConfig {
 impl IfranConfig {
     /// Validate configuration for logical consistency.
     pub fn validate(&self) -> crate::types::error::Result<()> {
-        if matches!(self.storage.backend, StorageBackendKind::Postgres)
-            && self.storage.postgres_url.is_none()
-        {
-            return Err(crate::types::IfranError::ConfigError(
-                "storage.postgres_url is required when backend = \"postgres\"".into(),
-            ));
-        }
-        if matches!(self.fleet.backend, FleetBackendKind::Redis) && self.fleet.redis_url.is_none() {
-            return Err(crate::types::IfranError::ConfigError(
-                "fleet.redis_url is required when fleet.backend = \"redis\"".into(),
-            ));
-        }
         if self.security.multi_tenant && !self.security.auth_required {
             // In multi-tenant mode, auth is always enforced via tenant keys,
             // but warn if auth_required is false (it's ignored in multi-tenant).
@@ -366,31 +312,6 @@ impl IfranConfig {
 
         // 4. Built-in defaults
         Self::default()
-    }
-
-    /// Returns the config file path that would be used by `discover()`,
-    /// or `None` if falling back to defaults.
-    pub fn discover_path() -> Option<PathBuf> {
-        if let Ok(path) = std::env::var("IFRAN_CONFIG") {
-            let p = PathBuf::from(&path);
-            if p.exists() {
-                return Some(p);
-            }
-        }
-
-        if let Ok(home) = std::env::var("HOME") {
-            let user_config = PathBuf::from(home).join(".ifran/ifran.toml");
-            if user_config.exists() {
-                return Some(user_config);
-            }
-        }
-
-        let system_config = PathBuf::from("/etc/ifran/ifran.toml");
-        if system_config.exists() {
-            return Some(system_config);
-        }
-
-        None
     }
 }
 
@@ -775,162 +696,5 @@ gpu_memory_reserve_mb = 512
         assert!(!cfg.fleet.enabled);
         assert_eq!(cfg.fleet.suspect_timeout_secs, 30);
         assert_eq!(cfg.hardware.telemetry_interval_secs, 10);
-    }
-
-    #[test]
-    fn storage_backend_kind_serde() {
-        let sqlite: StorageBackendKind = serde_json::from_str(r#""sqlite""#).unwrap();
-        assert!(matches!(sqlite, StorageBackendKind::Sqlite));
-        let postgres: StorageBackendKind = serde_json::from_str(r#""postgres""#).unwrap();
-        assert!(matches!(postgres, StorageBackendKind::Postgres));
-        // Default
-        assert!(matches!(
-            StorageBackendKind::default(),
-            StorageBackendKind::Sqlite
-        ));
-    }
-
-    #[test]
-    fn fleet_backend_kind_serde() {
-        let memory: FleetBackendKind = serde_json::from_str(r#""memory""#).unwrap();
-        assert!(matches!(memory, FleetBackendKind::Memory));
-        let redis: FleetBackendKind = serde_json::from_str(r#""redis""#).unwrap();
-        assert!(matches!(redis, FleetBackendKind::Redis));
-        assert!(matches!(
-            FleetBackendKind::default(),
-            FleetBackendKind::Memory
-        ));
-    }
-
-    #[test]
-    fn validate_postgres_without_url_rejected() {
-        let mut cfg = IfranConfig::default();
-        cfg.storage.backend = StorageBackendKind::Postgres;
-        cfg.storage.postgres_url = None;
-        assert!(cfg.validate().is_err());
-    }
-
-    #[test]
-    fn validate_postgres_with_url_ok() {
-        let mut cfg = IfranConfig::default();
-        cfg.storage.backend = StorageBackendKind::Postgres;
-        cfg.storage.postgres_url = Some("postgres://localhost/ifran".into());
-        assert!(cfg.validate().is_ok());
-    }
-
-    #[test]
-    fn validate_redis_fleet_without_url_rejected() {
-        let mut cfg = IfranConfig::default();
-        cfg.fleet.backend = FleetBackendKind::Redis;
-        cfg.fleet.redis_url = None;
-        assert!(cfg.validate().is_err());
-    }
-
-    #[test]
-    fn validate_redis_fleet_with_url_ok() {
-        let mut cfg = IfranConfig::default();
-        cfg.fleet.backend = FleetBackendKind::Redis;
-        cfg.fleet.redis_url = Some("redis://127.0.0.1".into());
-        assert!(cfg.validate().is_ok());
-    }
-
-    #[test]
-    fn default_storage_config_fields() {
-        let cfg = IfranConfig::default();
-        assert!(matches!(cfg.storage.backend, StorageBackendKind::Sqlite));
-        assert!(cfg.storage.postgres_url.is_none());
-        assert_eq!(cfg.storage.postgres_pool_size, 8);
-    }
-
-    #[test]
-    fn default_fleet_config_fields() {
-        let cfg = IfranConfig::default();
-        assert!(matches!(cfg.fleet.backend, FleetBackendKind::Memory));
-        assert!(cfg.fleet.redis_url.is_none());
-    }
-
-    #[test]
-    fn config_with_storage_backend_section() {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let toml_content = r#"
-[server]
-bind = "127.0.0.1:9000"
-grpc_bind = "127.0.0.1:9001"
-
-[storage]
-models_dir = "/tmp/models"
-database = "/tmp/test.db"
-cache_dir = "/tmp/cache"
-backend = "postgres"
-postgres_url = "postgres://user:pass@host/db"
-postgres_pool_size = 16
-
-[backends]
-default = "llamacpp"
-enabled = ["llamacpp"]
-
-[training]
-executor = "subprocess"
-max_concurrent_jobs = 2
-checkpoints_dir = "/tmp/checkpoints"
-
-[bridge]
-enabled = false
-heartbeat_interval_secs = 10
-
-[hardware]
-gpu_memory_reserve_mb = 512
-"#;
-        std::fs::write(tmp.path(), toml_content).unwrap();
-        let cfg = IfranConfig::load(tmp.path()).unwrap();
-        assert!(matches!(cfg.storage.backend, StorageBackendKind::Postgres));
-        assert_eq!(
-            cfg.storage.postgres_url.as_deref(),
-            Some("postgres://user:pass@host/db")
-        );
-        assert_eq!(cfg.storage.postgres_pool_size, 16);
-    }
-
-    #[test]
-    fn config_with_redis_fleet_section() {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let toml_content = r#"
-[server]
-bind = "127.0.0.1:9000"
-grpc_bind = "127.0.0.1:9001"
-
-[storage]
-models_dir = "/tmp/models"
-database = "/tmp/test.db"
-cache_dir = "/tmp/cache"
-
-[backends]
-default = "llamacpp"
-enabled = ["llamacpp"]
-
-[training]
-executor = "subprocess"
-max_concurrent_jobs = 2
-checkpoints_dir = "/tmp/checkpoints"
-
-[bridge]
-enabled = false
-heartbeat_interval_secs = 10
-
-[hardware]
-gpu_memory_reserve_mb = 512
-
-[fleet]
-enabled = true
-backend = "redis"
-redis_url = "redis://10.0.0.1:6379"
-"#;
-        std::fs::write(tmp.path(), toml_content).unwrap();
-        let cfg = IfranConfig::load(tmp.path()).unwrap();
-        assert!(matches!(cfg.fleet.backend, FleetBackendKind::Redis));
-        assert_eq!(
-            cfg.fleet.redis_url.as_deref(),
-            Some("redis://10.0.0.1:6379")
-        );
     }
 }
