@@ -48,7 +48,7 @@ hwaccel = ["dep:ai-hwaccel"]
 # PostgreSQL storage backend
 postgres = ["dep:tokio-postgres", "dep:deadpool-postgres"]
 # Redis fleet coordination (uses majra's Redis-backed primitives)
-redis = ["dep:redis"]
+redis = ["dep:redis", "majra/redis-backend"]
 # OpenTelemetry
 otlp = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:tracing-opentelemetry"]
 

@@ -9,6 +9,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - **Eliminated transitive `rusqlite` from majra** — replaced `majra` `features = ["full"]` with only the 9 features actually used (`barrier`, `dag`, `fleet`, `heartbeat`, `logging`, `pubsub`, `queue`, `ratelimit`, `ws`), dropping unused `sqlite`, `postgres`, `quic`, `ipc`, `ipc-encrypted`, `prometheus`, `relay` features and their transitive dependencies
+- **`redis` feature now activates `majra/redis-backend`** — `fleet::redis_coordinator` requires `majra::redis_backend` which was previously only available via `full`; now correctly gated through ifran's `redis` feature flag
 
 ### Dependencies
 - `majra` 1.0.3 (from 1.0.2 — fixes `ws` feature missing `futures-util` gate)
