@@ -170,9 +170,9 @@ jobs:
 
       - name: Run cargo outdated
         run: |
-          # sha2 0.10 is intentionally held — hmac 0.13 (needed for sha2 0.11) is pre-release.
-          # Exclude it from the check; fail on any other outdated root dep.
-          cargo outdated --root-deps-only --exit-code 1 --exclude sha2
+          # sha2 0.10 and hmac 0.12 are intentionally held — hmac 0.13 (needed for sha2 0.11) is pre-release.
+          # Exclude both from the check; fail on any other outdated root dep.
+          cargo outdated --root-deps-only --exit-code 1 --exclude sha2 --exclude hmac
 
   test:
     name: Tests
