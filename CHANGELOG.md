@@ -5,31 +5,50 @@ All notable changes to Ifran will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
-## [1.1.1]
+## [Unreleased]
+
+## [1.2.0] - 2026-03-30
+
+### Removed
+- **5,700+ lines of dead code** — P(-1) scaffold hardening audit identified and removed 28 source files and numerous dead types/functions that were scaffolded but never wired into any caller
+- **Dead modules**: `ab_test/router`, `drift/detector`, `scoring/quality`, `train/workflow/pipeline`, `train/integration/ollama`, `train/continual/config`, `train/executor/native`, `train/checkpoint/merger`, `eval/judge`, `eval/responsible_ai`, `lifecycle/pool`, `rag/optimizer`, `registry/{scanner,oci,direct}`, `server/middleware/output_validation`, `fleet/redis_coordinator`, `storage/pg`
+- **Dead types**: `RefreshJob`, `RefreshStatus`, `VersionComparison`, `AbTestResult`, `AbTestStatus`, `DownloadStatus`, `AnnotationExport`, `RagResult`, `DriftResult`, `DriftSeverity`, `BaselineSnapshot` (types modules `types/ab_test`, `types/drift` removed entirely)
+- **Dead enum variants**: `DownloadState::Paused`
+- **Dead functions**: `JobManager::set_budget_checker`, `JobManager::recover`, `FleetManager::evict_offline`, `FleetManager::submit_job`, `detect_registry`, `ModelManager::prepare_load`, `StorageLayout::default_location`, `IfranConfig::discover_path`
+- **Dead config**: `StorageBackendKind` enum, `FleetBackendKind` enum, `StorageConfig::{backend,postgres_url,postgres_pool_size}`, `FleetConfig::{backend,redis_url}`, and all associated validation/tests
+- **`postgres` feature** and deps (`tokio-postgres`, `deadpool-postgres`) — `PgPool` was never used outside its own file
+- **`redis` feature** and dep (`redis`) — `RedisCoordinator` was never used outside its own file
+
+### Fixed
+- **Feature-gated `openai_compat` module** — `backends::openai_compat` now conditionally compiled only when a backend feature is active, eliminating dead-code warnings when building without backends
+- **Feature-gated experiment type imports** — `storage::traits` experiment type imports now gated behind `sqlite` feature, eliminating unused-import warnings in bare library builds
+
+### Performance
+- **43 fewer transitive dependencies** (451 → 408 crate deps) from removing unused `postgres`, `redis`, and their dependency trees
+
+## [1.1.1] - 2026-03-30
 
 ### Fixed
 - **Eliminated transitive `rusqlite` from majra** — replaced `majra` `features = ["full"]` with only the 9 features actually used (`barrier`, `dag`, `fleet`, `heartbeat`, `logging`, `pubsub`, `queue`, `ratelimit`, `ws`), dropping unused `sqlite`, `postgres`, `quic`, `ipc`, `ipc-encrypted`, `prometheus`, `relay` features and their transitive dependencies
-- **`redis` feature now activates `majra/redis-backend`** — `fleet::redis_coordinator` requires `majra::redis_backend` which was previously only available via `full`; now correctly gated through ifran's `redis` feature flag
+- **`redis` feature now activates `majra/redis-backend`** — `fleet::redis_coordinator` requires `majra::redis_backend` which was previously only available via `full`; now correctly gated through ifran's `redis` feature flag _(feature removed in 1.2.0)_
 
 ### Dependencies
 - `majra` 1.0.3 (from 1.0.2 — fixes `ws` feature missing `futures-util` gate)
 
----
-
-## [1.1.0]
+## [1.1.0] - 2026-03-28
 
 ### Added
 
 #### Storage Abstraction
 - **Database-agnostic store traits** — added `JobStore`, `EvalStore`, `PreferenceStore` traits to `storage/traits.rs`, completing all 11 store trait abstractions
 - **Trait implementations** for all 3 new traits on their concrete SQLite stores
-- **PostgreSQL backend** (`postgres` feature) — `PgPool` struct implementing `ModelStore`, `TenantStore`, `JobStore`, `EvalStore`, `PreferenceStore`, `MarketplaceStore` via `tokio-postgres`/`deadpool-postgres`. SQL migrations in `storage/pg_migrations.sql`
-- **Config-driven backend selection** — `storage.backend = "sqlite" | "postgres"` with `storage.postgres_url` and `storage.postgres_pool_size` config fields
+- **PostgreSQL backend** (`postgres` feature) — `PgPool` struct implementing `ModelStore`, `TenantStore`, `JobStore`, `EvalStore`, `PreferenceStore`, `MarketplaceStore` via `tokio-postgres`/`deadpool-postgres`. SQL migrations in `storage/pg_migrations.sql` _(removed in 1.2.0 — never wired into server startup)_
+- **Config-driven backend selection** — `storage.backend = "sqlite" | "postgres"` with `storage.postgres_url` and `storage.postgres_pool_size` config fields _(removed in 1.2.0)_
 
 #### Redis Fleet Coordination
-- **Redis feature flag** (`redis` feature) — gates `fleet::redis_coordinator` module using majra's Redis-backed primitives
-- **`RedisCoordinator`** wrapping `RedisHeartbeatTracker`, `RedisPubSub`, `RedisRateLimiter` for cross-instance fleet coordination
-- **Config-driven fleet backend** — `fleet.backend = "memory" | "redis"` with `fleet.redis_url` config field
+- **Redis feature flag** (`redis` feature) — gates `fleet::redis_coordinator` module using majra's Redis-backed primitives _(removed in 1.2.0 — never wired into fleet manager)_
+- **`RedisCoordinator`** wrapping `RedisHeartbeatTracker`, `RedisPubSub`, `RedisRateLimiter` for cross-instance fleet coordination _(removed in 1.2.0)_
+- **Config-driven fleet backend** — `fleet.backend = "memory" | "redis"` with `fleet.redis_url` config field _(removed in 1.2.0)_
 
 #### Human Approval Gates
 - **`PendingApproval` training status** — new variant in `TrainingStatus` enum for high-risk jobs
@@ -49,13 +68,11 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Dependencies
 - `majra` 1.0.2 (upgraded from 1.0.1 — redis 0.27 → 1.x)
-- `tokio-postgres` 0.7 (optional, `postgres` feature)
-- `deadpool-postgres` 0.14 (optional, `postgres` feature)
-- `redis` 1.x (optional, `redis` feature)
+- `tokio-postgres` 0.7 (optional, `postgres` feature) _(removed in 1.2.0)_
+- `deadpool-postgres` 0.14 (optional, `postgres` feature) _(removed in 1.2.0)_
+- `redis` 1.x (optional, `redis` feature) _(removed in 1.2.0)_
 
----
-
-## [1.0.0]
+## [1.0.0] - 2026-03-28
 
 ### Changed
 
@@ -112,7 +129,11 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Tests: UTF-8 truncate, zero-capacity buffer, NaN/Infinity hyperparams, zero gradient accumulation, negative weight decay (1,444 total, up from 1,430)
 - `benchmarks.md`: 3-point trend tracking with P(-1) audit results
 
-## [2026.3.26]
+---
+
+_Entries below predate semver adoption and were never tagged as releases._
+
+## [2026.3.26] (pre-release)
 
 ### Changed
 
@@ -132,7 +153,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Fixed
 - Non-exhaustive match on `majra::heartbeat::Status` in fleet manager
 
-## [2026.3.19]
+## [2026.3.19] (pre-release)
 
 ### Changed
 
@@ -217,9 +238,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Built-in per-backend detection functions compiled out via `cfg(not(feature = "ai-hwaccel"))` when the external crate handles detection — zero dead code warnings in either configuration
 - Conversion layer maps `ai_hwaccel::AcceleratorType` → ifran `AcceleratorKind` and `AcceleratorProfile` → `GpuDevice`/`SystemHardware` so all downstream code (allocator, telemetry, budget checks, backend routing) works unchanged
 
----
 
-## [2026.3.18-2]
+## [2026.3.18-2] (pre-release)
 
 ### Added
 
@@ -255,7 +275,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Removed `// TODO: tenant-scope` comments from distributed and eval handlers
 - 1,290 tests across all crates (up from 1,238)
 
-## [2026.3.18-1]
+## [2026.3.18-1] (pre-release)
 
 ### Added
 
@@ -305,7 +325,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Removed AGNOS-specific assumptions from encrypted storage detection
 - 1,238 tests across all crates (up from 1,043)
 
-## [2026.3.15]
+## [2026.3.15] (pre-release)
 
 ### Added
 
@@ -404,7 +424,6 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Workspace version bumped to 2026.3.15
 - Auth middleware changed from `from_fn` to `from_fn_with_state` to access `AppState`
 
----
 
 ## [2026.3.14]
 
@@ -446,7 +465,6 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Changed
 - Workspace version bumped to 2026.3.14
 
----
 
 ## [2026.3.13] — (in progress)
 
@@ -475,7 +493,6 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - `ifran-desktop/commands/rlhf`: Tauri commands — `list_sessions`, `create_session`, `get_next_pair`, `submit_annotation`, `get_session_stats`, `export_session`
 - `ifran-desktop/routes/rlhf`: Annotation UI — session management, side-by-side response comparison, preference buttons, progress bar, JSON export
 
----
 
 ## [2026.3.11] — (in progress)
 
@@ -496,7 +513,6 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - TOML experiment program format for declarative hyperparameter sweep specification
 - 31 new tests across experiment types, store, search space, and API (543 total)
 
----
 
 ## [2026.3.10]
 
@@ -730,3 +746,9 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - `ifran-train/checkpoint/store`: `prune()` now handles already-deleted checkpoints gracefully (ENOENT-tolerant) instead of propagating errors
 - `ifran-train/dataset/validator`: CSV validation now handles RFC 4180 quoted fields — commas inside `"quoted,field"` no longer cause false column-count mismatches
 - 512 tests across all modules
+
+[Unreleased]: https://github.com/MacCracken/ifran/compare/1.2.0...HEAD
+[1.2.0]: https://github.com/MacCracken/ifran/compare/1.1.1...1.2.0
+[1.1.1]: https://github.com/MacCracken/ifran/compare/1.1.0...1.1.1
+[1.1.0]: https://github.com/MacCracken/ifran/compare/1.0.0...1.1.0
+[1.0.0]: https://github.com/MacCracken/ifran/releases/tag/1.0.0
