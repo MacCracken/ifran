@@ -1,4 +1,5 @@
 pub mod cache;
+#[cfg(feature = "sqlite")]
 pub mod db;
 pub mod encryption;
 pub mod layout;

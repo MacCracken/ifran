@@ -20,9 +20,10 @@ required-features = ["server"]
 [[bin]]
 name = "ifran"
 path = "src/cli_main.rs"
+required-features = ["sqlite"]
 
 [features]
-default = ["server", "llamacpp", "candle-backend", "gguf", "ollama", "vllm", "onnx", "tensorrt", "tpu", "gaudi", "inferentia", "oneapi", "qualcomm", "xdna"]
+default = ["server", "sqlite", "llamacpp", "candle-backend", "gguf", "ollama", "vllm", "onnx", "tensorrt", "tpu", "gaudi", "inferentia", "oneapi", "qualcomm", "xdna"]
 full = ["default", "metal", "vulkan", "wasm", "hwaccel", "otlp"]
 # Server feature — API server, gRPC bridge, fleet metrics, hoosh integration
 server = ["dep:hoosh", "dep:axum", "dep:tower", "dep:tower-http", "dep:tonic", "dep:tonic-prost", "dep:prost", "dep:prometheus", "dep:async-stream"]
@@ -45,6 +46,8 @@ qualcomm = []
 xdna = []
 # Hardware acceleration detection
 hwaccel = ["dep:ai-hwaccel"]
+# SQLite storage backend (default — embedded, zero-config)
+sqlite = ["dep:rusqlite", "dep:r2d2", "dep:r2d2_sqlite"]
 # PostgreSQL storage backend
 postgres = ["dep:tokio-postgres", "dep:deadpool-postgres"]
 # Redis fleet coordination (uses majra's Redis-backed primitives)
@@ -88,10 +91,10 @@ tonic = { version = "0.14", optional = true }
 tonic-prost = { version = "0.14", optional = true }
 prost = { version = "0.14", optional = true }
 
-# Database
-rusqlite = { version = "0.39", features = ["bundled"] }
-r2d2 = "0.8"
-r2d2_sqlite = "0.33"
+# Database — SQLite (optional, gated by `sqlite` feature)
+rusqlite = { version = "0.39", features = ["bundled"], optional = true }
+r2d2 = { version = "0.8", optional = true }
+r2d2_sqlite = { version = "0.33", optional = true }
 tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-chrono-0_4", "with-serde_json-1"], optional = true }
 deadpool-postgres = { version = "0.14", optional = true }
 

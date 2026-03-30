@@ -71,7 +71,8 @@ pub mod bridge;
 #[cfg(feature = "server")]
 pub mod server;
 
-// -- CLI --
+// -- CLI (requires sqlite for ModelDatabase) --
+#[cfg(feature = "sqlite")]
 pub mod cli;
 
 // Re-export core types at crate root for convenience

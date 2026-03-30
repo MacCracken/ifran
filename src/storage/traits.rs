@@ -19,8 +19,11 @@ use crate::types::training::{TrainingJobId, TrainingStatus};
 use crate::types::versioning::{ModelVersion, ModelVersionId};
 use uuid::Uuid;
 
+#[cfg(feature = "sqlite")]
 use crate::experiment::store::{ExperimentRecord, ExperimentSummary};
+#[cfg(feature = "sqlite")]
 use crate::preference::store::PreferencePair;
+#[cfg(feature = "sqlite")]
 use crate::tenant::store::TenantRecord;
 use crate::train::job::status::JobState;
 
@@ -58,6 +61,7 @@ pub trait MarketplaceStore: Send + Sync {
 }
 
 /// Experiment and trial store.
+#[cfg(feature = "sqlite")]
 pub trait ExperimentStore: Send + Sync {
     fn insert_experiment(
         &self,
@@ -153,6 +157,7 @@ pub trait AnnotationStore: Send + Sync {
 }
 
 /// Multi-tenant store.
+#[cfg(feature = "sqlite")]
 pub trait TenantStore: Send + Sync {
     fn create_tenant(&self, name: &str) -> Result<(TenantRecord, String)>;
     fn resolve_by_key(&self, raw_key: &str) -> Result<TenantRecord>;
@@ -229,6 +234,7 @@ pub trait EvalStore: Send + Sync {
 }
 
 /// Preference pair store for DPO/RLHF training data.
+#[cfg(feature = "sqlite")]
 pub trait PreferenceStore: Send + Sync {
     fn add(&self, pair: &PreferencePair, tenant_id: &TenantId) -> Result<()>;
     fn list(&self, tenant_id: &TenantId, limit: u32) -> Result<Vec<PreferencePair>>;
