@@ -5,6 +5,16 @@ All notable changes to Ifran will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.1]
+
+### Fixed
+- **Eliminated transitive `rusqlite` from majra** — replaced `majra` `features = ["full"]` with only the 9 features actually used (`barrier`, `dag`, `fleet`, `heartbeat`, `logging`, `pubsub`, `queue`, `ratelimit`, `ws`), dropping unused `sqlite`, `postgres`, `quic`, `ipc`, `ipc-encrypted`, `prometheus`, `relay` features and their transitive dependencies
+
+### Dependencies
+- `majra` 1.0.3 (from 1.0.2 — fixes `ws` feature missing `futures-util` gate)
+
+---
+
 ## [1.1.0]
 
 ### Added
