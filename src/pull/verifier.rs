@@ -25,8 +25,15 @@ pub fn hash_file(path: &Path, algorithm: HashAlgorithm) -> Result<String> {
     match algorithm {
         HashAlgorithm::Sha256 => {
             let mut hasher = Sha256::new();
-            std::io::copy(&mut reader, &mut hasher)?;
-            Ok(format!("{:x}", hasher.finalize()))
+            let mut buf = [0u8; 8192];
+            loop {
+                let n = std::io::Read::read(&mut reader, &mut buf)?;
+                if n == 0 {
+                    break;
+                }
+                Digest::update(&mut hasher, &buf[..n]);
+            }
+            Ok(hex::encode(hasher.finalize()))
         }
         HashAlgorithm::Blake3 => {
             let mut hasher = blake3::Hasher::new();
