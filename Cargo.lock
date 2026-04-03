@@ -984,6 +984,8 @@ dependencies = [
 [[package]]
 name = "hoosh"
 version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36da1c5d3dcf9360d7a988e06fb1f8b2597731436ec576585a7e03ab5fa6ef25"
 dependencies = [
  "anyhow",
  "arc-swap",
