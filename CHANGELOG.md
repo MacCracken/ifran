@@ -7,6 +7,41 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-04-03
+
+### Changed
+- **Rustls crypto provider** — switched from `reqwest/rustls` to `reqwest/rustls-no-provider` with explicit `rustls` + `ring` crypto provider installation; all backends, discovery, downloader, encryption, marketplace, and test helpers call `ensure_crypto_provider()` for deterministic TLS init
+- **CircuitBreaker unified locking** — consolidated three separate locks (`AtomicU32` + two `Mutex`es) into a single `Mutex<CircuitBreakerInner>`, eliminating potential inconsistent state from interleaved lock acquisition; `failure_count()` is now `async`
+- **BackendRouter reduced lock contention** — `select()` and `select_with_privacy()` now acquire the `RwLock` once instead of re-acquiring per lookup
+- **Auth middleware API key caching** — `configured_api_key()` now reads `IFRAN_API_KEY` env var once via `OnceLock` instead of on every request
+- **Eval sample loading** — `load_samples()` uses buffered line-by-line `BufReader` instead of reading entire file into memory
+- **Prompt sanitization** — `sanitize_prompt()` uses pre-allocated `String::with_capacity` + `push_str` instead of `format!`
+- **Output filter** — `redact_fixed()` accepts a pre-computed lowercase haystack to avoid re-lowercasing on every pattern; `find_generic_api_key()` uses `is_none_or` for cleaner option comparison
+- **Fleet stats** — GPU count and memory aggregation uses `saturating_add` to prevent overflow
+- **Release profile** — `lto = true` (full LTO), `codegen-units = 1`, `panic = "abort"` for smaller/faster release binaries
+
+### Fixed
+- **RAG chunker UTF-8 safety** — `chunk_text()` now clamps all slice points to valid UTF-8 character boundaries via `floor_char_boundary` / `ceil_char_boundary` helpers, preventing panics on multi-byte text (CJK, emoji, accented characters)
+- **Docker executor path traversal hardening** — dataset path validation now uses `std::path::Component::ParentDir` matching instead of string `contains("..")`, and also rejects paths containing `:` to prevent Docker volume mount injection
+- **Subprocess executor path validation** — added the same absolute-path + no-`..` validation that Docker executor has
+- **Docker executor stderr truncation** — container failure messages are truncated to 500 bytes to avoid leaking secrets from container output
+- **ModelCache oversized item rejection** — `insert()` now rejects items larger than `max_bytes` instead of evicting the entire cache to make room for an impossible fit
+- **Config validation** — added checks for `max_concurrent_jobs >= 1` and `suspect_timeout_secs < offline_timeout_secs`
+- **Config discovery logging** — parse failures during config discovery now emit `tracing::warn` instead of being silently ignored
+- **CORS permissive warning** — `build_cors_layer()` logs a warning when all origins are allowed
+- **SHA-256 hashing** — `hash_file()` uses explicit 8 KiB buffered reads with `Digest::update` instead of `std::io::copy`, and uses `hex::encode` instead of `format!("{:x}", ...)`
+- **Feature-gated CLI commands** — `run` and `serve` subcommands now require `server` feature at compile time
+- **Benchmark harness** — `core_benchmarks` now requires `sqlite` feature via `required-features`
+
+### Dependencies
+- `sha2` 0.10 → 0.11
+- `hmac` 0.12 → 0.13 (added explicit `KeyInit` import)
+- `ai-hwaccel` 1.0.0 → 1.1.1 (`.available()` now returns an iterator instead of a slice)
+- `hoosh` 1.0.0 → 1.2.0
+- `majra` 1.0.3 → 1.0.4
+- Added `rustls` 0.23 (explicit ring crypto provider)
+- `deny.toml`: removed stale `RUSTSEC-2025-0119` advisory ignore, added `GPL-3.0-only` to allowed licenses
+
 ## [1.2.0] - 2026-03-30
 
 ### Removed
