@@ -38,9 +38,14 @@ impl TrainingExecutor for DockerExecutor {
 
         // Validate dataset path does not escape allowed directories
         let dataset_path = std::path::Path::new(&config.dataset.path);
-        if config.dataset.path.contains("..") || !dataset_path.is_absolute() {
+        if !dataset_path.is_absolute()
+            || dataset_path
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+            || config.dataset.path.contains(':')
+        {
             return Err(IfranError::TrainingError(
-                "dataset path must be an absolute path without '..' components".into(),
+                "dataset path must be an absolute path without '..' or ':' characters".into(),
             ));
         }
 
@@ -114,8 +119,16 @@ impl TrainingExecutor for DockerExecutor {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            // Truncate stderr to avoid leaking secrets from container output
+            let truncated: &str = if stderr.len() > 500 {
+                &stderr[..500]
+            } else {
+                &stderr
+            };
+            tracing::error!(job_id = %job_id, "Training container failed (full stderr logged)");
+            tracing::debug!(job_id = %job_id, stderr = %stderr, "Full container stderr");
             return Err(IfranError::TrainingError(format!(
-                "Training container failed: {stderr}"
+                "Training container failed: {truncated}"
             )));
         }
 
@@ -223,7 +236,6 @@ mod tests {
 
     #[test]
     fn dataset_path_validation_rejects_relative() {
-        // The run() method rejects relative paths — validate the logic inline
         let path = "data/train.jsonl";
         let p = std::path::Path::new(path);
         assert!(!p.is_absolute(), "relative path should not be absolute");
@@ -232,7 +244,11 @@ mod tests {
     #[test]
     fn dataset_path_validation_rejects_dotdot() {
         let path = "/data/../etc/passwd";
-        assert!(path.contains(".."), "path with .. should be detected");
+        let p = std::path::Path::new(path);
+        let has_parent = p
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir));
+        assert!(has_parent, "path with .. components should be detected");
     }
 
     #[test]
@@ -240,7 +256,17 @@ mod tests {
         let path = "/workspace/datasets/train.jsonl";
         let p = std::path::Path::new(path);
         assert!(p.is_absolute());
-        assert!(!path.contains(".."));
+        let has_parent = p
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir));
+        assert!(!has_parent);
+    }
+
+    #[test]
+    fn dataset_path_validation_rejects_colon() {
+        // Colons in Docker volume mounts can override the container destination
+        let path = "/data/train.jsonl:/evil";
+        assert!(path.contains(':'), "path with : should be detected");
     }
 
     #[test]

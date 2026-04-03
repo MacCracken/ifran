@@ -1,3 +1,4 @@
+#![cfg(all(feature = "server", feature = "sqlite"))]
 //! Integration tests for the Ifran REST API.
 //!
 //! These tests spin up the full Axum router with a temp SQLite database and

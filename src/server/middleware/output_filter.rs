@@ -49,8 +49,10 @@ pub fn filter_output(text: &str) -> FilterResult {
     let mut buf = text.to_string();
 
     // 1. Fixed-string patterns (system prompt leaks)
+    // Pre-compute lowercase once for all fixed-pattern scans
+    let lower = buf.to_ascii_lowercase();
     for &phrase in SYSTEM_PROMPT_PHRASES {
-        redact_fixed(&mut buf, phrase, "SYSTEM_PROMPT", &mut redactions);
+        redact_fixed(&mut buf, &lower, phrase, "SYSTEM_PROMPT", &mut redactions);
     }
 
     // 2. Structured patterns — order matters: longer / more specific first.
@@ -74,13 +76,16 @@ pub fn filter_output(text: &str) -> FilterResult {
 // ---------------------------------------------------------------------------
 
 /// Replace all case-insensitive occurrences of `needle` in `haystack`.
+///
+/// `lower` is the pre-computed lowercase version of `haystack` (avoids
+/// re-lowercasing on every call).
 fn redact_fixed(
     haystack: &mut String,
+    lower: &str,
     needle: &str,
     category: &'static str,
     redactions: &mut Vec<Redaction>,
 ) {
-    let lower = haystack.to_ascii_lowercase();
     let needle_lower = needle.to_ascii_lowercase();
     let mut replacement = String::new();
     let _ = write!(replacement, "[REDACTED_{category}]");
@@ -258,7 +263,7 @@ fn find_generic_api_key(text: &str) -> Option<(usize, usize)> {
             if value_len >= 20 {
                 let end = after_label + ws1 + 1 + ws2 + quote_skip + value_len;
                 let candidate = (abs, end);
-                if best.is_none() || candidate.0 < best.unwrap().0 {
+                if best.is_none_or(|b| candidate.0 < b.0) {
                     best = Some(candidate);
                 }
             }

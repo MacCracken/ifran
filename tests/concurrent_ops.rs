@@ -1,3 +1,4 @@
+#![cfg(feature = "server")]
 //! Concurrent operation tests — verify correctness under parallel access.
 
 use ifran::audit;

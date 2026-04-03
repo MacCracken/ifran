@@ -1,4 +1,7 @@
 /// Split text into chunks with overlap. Tries to break at whitespace boundaries.
+///
+/// All slice points are guaranteed to land on valid UTF-8 character boundaries,
+/// so this is safe for multi-byte text (CJK, emoji, accented characters, etc.).
 pub fn chunk_text(text: &str, chunk_size: usize, overlap: usize) -> Vec<String> {
     // Handle edge cases
     if text.is_empty() || chunk_size == 0 {
@@ -15,20 +18,27 @@ pub fn chunk_text(text: &str, chunk_size: usize, overlap: usize) -> Vec<String> 
     };
     let mut chunks = Vec::with_capacity((text.len() / step) + 1);
     let mut start = 0;
-    let bytes = text.as_bytes();
 
     while start < text.len() {
-        let end = (start + chunk_size).min(text.len());
+        let raw_end = (start + chunk_size).min(text.len());
+        // Clamp to a valid char boundary (walk backward)
+        let end = floor_char_boundary(text, raw_end);
 
         // If we're not at the end, try to break at a whitespace boundary
         let actual_end = if end < text.len() {
-            // Look backward for whitespace
+            // Look backward for whitespace on char boundaries
             let mut break_point = end;
-            while break_point > start && !bytes[break_point].is_ascii_whitespace() {
-                break_point -= 1;
+            while break_point > start {
+                if text.as_bytes()[break_point].is_ascii_whitespace()
+                    || text.is_char_boundary(break_point)
+                        && text[break_point..].starts_with(|c: char| c.is_whitespace())
+                {
+                    break;
+                }
+                break_point = floor_char_boundary(text, break_point.saturating_sub(1));
             }
             if break_point == start {
-                end // No whitespace found, hard break
+                end // No whitespace found, hard break at char boundary
             } else {
                 break_point
             }
@@ -45,6 +55,8 @@ pub fn chunk_text(text: &str, chunk_size: usize, overlap: usize) -> Vec<String> 
             1
         };
         let new_start = start + advance;
+        // Clamp new_start to a valid char boundary (walk forward)
+        let new_start = ceil_char_boundary(text, new_start);
         if new_start <= start {
             break;
         }
@@ -52,6 +64,28 @@ pub fn chunk_text(text: &str, chunk_size: usize, overlap: usize) -> Vec<String> 
     }
 
     chunks
+}
+
+/// Find the largest byte index <= `idx` that is a valid char boundary.
+#[inline]
+fn floor_char_boundary(s: &str, idx: usize) -> usize {
+    let idx = idx.min(s.len());
+    let mut i = idx;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// Find the smallest byte index >= `idx` that is a valid char boundary.
+#[inline]
+fn ceil_char_boundary(s: &str, idx: usize) -> usize {
+    let idx = idx.min(s.len());
+    let mut i = idx;
+    while i < s.len() && !s.is_char_boundary(i) {
+        i += 1;
+    }
+    i
 }
 
 #[cfg(test)]
@@ -126,5 +160,37 @@ mod tests {
         let text = "hello world foo bar baz qux";
         let chunks = chunk_text(text, 5, 100);
         assert!(!chunks.is_empty());
+    }
+
+    #[test]
+    fn multibyte_utf8_does_not_panic() {
+        // CJK characters are 3 bytes each; chunk_size in bytes may land mid-char
+        let text = "你好世界测试文本数据处理";
+        let chunks = chunk_text(text, 7, 2);
+        assert!(!chunks.is_empty());
+        // Every chunk must be valid UTF-8 (implicit — they're Strings)
+        for chunk in &chunks {
+            assert!(!chunk.is_empty());
+        }
+    }
+
+    #[test]
+    fn emoji_does_not_panic() {
+        let text = "Hello 🌍🌎🌏 world 🚀🎉 testing 🔥";
+        let chunks = chunk_text(text, 10, 3);
+        assert!(!chunks.is_empty());
+        for chunk in &chunks {
+            assert!(!chunk.is_empty());
+        }
+    }
+
+    #[test]
+    fn mixed_ascii_and_multibyte() {
+        let text = "café résumé naïve über straße";
+        let chunks = chunk_text(text, 8, 2);
+        assert!(!chunks.is_empty());
+        for chunk in &chunks {
+            assert!(!chunk.is_empty());
+        }
     }
 }

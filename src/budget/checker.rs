@@ -49,6 +49,15 @@ impl BudgetChecker {
         // Try hoosh first
         match self.query_hoosh(tenant_id).await {
             Ok(status) => {
+                if !status.allowed {
+                    return Ok(BudgetStatus {
+                        allowed: false,
+                        remaining_gpu_hours: status.remaining_gpu_hours,
+                        reason: status
+                            .reason
+                            .or(Some("Budget request denied by accounting service".into())),
+                    });
+                }
                 if status.remaining_gpu_hours < requested_gpu_hours {
                     return Ok(BudgetStatus {
                         allowed: false,

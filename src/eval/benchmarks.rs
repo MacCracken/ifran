@@ -211,17 +211,22 @@ pub fn mmlu_expected_letter(sample: &EvalSample) -> String {
 }
 
 /// Load eval samples from a JSONL file.
+///
+/// Uses buffered line-by-line reading to avoid loading the entire file into memory.
 pub fn load_samples(
     path: &str,
     limit: Option<usize>,
 ) -> crate::types::error::Result<Vec<EvalSample>> {
-    let content = std::fs::read_to_string(path)?;
+    use std::io::BufRead;
+    let file = std::fs::File::open(path)?;
+    let reader = std::io::BufReader::new(file);
     let mut samples = Vec::new();
-    for line in content.lines() {
+    for line in reader.lines() {
+        let line = line?;
         if line.trim().is_empty() {
             continue;
         }
-        let sample: EvalSample = serde_json::from_str(line).map_err(|e| {
+        let sample: EvalSample = serde_json::from_str(&line).map_err(|e| {
             crate::types::IfranError::EvalError(format!("Invalid eval sample: {e}"))
         })?;
         samples.push(sample);

@@ -33,7 +33,11 @@ pub fn validate_prompt_length(prompt: &str, max_len: usize) -> Result<(), (Statu
 #[must_use]
 #[inline]
 pub fn sanitize_prompt(user_content: &str) -> String {
-    format!("<|user_input_start|>\n{user_content}\n<|user_input_end|>")
+    let mut buf = String::with_capacity(user_content.len() + 40);
+    buf.push_str("<|user_input_start|>\n");
+    buf.push_str(user_content);
+    buf.push_str("\n<|user_input_end|>");
+    buf
 }
 
 /// Validate a model name: alphanumeric, hyphens, underscores, slashes

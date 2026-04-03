@@ -262,6 +262,9 @@ async fn track_metrics(State(metrics): State<Arc<Metrics>>, req: Request, next: 
 /// - Specific origins = restrictive
 fn build_cors_layer(origins: &[String]) -> CorsLayer {
     if origins.is_empty() || (origins.len() == 1 && origins[0] == "*") {
+        tracing::warn!(
+            "CORS is permissive (all origins allowed). Configure `security.cors_allowed_origins` for production."
+        );
         return CorsLayer::permissive();
     }
 

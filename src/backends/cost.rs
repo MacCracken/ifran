@@ -26,11 +26,13 @@ impl CostConfig {
         self.costs.insert(backend_id.into(), cost_per_1k);
     }
 
+    #[must_use]
     pub fn get_cost(&self, backend_id: &str) -> Option<f64> {
         self.costs.get(backend_id).copied()
     }
 
     /// Select the cheapest backend from a list of candidates.
+    #[must_use]
     pub fn cheapest<'a>(&self, candidates: &[&'a str]) -> Option<&'a str> {
         candidates
             .iter()
@@ -47,6 +49,7 @@ impl CostConfig {
     /// Select the best backend considering both cost and a preference.
     /// Returns the cheapest among those within `budget_per_1k`, or
     /// the cheapest overall if none are within budget.
+    #[must_use]
     pub fn select_within_budget<'a>(
         &self,
         candidates: &[&'a str],

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use tracing::warn;
 
 /// Top-level Ifran configuration, loaded from ifran.toml.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -253,6 +254,17 @@ impl IfranConfig {
             // but warn if auth_required is false (it's ignored in multi-tenant).
             // This is not an error — multi-tenant overrides auth_required.
         }
+        if self.training.max_concurrent_jobs == 0 {
+            return Err(crate::types::IfranError::ConfigError(
+                "max_concurrent_jobs must be >= 1".into(),
+            ));
+        }
+        if self.fleet.enabled && self.fleet.suspect_timeout_secs >= self.fleet.offline_timeout_secs
+        {
+            return Err(crate::types::IfranError::ConfigError(
+                "suspect_timeout_secs must be less than offline_timeout_secs".into(),
+            ));
+        }
         if self.budget.enabled && self.budget.max_gpu_hours_per_day < 0.0 {
             return Err(crate::types::IfranError::ConfigError(
                 "max_gpu_hours_per_day must be >= 0".into(),
@@ -286,8 +298,11 @@ impl IfranConfig {
         if let Ok(path) = std::env::var("IFRAN_CONFIG") {
             let p = PathBuf::from(&path);
             if p.exists() {
-                if let Ok(cfg) = Self::load(&p) {
-                    return cfg;
+                match Self::load(&p) {
+                    Ok(cfg) => return cfg,
+                    Err(e) => {
+                        warn!(path = %p.display(), error = %e, "Failed to parse config file, trying next source")
+                    }
                 }
             }
         }
@@ -296,8 +311,11 @@ impl IfranConfig {
         if let Ok(home) = std::env::var("HOME") {
             let user_config = PathBuf::from(home).join(".ifran/ifran.toml");
             if user_config.exists() {
-                if let Ok(cfg) = Self::load(&user_config) {
-                    return cfg;
+                match Self::load(&user_config) {
+                    Ok(cfg) => return cfg,
+                    Err(e) => {
+                        warn!(path = %user_config.display(), error = %e, "Failed to parse user config, trying next source")
+                    }
                 }
             }
         }
@@ -305,8 +323,11 @@ impl IfranConfig {
         // 3. System config (Agnosticos / systemd)
         let system_config = PathBuf::from("/etc/ifran/ifran.toml");
         if system_config.exists() {
-            if let Ok(cfg) = Self::load(&system_config) {
-                return cfg;
+            match Self::load(&system_config) {
+                Ok(cfg) => return cfg,
+                Err(e) => {
+                    warn!(path = %system_config.display(), error = %e, "Failed to parse system config, falling back to defaults")
+                }
             }
         }
 
@@ -696,5 +717,30 @@ gpu_memory_reserve_mb = 512
         assert!(!cfg.fleet.enabled);
         assert_eq!(cfg.fleet.suspect_timeout_secs, 30);
         assert_eq!(cfg.hardware.telemetry_interval_secs, 10);
+    }
+
+    #[test]
+    fn validate_zero_concurrent_jobs_rejected() {
+        let mut cfg = IfranConfig::default();
+        cfg.training.max_concurrent_jobs = 0;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn validate_suspect_gte_offline_rejected() {
+        let mut cfg = IfranConfig::default();
+        cfg.fleet.enabled = true;
+        cfg.fleet.suspect_timeout_secs = 90;
+        cfg.fleet.offline_timeout_secs = 90;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn validate_suspect_lt_offline_ok() {
+        let mut cfg = IfranConfig::default();
+        cfg.fleet.enabled = true;
+        cfg.fleet.suspect_timeout_secs = 30;
+        cfg.fleet.offline_timeout_secs = 90;
+        assert!(cfg.validate().is_ok());
     }
 }

@@ -84,32 +84,33 @@ impl BackendRouter {
         format: ModelFormat,
         preferred: Option<&str>,
     ) -> Option<Arc<dyn InferenceBackend>> {
+        // Single lock acquisition for all lookups
+        let guard = self.backends.read().unwrap_or_else(|e| e.into_inner());
+
         // 1. Explicit preference
         if let Some(name) = preferred {
             let id = BackendId(name.to_string());
-            if let Some(b) = self.get(&id) {
-                return Some(b);
+            if let Some(b) = guard.get(&id) {
+                return Some(Arc::clone(b));
             }
             tracing::warn!(backend = %name, "Preferred backend not found, falling back to auto-selection");
         }
 
         // 2. Configured default, if it supports the format
         if let Some(ref default_id) = self.default_backend {
-            if let Some(b) = self.get(default_id) {
+            if let Some(b) = guard.get(default_id) {
                 if b.supported_formats().contains(&format) {
-                    return Some(b);
+                    return Some(Arc::clone(b));
                 }
             }
         }
 
         // 3. First backend that supports the format
-        let guard = self.backends.read().unwrap_or_else(|e| e.into_inner());
         for backend in guard.values() {
             if backend.supported_formats().contains(&format) {
                 return Some(Arc::clone(backend));
             }
         }
-        drop(guard);
 
         // 4. No matching backend found
         tracing::warn!(?format, "No backend supports the requested model format");
@@ -145,12 +146,15 @@ impl BackendRouter {
         }
 
         // For sensitive data, only consider local backends
+        // Single lock acquisition for all lookups
+        let guard = self.backends.read().unwrap_or_else(|e| e.into_inner());
+
         // 1. Explicit preference (if it's local)
         if let Some(name) = preferred {
             let id = BackendId(name.to_string());
-            if let Some(b) = self.get(&id) {
+            if let Some(b) = guard.get(&id) {
                 if b.capabilities().locality == BackendLocality::Local {
-                    return Some(b);
+                    return Some(Arc::clone(b));
                 }
                 tracing::warn!(
                     backend = %name,
@@ -161,17 +165,16 @@ impl BackendRouter {
 
         // 2. Default backend (if local and supports format)
         if let Some(ref default_id) = self.default_backend {
-            if let Some(b) = self.get(default_id) {
+            if let Some(b) = guard.get(default_id) {
                 if b.capabilities().locality == BackendLocality::Local
                     && b.supported_formats().contains(&format)
                 {
-                    return Some(b);
+                    return Some(Arc::clone(b));
                 }
             }
         }
 
         // 3. First local backend that supports the format
-        let guard = self.backends.read().unwrap_or_else(|e| e.into_inner());
         for backend in guard.values() {
             if backend.capabilities().locality == BackendLocality::Local
                 && backend.supported_formats().contains(&format)
@@ -179,7 +182,6 @@ impl BackendRouter {
                 return Some(Arc::clone(backend));
             }
         }
-        drop(guard);
 
         tracing::warn!(
             ?format,
@@ -190,6 +192,7 @@ impl BackendRouter {
     }
 
     /// Check if any backend supports a given format.
+    #[must_use]
     pub fn supports_format(&self, format: ModelFormat) -> bool {
         self.backends
             .read()
@@ -199,6 +202,7 @@ impl BackendRouter {
     }
 
     /// Number of registered backends.
+    #[must_use]
     pub fn count(&self) -> usize {
         self.backends
             .read()

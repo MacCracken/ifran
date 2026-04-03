@@ -23,11 +23,13 @@ enum Commands {
     /// List locally available models
     List,
     /// Run interactive inference on a model
+    #[cfg(feature = "server")]
     Run {
         /// Model name or ID
         model: String,
     },
     /// Start the API server
+    #[cfg(feature = "server")]
     Serve {
         /// Bind address (e.g. 0.0.0.0:8420)
         #[arg(short, long)]
@@ -158,7 +160,9 @@ async fn main() {
     let result = match cli.command {
         Commands::Pull { model, quant } => commands::pull::execute(&model, quant.as_deref()).await,
         Commands::List => commands::list::execute().await,
+        #[cfg(feature = "server")]
         Commands::Run { model } => commands::run::execute(&model).await,
+        #[cfg(feature = "server")]
         Commands::Serve { bind } => commands::serve::execute(bind.as_deref()).await,
         Commands::Train {
             base_model,
@@ -260,6 +264,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "server")]
     fn cli_run() {
         let cli = Cli::try_parse_from(["ifran", "run", "llama-7b"]).unwrap();
         match cli.command {
@@ -269,6 +274,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "server")]
     fn cli_serve_default() {
         let cli = Cli::try_parse_from(["ifran", "serve"]).unwrap();
         match cli.command {
@@ -278,6 +284,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "server")]
     fn cli_serve_with_bind() {
         let cli = Cli::try_parse_from(["ifran", "serve", "--bind", "0.0.0.0:9000"]).unwrap();
         match cli.command {

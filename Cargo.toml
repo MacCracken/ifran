@@ -156,6 +156,7 @@ http-body-util = "0.1"
 [[bench]]
 name = "core_benchmarks"
 harness = false
+required-features = ["sqlite"]
 
 [[bench]]
 name = "server_benchmarks"

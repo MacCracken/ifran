@@ -27,6 +27,18 @@ impl SubprocessExecutor {
 #[async_trait]
 impl TrainingExecutor for SubprocessExecutor {
     async fn run(&self, config: &TrainingJobConfig, job_id: TrainingJobId) -> Result<()> {
+        // Validate dataset path does not escape allowed directories
+        let dataset_path = std::path::Path::new(&config.dataset.path);
+        if !dataset_path.is_absolute()
+            || dataset_path
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return Err(IfranError::TrainingError(
+                "dataset path must be an absolute path without '..' components".into(),
+            ));
+        }
+
         let script = super::script_for_method(config.method);
 
         let config_json =
@@ -145,6 +157,23 @@ mod tests {
 
         executor.cancel(job_id).await.unwrap();
         assert!(executor.processes.read().await.is_empty());
+    }
+
+    #[test]
+    fn dataset_path_validation_rejects_relative() {
+        let path = "data/train.jsonl";
+        let p = std::path::Path::new(path);
+        assert!(!p.is_absolute());
+    }
+
+    #[test]
+    fn dataset_path_validation_rejects_dotdot() {
+        let path = "/data/../etc/passwd";
+        let p = std::path::Path::new(path);
+        let has_parent = p
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir));
+        assert!(has_parent);
     }
 
     #[test]

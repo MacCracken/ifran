@@ -11,16 +11,25 @@ use axum::extract::Request;
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::Response;
+use std::sync::OnceLock;
 
 use crate::server::state::AppState;
+
+/// Cached API key — read from env once, reused for all subsequent requests.
+static CACHED_API_KEY: OnceLock<Option<String>> = OnceLock::new();
 
 /// Extract the configured API key (from env or config).
 ///
 /// Returns `None` if auth is disabled (no key set).
-pub fn configured_api_key() -> Option<String> {
-    std::env::var("IFRAN_API_KEY")
-        .ok()
-        .filter(|k| !k.is_empty())
+/// The value is cached after the first call to avoid per-request env var reads.
+pub fn configured_api_key() -> Option<&'static str> {
+    CACHED_API_KEY
+        .get_or_init(|| {
+            std::env::var("IFRAN_API_KEY")
+                .ok()
+                .filter(|k| !k.is_empty())
+        })
+        .as_deref()
 }
 
 /// Auth middleware — validates Bearer token and injects TenantId into request extensions.
@@ -60,7 +69,7 @@ pub async fn require_auth(
         Ok(next.run(req).await)
     } else {
         // Single-tenant mode: legacy IFRAN_API_KEY behavior
-        let api_key = match configured_api_key() {
+        let api_key: &str = match configured_api_key() {
             Some(key) => key,
             None => {
                 // No key configured — open access, default tenant

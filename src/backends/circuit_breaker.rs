@@ -5,7 +5,6 @@
 //! - **Open**: requests fail immediately (backend assumed down).
 //! - **HalfOpen**: one probe request allowed to test recovery.
 
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
@@ -21,14 +20,19 @@ pub enum CircuitState {
     HalfOpen,
 }
 
+/// Internal state protected by a single mutex to avoid inconsistent lock ordering.
+struct CircuitBreakerInner {
+    state: CircuitState,
+    last_failure: Option<Instant>,
+    consecutive_failures: u32,
+}
+
 /// A circuit breaker that tracks consecutive failures and controls access
 /// to a backend.
 pub struct CircuitBreaker {
     failure_threshold: u32,
     recovery_timeout: Duration,
-    consecutive_failures: AtomicU32,
-    last_failure: Mutex<Option<Instant>>,
-    state: Mutex<CircuitState>,
+    inner: Mutex<CircuitBreakerInner>,
 }
 
 impl CircuitBreaker {
@@ -43,9 +47,11 @@ impl CircuitBreaker {
         Self {
             failure_threshold,
             recovery_timeout,
-            consecutive_failures: AtomicU32::new(0),
-            last_failure: Mutex::new(None),
-            state: Mutex::new(CircuitState::Closed),
+            inner: Mutex::new(CircuitBreakerInner {
+                state: CircuitState::Closed,
+                last_failure: None,
+                consecutive_failures: 0,
+            }),
         }
     }
 
@@ -54,15 +60,13 @@ impl CircuitBreaker {
     /// Returns `true` when the request may proceed, `false` when the
     /// circuit is open and the recovery timeout has not yet elapsed.
     pub async fn allow_request(&self) -> bool {
-        let mut state = self.state.lock().await;
-        match *state {
+        let mut inner = self.inner.lock().await;
+        match inner.state {
             CircuitState::Closed => true,
             CircuitState::Open => {
-                // Check if recovery timeout has elapsed
-                let last = self.last_failure.lock().await;
-                if let Some(ts) = *last {
+                if let Some(ts) = inner.last_failure {
                     if ts.elapsed() >= self.recovery_timeout {
-                        *state = CircuitState::HalfOpen;
+                        inner.state = CircuitState::HalfOpen;
                         tracing::info!("Circuit breaker transitioning to half-open");
                         return true;
                     }
@@ -79,50 +83,43 @@ impl CircuitBreaker {
 
     /// Record a successful request, resetting the breaker to closed.
     pub async fn record_success(&self) {
-        self.consecutive_failures.store(0, Ordering::Relaxed);
-        let mut state = self.state.lock().await;
-        if *state != CircuitState::Closed {
+        let mut inner = self.inner.lock().await;
+        inner.consecutive_failures = 0;
+        if inner.state != CircuitState::Closed {
             tracing::info!("Circuit breaker closing after successful probe");
-            *state = CircuitState::Closed;
+            inner.state = CircuitState::Closed;
         }
     }
 
     /// Record a failed request.  If the failure threshold is reached the
     /// circuit opens.
     pub async fn record_failure(&self) {
-        let prev = self.consecutive_failures.fetch_add(1, Ordering::Relaxed);
-        let new_count = prev + 1;
+        let mut inner = self.inner.lock().await;
+        inner.consecutive_failures += 1;
+        inner.last_failure = Some(Instant::now());
+        let new_count = inner.consecutive_failures;
 
-        {
-            let mut last = self.last_failure.lock().await;
-            *last = Some(Instant::now());
-        }
-
-        let mut state = self.state.lock().await;
-        if *state == CircuitState::HalfOpen {
+        if inner.state == CircuitState::HalfOpen {
             tracing::warn!("Probe request failed — circuit remains open");
-            *state = CircuitState::Open;
-        } else if new_count >= self.failure_threshold {
-            if *state != CircuitState::Open {
-                tracing::warn!(
-                    failures = new_count,
-                    threshold = self.failure_threshold,
-                    "Circuit breaker opening"
-                );
-                *state = CircuitState::Open;
-            }
+            inner.state = CircuitState::Open;
+        } else if new_count >= self.failure_threshold && inner.state != CircuitState::Open {
+            tracing::warn!(
+                failures = new_count,
+                threshold = self.failure_threshold,
+                "Circuit breaker opening"
+            );
+            inner.state = CircuitState::Open;
         }
     }
 
     /// Get the current circuit state.
     pub async fn state(&self) -> CircuitState {
-        *self.state.lock().await
+        self.inner.lock().await.state
     }
 
     /// Get the current consecutive failure count.
-    #[must_use]
-    pub fn failure_count(&self) -> u32 {
-        self.consecutive_failures.load(Ordering::Relaxed)
+    pub async fn failure_count(&self) -> u32 {
+        self.inner.lock().await.consecutive_failures
     }
 }
 
@@ -132,10 +129,6 @@ impl std::fmt::Debug for CircuitBreaker {
         f.debug_struct("CircuitBreaker")
             .field("failure_threshold", &self.failure_threshold)
             .field("recovery_timeout", &self.recovery_timeout)
-            .field(
-                "consecutive_failures",
-                &self.consecutive_failures.load(Ordering::Relaxed),
-            )
             .finish_non_exhaustive()
     }
 }
@@ -200,7 +193,7 @@ mod tests {
 
         cb.record_success().await;
         assert_eq!(cb.state().await, CircuitState::Closed);
-        assert_eq!(cb.failure_count(), 0);
+        assert_eq!(cb.failure_count().await, 0);
     }
 
     #[tokio::test]
@@ -220,7 +213,7 @@ mod tests {
         let cb = CircuitBreaker::new(3, Duration::from_secs(5));
         cb.record_success().await;
         assert_eq!(cb.state().await, CircuitState::Closed);
-        assert_eq!(cb.failure_count(), 0);
+        assert_eq!(cb.failure_count().await, 0);
     }
 
     #[tokio::test]
@@ -230,7 +223,7 @@ mod tests {
             cb.record_failure().await;
         }
         assert_eq!(cb.state().await, CircuitState::Closed);
-        assert_eq!(cb.failure_count(), 4);
+        assert_eq!(cb.failure_count().await, 4);
     }
 
     #[tokio::test]
@@ -247,10 +240,10 @@ mod tests {
         let cb = CircuitBreaker::new(3, Duration::from_secs(5));
         cb.record_failure().await;
         cb.record_failure().await;
-        assert_eq!(cb.failure_count(), 2);
+        assert_eq!(cb.failure_count().await, 2);
 
         cb.record_success().await;
-        assert_eq!(cb.failure_count(), 0);
+        assert_eq!(cb.failure_count().await, 0);
         assert_eq!(cb.state().await, CircuitState::Closed);
     }
 }

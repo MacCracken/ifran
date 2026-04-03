@@ -80,7 +80,7 @@ impl EvalStore {
                 result.run_id.to_string(),
                 result.model_name,
                 serde_json::to_string(&result.benchmark)
-                    .unwrap()
+                    .map_err(|e| IfranError::StorageError(e.to_string()))?
                     .trim_matches('"'),
                 result.score,
                 result.details.as_ref().map(|d| d.to_string()),

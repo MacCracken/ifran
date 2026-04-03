@@ -407,8 +407,10 @@ impl FleetManager {
                 NodeHealth::Suspect => stats.suspect += 1,
                 NodeHealth::Offline => stats.offline += 1,
             }
-            stats.total_gpus += m.gpu_info.gpu_count;
-            stats.total_gpu_memory_mb += m.gpu_info.total_gpu_memory_mb;
+            stats.total_gpus = stats.total_gpus.saturating_add(m.gpu_info.gpu_count);
+            stats.total_gpu_memory_mb = stats
+                .total_gpu_memory_mb
+                .saturating_add(m.gpu_info.total_gpu_memory_mb);
         }
 
         stats

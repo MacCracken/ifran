@@ -46,12 +46,14 @@ impl ModelCache {
 
     /// Number of cached entries.
     #[inline]
+    #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
     /// Whether the cache is empty.
     #[inline]
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
@@ -71,6 +73,7 @@ impl ModelCache {
 
     /// Check if a key exists in the cache.
     #[inline]
+    #[must_use]
     pub fn contains(&self, key: &str) -> bool {
         self.entries.contains_key(key)
     }
@@ -83,6 +86,11 @@ impl ModelCache {
         // If the item already exists, remove it first so we re-add with fresh timestamp
         if let Some(old) = self.entries.remove(&key) {
             self.current_bytes -= old.size_bytes;
+        }
+
+        // Reject items that exceed the total cache capacity on their own
+        if size_bytes > self.max_bytes {
+            return vec![];
         }
 
         let mut evicted = Vec::new();
@@ -261,5 +269,26 @@ mod tests {
 
         let keys = cache.keys_by_age();
         assert_eq!(keys, vec!["first", "second", "third"]);
+    }
+
+    #[test]
+    fn oversized_item_rejected() {
+        let mut cache = ModelCache::new(1000);
+        cache.insert("small".into(), 500);
+        // An item larger than max_bytes is rejected without evicting existing entries
+        let evicted = cache.insert("huge".into(), 2000);
+        assert!(evicted.is_empty());
+        assert!(!cache.contains("huge"));
+        // Original item untouched
+        assert!(cache.contains("small"));
+        assert_eq!(cache.total_bytes(), 500);
+    }
+
+    #[test]
+    fn zero_capacity_cache() {
+        let mut cache = ModelCache::new(0);
+        let evicted = cache.insert("any".into(), 1);
+        assert!(evicted.is_empty());
+        assert!(!cache.contains("any"));
     }
 }
