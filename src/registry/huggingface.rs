@@ -194,6 +194,11 @@ fn urlencoded(s: &str) -> String {
 mod tests {
     use super::*;
 
+    fn test_client() -> Client {
+        crate::ensure_crypto_provider();
+        Client::new()
+    }
+
     // -- Pure function / data structure tests --
 
     #[test]
@@ -357,7 +362,7 @@ mod tests {
             .create_async()
             .await;
 
-        let client = HfClient::new(Client::new(), None).with_base_url(server.url());
+        let client = HfClient::new(test_client(), None).with_base_url(server.url());
         let info = client.model_info("test-org/test-model").await.unwrap();
         assert_eq!(info.model_id, "test-org/test-model");
         assert_eq!(info.siblings.len(), 3);
@@ -373,7 +378,7 @@ mod tests {
             .create_async()
             .await;
 
-        let client = HfClient::new(Client::new(), None).with_base_url(server.url());
+        let client = HfClient::new(test_client(), None).with_base_url(server.url());
         let result = client.model_info("nonexistent/model").await;
         assert!(matches!(result, Err(IfranError::ModelNotFound(_))));
         mock.assert_async().await;
@@ -388,7 +393,7 @@ mod tests {
             .create_async()
             .await;
 
-        let client = HfClient::new(Client::new(), None).with_base_url(server.url());
+        let client = HfClient::new(test_client(), None).with_base_url(server.url());
         let result = client.model_info("org/model").await;
         assert!(matches!(result, Err(IfranError::DownloadError(_))));
         mock.assert_async().await;
@@ -414,7 +419,7 @@ mod tests {
             .create_async()
             .await;
 
-        let client = HfClient::new(Client::new(), None).with_base_url(server.url());
+        let client = HfClient::new(test_client(), None).with_base_url(server.url());
         let files = client.list_gguf_files("org/model").await.unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].filename, "model.gguf");
@@ -440,7 +445,7 @@ mod tests {
             .create_async()
             .await;
 
-        let client = HfClient::new(Client::new(), None).with_base_url(server.url());
+        let client = HfClient::new(test_client(), None).with_base_url(server.url());
         let file = client
             .resolve_gguf("org/model", Some("q4_k_m"))
             .await
@@ -468,7 +473,7 @@ mod tests {
             .create_async()
             .await;
 
-        let client = HfClient::new(Client::new(), None).with_base_url(server.url());
+        let client = HfClient::new(test_client(), None).with_base_url(server.url());
         let file = client.resolve_gguf("org/model", None).await.unwrap();
         assert_eq!(file.filename, "model-Q4_K_M.gguf");
         mock.assert_async().await;
@@ -492,7 +497,7 @@ mod tests {
             .create_async()
             .await;
 
-        let client = HfClient::new(Client::new(), None).with_base_url(server.url());
+        let client = HfClient::new(test_client(), None).with_base_url(server.url());
         let result = client.resolve_gguf("org/model", Some("Q8_0")).await;
         assert!(matches!(result, Err(IfranError::ModelNotFound(_))));
         mock.assert_async().await;
@@ -516,7 +521,7 @@ mod tests {
             .create_async()
             .await;
 
-        let client = HfClient::new(Client::new(), None).with_base_url(server.url());
+        let client = HfClient::new(test_client(), None).with_base_url(server.url());
         let result = client.resolve_gguf("org/model", None).await;
         assert!(matches!(result, Err(IfranError::ModelNotFound(_))));
         mock.assert_async().await;
@@ -535,7 +540,7 @@ mod tests {
             .await;
 
         let client =
-            HfClient::new(Client::new(), Some("test-token-123".into())).with_base_url(server.url());
+            HfClient::new(test_client(), Some("test-token-123".into())).with_base_url(server.url());
         let info = client.model_info("org/private-model").await.unwrap();
         assert_eq!(info.model_id, "org/private-model");
         mock.assert_async().await;

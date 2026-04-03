@@ -158,6 +158,7 @@ pub async fn download(
 
 /// Build a reusable reqwest client with sensible defaults.
 pub fn build_client() -> Result<Client> {
+    crate::ensure_crypto_provider();
     Client::builder()
         .user_agent(format!("ifran/{}", env!("CARGO_PKG_VERSION")))
         .connect_timeout(std::time::Duration::from_secs(30))
@@ -198,7 +199,7 @@ mod tests {
         };
 
         let progress = ProgressTracker::default();
-        let client = Client::new();
+        let client = build_client().unwrap();
         download(&client, &request, &progress).await.unwrap();
 
         assert!(dest.exists());
@@ -231,7 +232,7 @@ mod tests {
         };
 
         let progress = ProgressTracker::default();
-        download(&Client::new(), &request, &progress).await.unwrap();
+        download(&build_client().unwrap(), &request, &progress).await.unwrap();
         assert!(dest.exists());
         mock.assert_async().await;
     }
@@ -254,7 +255,7 @@ mod tests {
         };
 
         let progress = ProgressTracker::default();
-        let result = download(&Client::new(), &request, &progress).await;
+        let result = download(&build_client().unwrap(), &request, &progress).await;
         assert!(matches!(result, Err(IfranError::DownloadError(_))));
         mock.assert_async().await;
     }
@@ -288,7 +289,7 @@ mod tests {
         };
 
         let progress = ProgressTracker::default();
-        download(&Client::new(), &request, &progress).await.unwrap();
+        download(&build_client().unwrap(), &request, &progress).await.unwrap();
         assert!(dest.exists());
         mock.assert_async().await;
     }
@@ -312,7 +313,7 @@ mod tests {
         };
 
         let progress = ProgressTracker::default();
-        let result = download(&Client::new(), &request, &progress).await;
+        let result = download(&build_client().unwrap(), &request, &progress).await;
         assert!(result.is_err());
         mock.assert_async().await;
     }
@@ -342,7 +343,7 @@ mod tests {
         };
 
         let progress = ProgressTracker::default();
-        download(&Client::new(), &request, &progress).await.unwrap();
+        download(&build_client().unwrap(), &request, &progress).await.unwrap();
 
         let content = tokio::fs::read(&dest).await.unwrap();
         assert_eq!(content, b"first_second");
@@ -370,7 +371,7 @@ mod tests {
         let progress = ProgressTracker::default();
         let mut rx = progress.subscribe();
 
-        download(&Client::new(), &request, &progress).await.unwrap();
+        download(&build_client().unwrap(), &request, &progress).await.unwrap();
 
         // Should receive at least the initial and completion events
         let first = rx.recv().await.unwrap();

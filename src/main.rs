@@ -4,6 +4,10 @@ use ifran::server::state::AppState;
 
 #[tokio::main]
 async fn main() {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("failed to install rustls crypto provider");
+
     ifran::server::middleware::telemetry::init_tracing();
 
     let config = IfranConfig::discover();

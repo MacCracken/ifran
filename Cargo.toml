@@ -120,10 +120,10 @@ indicatif = "0.18"
 # Connection pooling (covered by r2d2 + r2d2_sqlite above)
 
 # Hardware acceleration detection
-ai-hwaccel = { version = "1.0.0", optional = true }
+ai-hwaccel = { path = "../ai-hwaccel", optional = true }
 
 # Ecosystem crates (server feature)
-hoosh = { version = "1.0.0", default-features = false, features = ["ollama", "llamacpp"], optional = true }
+hoosh = { path = "../hoosh", default-features = false, features = ["ollama", "llamacpp"], optional = true }
 majra = { version = "1.0.3", default-features = false, features = [
     "barrier",       # distributed training coordination
     "dag",           # workflow orchestration

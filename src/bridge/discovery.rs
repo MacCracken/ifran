@@ -110,6 +110,7 @@ async fn query_daimon_registry() -> Option<String> {
         std::env::var("DAIMON_ENDPOINT").unwrap_or_else(|_| DEFAULT_DAIMON_ENDPOINT.to_string());
     let url = format!("{base}/v1/discover?service=secureyeoman");
 
+    crate::ensure_crypto_provider();
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
         .build()

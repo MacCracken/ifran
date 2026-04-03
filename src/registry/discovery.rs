@@ -65,6 +65,7 @@ pub async fn discover_all() -> Vec<DiscoveredModel> {
 
 /// Discover models from a specific Ollama instance.
 pub async fn discover_ollama(base_url: &str) -> Result<Vec<DiscoveredModel>, String> {
+    crate::ensure_crypto_provider();
     let client = reqwest::Client::builder()
         .timeout(PROBE_TIMEOUT)
         .build()
@@ -135,6 +136,7 @@ async fn discover_openai_compatible(
     base_url: &str,
     source: DiscoverySource,
 ) -> Result<Vec<DiscoveredModel>, String> {
+    crate::ensure_crypto_provider();
     let client = reqwest::Client::builder()
         .timeout(PROBE_TIMEOUT)
         .build()

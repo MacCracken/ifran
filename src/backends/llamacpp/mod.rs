@@ -58,6 +58,7 @@ impl LlamaCppBackend {
     /// `server_bin` is the path to the `llama-server` binary. If None, looks
     /// in PATH.
     pub fn new(server_bin: Option<String>) -> Self {
+        crate::ensure_crypto_provider();
         Self {
             server_bin: server_bin.unwrap_or_else(|| "llama-server".into()),
             instances: Arc::new(RwLock::new(HashMap::new())),

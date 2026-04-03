@@ -15,6 +15,7 @@ pub struct MarketplaceResolver {
 
 impl MarketplaceResolver {
     pub fn new() -> Self {
+        crate::ensure_crypto_provider();
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(10))
             .build()

@@ -122,6 +122,7 @@ pub async fn request_unlock(path: &Path, daimon_endpoint: &str) -> Result<()> {
     let path_str = path.to_string_lossy();
     tracing::info!(path = %path_str, "Requesting volume unlock from daimon");
 
+    crate::ensure_crypto_provider();
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()

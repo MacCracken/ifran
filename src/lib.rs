@@ -72,6 +72,14 @@ pub mod server;
 #[cfg(feature = "sqlite")]
 pub mod cli;
 
+/// Install the rustls ring crypto provider (idempotent, safe to call multiple times).
+pub fn ensure_crypto_provider() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
 // Re-export core types at crate root for convenience
 pub use types::error::IfranError;
 pub use types::model::{ModelFormat, ModelId, ModelInfo, QuantLevel};

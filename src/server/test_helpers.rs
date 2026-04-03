@@ -48,6 +48,7 @@ pub mod helpers {
     /// Create a test `AppState` from a temporary directory.
     #[must_use]
     pub fn test_state(tmp: &tempfile::TempDir) -> AppState {
+        crate::ensure_crypto_provider();
         let config = test_config(tmp);
         AppState::new(config).unwrap()
     }

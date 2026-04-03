@@ -148,6 +148,10 @@ enum MarketplaceAction {
 
 #[tokio::main]
 async fn main() {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("failed to install rustls crypto provider");
+
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
 

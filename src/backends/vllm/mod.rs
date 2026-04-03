@@ -34,6 +34,7 @@ pub struct VllmBackend {
 
 impl VllmBackend {
     pub fn new(base_url: Option<String>) -> Self {
+        crate::ensure_crypto_provider();
         Self {
             base_url: base_url.unwrap_or_else(|| "http://127.0.0.1:8000".into()),
             client: reqwest::Client::builder()
