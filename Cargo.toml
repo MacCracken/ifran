@@ -120,7 +120,7 @@ indicatif = "0.18"
 # Connection pooling (covered by r2d2 + r2d2_sqlite above)
 
 # Hardware acceleration detection
-ai-hwaccel = { path = "../ai-hwaccel", optional = true }
+ai-hwaccel = { version = "1.1.1", optional = true }
 
 # Ecosystem crates (server feature)
 hoosh = { path = "../hoosh", default-features = false, features = ["ollama", "llamacpp"], optional = true }

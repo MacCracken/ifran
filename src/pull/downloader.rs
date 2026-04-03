@@ -232,7 +232,9 @@ mod tests {
         };
 
         let progress = ProgressTracker::default();
-        download(&build_client().unwrap(), &request, &progress).await.unwrap();
+        download(&build_client().unwrap(), &request, &progress)
+            .await
+            .unwrap();
         assert!(dest.exists());
         mock.assert_async().await;
     }
@@ -289,7 +291,9 @@ mod tests {
         };
 
         let progress = ProgressTracker::default();
-        download(&build_client().unwrap(), &request, &progress).await.unwrap();
+        download(&build_client().unwrap(), &request, &progress)
+            .await
+            .unwrap();
         assert!(dest.exists());
         mock.assert_async().await;
     }
@@ -343,7 +347,9 @@ mod tests {
         };
 
         let progress = ProgressTracker::default();
-        download(&build_client().unwrap(), &request, &progress).await.unwrap();
+        download(&build_client().unwrap(), &request, &progress)
+            .await
+            .unwrap();
 
         let content = tokio::fs::read(&dest).await.unwrap();
         assert_eq!(content, b"first_second");
@@ -371,7 +377,9 @@ mod tests {
         let progress = ProgressTracker::default();
         let mut rx = progress.subscribe();
 
-        download(&build_client().unwrap(), &request, &progress).await.unwrap();
+        download(&build_client().unwrap(), &request, &progress)
+            .await
+            .unwrap();
 
         // Should receive at least the initial and completion events
         let first = rx.recv().await.unwrap();

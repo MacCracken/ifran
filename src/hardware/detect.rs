@@ -129,9 +129,8 @@ fn detect_via_hwaccel() -> Result<SystemHardware> {
     // Extract CPU info from the CPU profile
     let cpu_profile = registry
         .available()
-        .iter()
         .find(|p| matches!(p.accelerator, ai_hwaccel::AcceleratorType::Cpu))
-        .copied();
+        .cloned();
 
     let cpu = if let Some(profile) = cpu_profile {
         // ai-hwaccel gives us memory; fill in CPU details from /proc as before
@@ -158,7 +157,6 @@ fn detect_via_hwaccel() -> Result<SystemHardware> {
     // Convert non-CPU profiles to GpuDevice
     let gpus: Vec<GpuDevice> = registry
         .available()
-        .iter()
         .filter(|p| !matches!(p.accelerator, ai_hwaccel::AcceleratorType::Cpu))
         .enumerate()
         .map(|(i, p)| {
