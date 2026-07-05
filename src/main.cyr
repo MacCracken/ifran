@@ -9,6 +9,7 @@ include "src/run.cyr"
 include "src/keys.cyr"
 include "src/store.cyr"
 include "src/dataset.cyr"
+include "src/sweep.cyr"
 
 fn usage(): i64 {
     println("ifran - AGNOS training control plane");
@@ -24,6 +25,8 @@ fn usage(): i64 {
     println("  dataset add <file> [name]      ingest a text corpus");
     println("  dataset ls                     list datasets");
     println("  dataset dedup <id>             derive an exact-line-deduped dataset");
+    println("  sweep <spec.cyml>              expand + run a parameter sweep (grid/random)");
+    println("  sweeps                         list sweeps");
     println("  version          print the version");
     return 0;
 }
@@ -84,7 +87,12 @@ fn main(): i64 {
         println("ifran: dataset needs add|ls|dedup");
         return 1;
     }
-    if (streq(cmd, "version") == 1) { println("ifran (cyrius port, M3)"); return 0; }
+    if (streq(cmd, "sweep") == 1) {
+        if (argc() < 3) { println("ifran: sweep needs a <spec.cyml>"); return 1; }
+        return sweep_run(argv(2));
+    }
+    if (streq(cmd, "sweeps") == 1) { return sweep_ls(); }
+    if (streq(cmd, "version") == 1) { println("ifran (cyrius port, M4)"); return 0; }
     usage();
     return 0;
 }

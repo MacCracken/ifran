@@ -15,6 +15,10 @@
 
 var _rs_path = 0;                            # 0 = default "ifran.db" (cwd)
 var _rs_db = 0;
+var _rs_sweep = 0;                           # current sweep id (0 = standalone run)
+
+# tag subsequent runs with a sweep id (the sweep runner brackets its combos)
+fn runstore_set_sweep(id): i64 { _rs_sweep = id; return 0; }
 
 # override the DB path (tests; a --db flag later). Call before first use.
 fn runstore_set_path(p): i64 { _rs_path = p; return 0; }
@@ -31,11 +35,13 @@ fn runstore_open(): i64 {
     if (_rs_db == 0) { println("ifran: cannot open ifran.db"); return 0; }
     # idempotent create (patra_exec errors on an existing table; ignored)
     var c1 = "CREATE TABLE runs (id INT AUTOINCREMENT, name STR, bin STR, args STR, ";
-    var c2 = "started INT, duration_ms INT, exit_code INT, status STR, log STR)";
+    var c2 = "started INT, duration_ms INT, exit_code INT, status STR, log STR, sweep INT)";
     var sb = str_builder_new();
     str_builder_add_cstr(sb, c1);
     str_builder_add_cstr(sb, c2);
     patra_exec(_rs_db, str_cstr(str_builder_build(sb)));
+    # schema migration for pre-M4 dbs (error-ignored when the column exists)
+    patra_exec(_rs_db, "ALTER TABLE runs ADD COLUMN sweep INT");
     return _rs_db;
 }
 
@@ -43,8 +49,8 @@ fn runstore_open(): i64 {
 fn runstore_start(name, bin, args_joined, started): i64 {
     var db = runstore_open();
     if (db == 0) { return 0 - 1; }
-    var ins = "INSERT INTO runs (name, bin, args, started, status) ";
-    var vals = "VALUES (?, ?, ?, ?, ?)";
+    var ins = "INSERT INTO runs (name, bin, args, started, status, sweep) ";
+    var vals = "VALUES (?, ?, ?, ?, ?, ?)";
     var sb = str_builder_new();
     str_builder_add_cstr(sb, ins);
     str_builder_add_cstr(sb, vals);
@@ -56,6 +62,7 @@ fn runstore_start(name, bin, args_joined, started): i64 {
     patra_bind_text(stmt, 2, args_joined, strlen(args_joined));
     patra_bind_int(stmt, 3, started);
     patra_bind_text(stmt, 4, "running", 7);
+    patra_bind_int(stmt, 5, _rs_sweep);
     var idp = alloc(8);
     if (patra_insert_returning(db, stmt, idp) != 0) { patra_finalize(stmt); return 0 - 1; }
     patra_finalize(stmt);
@@ -85,10 +92,10 @@ fn runstore_finish(id, exit_code, duration_ms, status, log_path): i64 {
 fn runstore_list(): i64 {
     var db = runstore_open();
     if (db == 0) { return 1; }
-    var rs = patra_query(db, "SELECT id, name, status, exit_code, duration_ms, started, log FROM runs");
+    var rs = patra_query(db, "SELECT id, name, status, exit_code, duration_ms, sweep, log FROM runs");
     if (rs == 0) { println("ifran: query failed"); return 1; }
     var n = patra_result_count(rs);
-    println("id | name | status | exit | ms | started | log");
+    println("id | name | status | exit | ms | sweep | log");
     var i = 0;
     while (i < n) {
         fmt_int(patra_result_get_int(rs, i, 0)); ifr_print_cstr(" | ");

@@ -25,8 +25,11 @@ job (80 s) → both artifacts ingested + verified. **M3 (datasets) ✅ DONE 2026
 honest stats + a REAL exact-line dedup (the Rust fake replaced) +
 id-referenced from job specs (`dataset = N` / `{dataset}` substitution);
 suite **43/43**; **proof met** — a 51 KB docs corpus deduped 567→356 lines
-and attn11 TRAINED on it as an ifran job. **Next: M4 — sweeps** (grid/random
-over job specs; results into the store). NOT porting: `backends/` (dead broker), server/lineage/marketplace/
+and attn11 TRAINED on it as an ifran job. **M4 (sweeps) ✅ DONE 2026-07-05**: grid + seeded-deterministic random over
+job templates, within-token `{axis}` substitution, combos as sweep-tagged
+first-class runs, pre-M4 schema migration; suite **53/53**; **proof met** — a
+3-combo attn11 steps-sweep trained on the M3 dataset (3/3 exit 0, durations
+scaling with steps). **Next: M5 — eval runner.** NOT porting: `backends/` (dead broker), server/lineage/marketplace/
 fleet/rag/hardware (owned homes) — see the ledger.
 
 ## Toolchain

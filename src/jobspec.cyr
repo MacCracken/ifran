@@ -69,7 +69,12 @@ fn jobspec_parse(path): i64 {
         println("ifran: job file has no [job] section");
         return 0;
     }
-    var pairs = bayan_toml_section_pairs(vec_get(jsecs, 0));
+    return jobspec_from_pairs(bayan_toml_section_pairs(vec_get(jsecs, 0)));
+}
+
+# Build a spec record from a section's pairs ([job] — and [sweep] reuses this
+# shape for the shared template fields). Returns the record or 0.
+fn jobspec_from_pairs(pairs): i64 {
     var name = _js_get_cstr(pairs, "name");
     if (name == 0) { println("ifran: [job] missing `name`"); return 0; }
     if (strlen(name) > 63) { println("ifran: `name` too long (<= 63)"); return 0; }

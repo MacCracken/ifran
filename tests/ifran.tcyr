@@ -6,6 +6,7 @@ include "src/run.cyr"
 include "src/keys.cyr"
 include "src/store.cyr"
 include "src/dataset.cyr"
+include "src/sweep.cyr"
 
 fn _t_write(path, s): i64 {
     file_write_all(path, s, strlen(s));
@@ -207,6 +208,72 @@ fn test_datasets(): i64 {
     return 0;
 }
 
+fn _t_runs_in_sweep(db, sid): i64 {
+    var stmt = patra_prepare(db, "SELECT id FROM runs WHERE sweep = ?");
+    patra_bind_int(stmt, 0, sid);
+    var rs = patra_query_prepared(db, stmt);
+    patra_finalize(stmt);
+    var n = patra_result_count(rs);
+    patra_result_free(rs);
+    return n;
+}
+
+fn test_sweeps(): i64 {
+    var db = runstore_open();
+    # 3x2 grid over /bin/echo: every combo runs + is tagged with the sweep id
+    var spec = "[sweep]\nname = \"g\"\nbin = \"/bin/echo\"\nargs = \"s={steps} l={lr}\"\nlogdir = \"/tmp/ifran_test_logs\"\n[sweep.grid]\nsteps = \"10 20 30\"\nlr = \"0.1 0.2\"\n";
+    file_write_all("/tmp/ifran_t_sweep.cyml", spec, strlen(spec));
+    assert_eq(sweep_run("/tmp/ifran_t_sweep.cyml"), 0, "3x2 grid sweep runs clean");
+    assert_eq(_t_runs_in_sweep(db, 1), 6, "6 combo runs tagged with sweep 1");
+    # a combo log shows real substitution (grid order: last axis fastest ->
+    # combo #0 = steps=10 lr=0.1)
+    var buf = alloc(128);
+    var n = file_read_all("/tmp/ifran_test_logs/run-5.log", buf, 128);
+    assert_gt(n, 0, "combo log written");
+    assert_eq(load8(buf + 2), 49, "combo 0 got steps=10 ('1')");
+
+    # deterministic random mode: same seed -> same combos (compare via a
+    # second identical sweep's captured args)
+    var rspec = "[sweep]\nname = \"r\"\nbin = \"/bin/echo\"\nargs = \"{steps}\"\nlogdir = \"/tmp/ifran_test_logs\"\nmode = \"random\"\nsamples = 4\nseed = 7\n[sweep.grid]\nsteps = \"a b c d e f g h\"\n";
+    file_write_all("/tmp/ifran_t_sweep.cyml", rspec, strlen(rspec));
+    assert_eq(sweep_run("/tmp/ifran_t_sweep.cyml"), 0, "random sweep (seed 7) runs");
+    assert_eq(sweep_run("/tmp/ifran_t_sweep.cyml"), 0, "random sweep (seed 7) again");
+    # both random sweeps drew the same sequence: compare the recorded args
+    var stmt = patra_prepare(db, "SELECT args FROM runs WHERE sweep = ?");
+    patra_bind_int(stmt, 0, 2);
+    var rs1 = patra_query_prepared(db, stmt);
+    patra_finalize(stmt);
+    var stmt2 = patra_prepare(db, "SELECT args FROM runs WHERE sweep = ?");
+    patra_bind_int(stmt2, 0, 3);
+    var rs2 = patra_query_prepared(db, stmt2);
+    patra_finalize(stmt2);
+    assert_eq(patra_result_count(rs1), 4, "4 samples in sweep 2");
+    assert_eq(patra_result_count(rs2), 4, "4 samples in sweep 3");
+    var same = 1;
+    var i = 0;
+    while (i < 4) {
+        var a1 = patra_result_get_str(rs1, i, 0);
+        var l1 = patra_result_get_str_len(rs1, i, 0);
+        var a2 = patra_result_get_str(rs2, i, 0);
+        var l2 = patra_result_get_str_len(rs2, i, 0);
+        if (l1 != l2) { same = 0; }
+        else {
+            var j = 0;
+            while (j < l1) { if (load8(a1 + j) != load8(a2 + j)) { same = 0; } j = j + 1; }
+        }
+        i = i + 1;
+    }
+    patra_result_free(rs1);
+    patra_result_free(rs2);
+    assert_eq(same, 1, "seeded random sweeps are reproducible (same draws)");
+
+    # spec rejects: no axes / no [sweep]
+    var noax = "[sweep]\nname = \"x\"\nbin = \"/bin/echo\"\n";
+    file_write_all("/tmp/ifran_t_sweep.cyml", noax, strlen(noax));
+    assert_eq(sweep_parse("/tmp/ifran_t_sweep.cyml"), 0, "sweep without axes rejected");
+    return 0;
+}
+
 fn main(): i64 {
     alloc_init();
     test_group("jobspec");
@@ -219,6 +286,8 @@ fn main(): i64 {
     test_model_store();
     test_group("datasets");
     test_datasets();
+    test_group("sweeps");
+    test_sweeps();
     return assert_summary();
 }
 

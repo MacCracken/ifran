@@ -17,7 +17,7 @@
 | `train/job`, `train/executor`, `train/approval` | `src/jobspec.cyr` + `src/run.cyr` + `src/runstore.cyr` | M1 | **✅ done** (approval/quotas later) |
 | `train/checkpoint`, `registry`, `storage`, `versioning` | `src/keys.cyr` + `src/store.cyr` — tula+sigil store (**crisp internal boundary** — the named first-extraction candidate) | M2 | **✅ done** |
 | `train/dataset`, `dataset` | `src/dataset.cyr` | M3 | **✅ done** (text corpora; akshara-packed stores if a consumer wants them) |
-| `train/experiment`, `experiment` | `src/sweep*.cyr` (grid/random; BBO is a later separate lane) | M4 | pending |
+| `train/experiment`, `experiment` | `src/sweep.cyr` (grid + seeded-random; BBO stays a separate lane) | M4 | **✅ done** |
 | `eval` | `src/eval*.cyr` | M5 | pending |
 | `preference`, `rlhf` | `src/pref*.cyr` (feeds tarka's DPO/KL/IPO/KTO) | M6 | pending |
 | `budget`, `audit` (thin parts) | job quotas + a libro-backed run journal | M1/M2 | pending |
@@ -74,7 +74,12 @@ port — they are reference for `rust-old/` and get pruned as milestones close
   id-referencing from job specs (`dataset = N` / `{dataset}`). Suite 43/43.
   **Proof met:** a 51 KB docs corpus deduped 567→356 lines and attn11 TRAINED
   on it as an ifran job (31.7 s, exit 0).
-- **M4 — sweeps** · **M5 — eval runner** · **M6 — preference store**.
+- **M4 — sweeps. ✅ DONE 2026-07-05.** `src/sweep.cyr`: grid (cartesian) +
+  seeded-deterministic random over job templates; within-token `{axis}`
+  substitution; combos = first-class runs tagged with the sweep id; pre-M4 db
+  migration (ALTER TABLE). Suite 53/53. **Proof met:** a 3-combo attn11
+  steps-sweep trained on the M3 dataset, 3/3 exit 0, durations scaling.
+- **M5 — eval runner** · **M6 — preference store**.
 - **v1.0** — an attn11/tarka/anukūlana workflow runs entirely as ifran jobs;
   `rust-old/` dismissed.
 

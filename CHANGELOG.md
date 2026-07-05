@@ -88,6 +88,33 @@ derived a curated child (**567 → 356 lines, 211 exact duplicates dropped**) �
 exit 0) with the placeholder resolved to the store path — **a sibling
 TRAINING on an ifran-managed dataset, end-to-end.**
 
+### Added — M4 (sweeps)
+- **`src/sweep.cyr`** — a sweep is a job TEMPLATE + parameter axes
+  (`[sweep]` mirrors `[job]`; `[sweep.grid]` axes are space-separated
+  candidates). **Grid** = cartesian product; **random** = `samples` draws,
+  **deterministic by seed** (same seed → same combos — reproducible sweeps,
+  proven in the suite by comparing two runs' recorded args). Every combo goes
+  through the ordinary M1 executor, so each is a first-class recorded run
+  **tagged with the sweep id** — "results into the store" for free. `{axis}`
+  placeholders substitute WITHIN tokens (`--steps={steps}` works); the
+  `{dataset}` placeholder now shares the same substring semantics.
+- **Scope held to the honest Rust surface**: grid + seeded-random only (the
+  Rust search was grid/random too); black-box optimization stays a separately
+  triggered lane, not smuggled in.
+- **Schema migration**: pre-M4 `runs` tables gain the `sweep` column via an
+  error-ignored `ALTER TABLE` at open (proven against a live pre-M4 db).
+- **CLI**: `ifran sweep <spec.cyml>` · `ifran sweeps`; `runs` listing shows the
+  sweep tag. **`tests/ifran.tcyr`** 43→**53**: 3×2 grid expansion + tagging,
+  substitution content checked in a combo log, seeded-random reproducibility,
+  axis/section rejects.
+
+### The M4 proof
+`ifran sweep` expanded a 3-combo grid over the REAL attn11 on the M3-curated
+dataset (`--steps 10|20|40`): 3/3 trained and exited 0, durations scaling with
+steps (10.8 s / 21.5 s / 42.9 s), every run recorded and tagged with the sweep
+id — **a hyperparameter sweep of real sovereign-ML training runs, orchestrated
+end-to-end.**
+
 ### Porting notes (patra/bayan RTFM-class, recorded for the port's continuation)
 - patra binds are **0-based**; an unbound slot defaults to INT 0 → a
   `PATRA_ERR_TYPE` (9) against a STR column.

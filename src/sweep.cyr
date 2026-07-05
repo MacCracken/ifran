@@ -1,0 +1,268 @@
+# @public — M4: the sweep runner. A sweep is a job TEMPLATE plus parameter
+# axes; ifran expands the combinations and drives every one through the
+# ordinary M1 executor, so each combo is a first-class recorded run (tagged
+# with the sweep id — "results into the store" for free).
+#
+#   [sweep]
+#   name = "steps-sweep"            # combo runs are named <name>#<k>
+#   bin  = "/path/attn11"           # + args/logdir/dataset exactly like [job];
+#   args = "--corpus {dataset} --steps {steps} --lr {lr}"
+#   mode = "grid"                   # grid (default) = cartesian product;
+#   samples = 5                     # random = `samples` draws (uniform per axis)
+#   seed = 42                       # random mode is DETERMINISTIC (LCG; same
+#                                   # seed -> same combos — reproducible sweeps)
+#   [sweep.grid]
+#   steps = "10 20 30"              # each axis: space-separated candidates;
+#   lr = "0.001 0.01"               # {axis} substitutes WITHIN tokens too
+#                                   # (both "--steps {steps}" and
+#                                   #  "--steps={steps}" work)
+#
+# Grid + seeded-random only — matching the honest Rust surface (its search was
+# grid/random too); black-box optimization (GP-BO/CMA-ES) is a separately
+# triggered lane, NOT smuggled in here.
+
+# axis record: +0 name (cstr), +8 values (vec of cstr)
+fn _sw_axis_name(a): i64 { return load64(a); }
+fn _sw_axis_values(a): i64 { return load64(a + 8); }
+
+var _sw_lcg = 1;
+fn _sw_seed(s): i64 { _sw_lcg = s; if (s == 0) { _sw_lcg = 1; } return 0; }
+fn _sw_next(n): i64 {
+    _sw_lcg = (_sw_lcg * 6364136223846793005 + 1442695040888963407);
+    var v = (_sw_lcg >> 33);
+    if (v < 0) { v = 0 - v; }
+    return v % n;
+}
+
+# parse [sweep] + [sweep.grid] -> (template jobspec, axes vec, mode, samples, seed)
+# packed: +0 js, +8 axes, +16 mode-cstr, +24 samples, +32 seed
+fn sweep_parse(path): i64 {
+    var sections = bayan_toml_parse_file(path);
+    var ss = bayan_toml_get_sections(sections, "sweep");
+    if (vec_len(ss) == 0) { println("ifran: sweep file has no [sweep] section"); return 0; }
+    var pairs = bayan_toml_section_pairs(vec_get(ss, 0));
+    var js = jobspec_from_pairs(pairs);
+    if (js == 0) { return 0; }
+    var gs = bayan_toml_get_sections(sections, "sweep.grid");
+    if (vec_len(gs) == 0) { println("ifran: sweep file has no [sweep.grid] axes"); return 0; }
+    var gpairs = bayan_toml_section_pairs(vec_get(gs, 0));
+    var axes = vec_new();
+    var i = 0;
+    while (i < vec_len(gpairs)) {
+        var pr = vec_get(gpairs, i);
+        var aname = str_cstr(bayan_toml_pair_key(pr));
+        var avals = vec_new();
+        _js_split_args(str_cstr(bayan_toml_pair_value(pr)), avals);
+        if (vec_len(avals) == 0) {
+            println("ifran: sweep axis with no candidate values");
+            return 0;
+        }
+        var ax = alloc(16);
+        store64(ax, aname);
+        store64(ax + 8, avals);
+        vec_push(axes, ax);
+        i = i + 1;
+    }
+    var mode = _js_get_cstr(pairs, "mode");
+    if (mode == 0) { mode = "grid"; }
+    var samples = 0;
+    var sv = toml_get(pairs, "samples");
+    if (sv != 0) { samples = str_to_int(sv); }
+    var seed = 1;
+    var seedv = toml_get(pairs, "seed");
+    if (seedv != 0) { seed = str_to_int(seedv); }
+    var sw = alloc(40);
+    store64(sw, js);
+    store64(sw + 8, axes);
+    store64(sw + 16, mode);
+    store64(sw + 24, samples);
+    store64(sw + 32, seed);
+    return sw;
+}
+
+fn _sw_combo_count(axes): i64 {
+    var n = 1;
+    var i = 0;
+    while (i < vec_len(axes)) {
+        n = n * vec_len(_sw_axis_values(vec_get(axes, i)));
+        i = i + 1;
+    }
+    return n;
+}
+
+# replace every occurrence of "{name}" inside tok with value; returns a fresh
+# cstr (or tok unchanged if no occurrence). Shared semantics with {dataset}.
+fn sweep_subst(tok, name, value): i64 {
+    var tl = strlen(tok);
+    var nl = strlen(name);
+    var vl = strlen(value);
+    var sb = str_builder_new();
+    var found = 0;
+    var i = 0;
+    while (i < tl) {
+        var hit = 0;
+        if (load8(tok + i) == 123) {                  # '{'
+            if (i + nl + 1 < tl) {
+                if (load8(tok + i + nl + 1) == 125) { # '}'
+                    var j = 0;
+                    hit = 1;
+                    while (j < nl) {
+                        if (load8(tok + i + 1 + j) != load8(name + j)) { hit = 0; j = nl; }
+                        j = j + 1;
+                    }
+                }
+            }
+        }
+        if (hit == 1) {
+            var k = 0;
+            while (k < vl) { str_builder_putc(sb, load8(value + k)); k = k + 1; }
+            i = i + nl + 2;
+            found = 1;
+        } else {
+            str_builder_putc(sb, load8(tok + i));
+            i = i + 1;
+        }
+    }
+    if (found == 0) { return tok; }
+    return str_cstr(str_builder_build(sb));
+}
+
+# build a per-combo jobspec: fresh argv with axis placeholders substituted per
+# `idx` (a vec of value-indices, one per axis), name = "<base>#<k>"
+fn _sw_combo_spec(js, axes, idx, k): i64 {
+    var argv = jobspec_argv(js);
+    var nv = vec_new();
+    var t = 0;
+    while (t < vec_len(argv)) {
+        var out = vec_get(argv, t);
+        var a = 0;
+        while (a < vec_len(axes)) {
+            var ax = vec_get(axes, a);
+            out = sweep_subst(out, _sw_axis_name(ax), vec_get(_sw_axis_values(ax), load64(vec_get(idx, a))));
+            a = a + 1;
+        }
+        vec_push(nv, out);
+        t = t + 1;
+    }
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, jobspec_name(js));
+    str_builder_add_cstr(sb, "#");
+    str_builder_add_int(sb, k);
+    var cjs = alloc(40);
+    store64(cjs, str_cstr(str_builder_build(sb)));
+    store64(cjs + 8, jobspec_bin(js));
+    store64(cjs + 16, nv);
+    store64(cjs + 24, jobspec_logdir(js));
+    store64(cjs + 32, jobspec_dataset(js));
+    return cjs;
+}
+
+fn _sw_open_table(): i64 {
+    var db = runstore_open();
+    if (db == 0) { return 0; }
+    patra_exec(db, "CREATE TABLE sweeps (id INT AUTOINCREMENT, name STR, mode STR, combos INT, started INT)");
+    return db;
+}
+
+fn _sw_insert(db, name, mode, combos): i64 {
+    var stmt = patra_prepare(db, "INSERT INTO sweeps (name, mode, combos, started) VALUES (?, ?, ?, ?)");
+    if (stmt == 0) { return 0 - 1; }
+    patra_bind_text(stmt, 0, name, strlen(name));
+    patra_bind_text(stmt, 1, mode, strlen(mode));
+    patra_bind_int(stmt, 2, combos);
+    patra_bind_int(stmt, 3, clock_epoch_secs());
+    var idp = alloc(8);
+    if (patra_insert_returning(db, stmt, idp) != 0) { patra_finalize(stmt); return 0 - 1; }
+    patra_finalize(stmt);
+    return load64(idp);
+}
+
+# Run a sweep spec. Every combo runs (failures recorded, not aborting the
+# sweep); returns 0 iff every combo exited 0.
+fn sweep_run(path): i64 {
+    var sw = sweep_parse(path);
+    if (sw == 0) { return 1; }
+    var js = load64(sw);
+    var axes = load64(sw + 8);
+    var mode = load64(sw + 16);
+    var db = _sw_open_table();
+    if (db == 0) { return 1; }
+    var is_random = streq(mode, "random");
+    var combos = 0;
+    if (is_random == 1) {
+        combos = load64(sw + 24);
+        if (combos <= 0) { println("ifran: random sweep needs samples > 0"); return 1; }
+    } else { combos = _sw_combo_count(axes); }
+    var sid = _sw_insert(db, jobspec_name(js), mode, combos);
+    if (sid < 0) { println("ifran: sweep record insert failed"); return 1; }
+    ifr_print_cstr("sweep "); fmt_int(sid);
+    ifr_print_cstr(" ("); ifr_print_cstr(mode);
+    ifr_print_cstr(", "); fmt_int(combos);
+    ifr_print_cstr(" combos)"); println("");
+    runstore_set_sweep(sid);
+    _sw_seed(load64(sw + 32));
+    var na = vec_len(axes);
+    var idx = vec_new();
+    var a = 0;
+    while (a < na) { var c0 = alloc(8); store64(c0, 0); vec_push(idx, c0); a = a + 1; }
+    var failures = 0;
+    var k = 0;
+    while (k < combos) {
+        if (is_random == 1) {
+            a = 0;
+            while (a < na) {
+                var ax = vec_get(axes, a);
+                store64(vec_get(idx, a), _sw_next(vec_len(_sw_axis_values(ax))));
+                a = a + 1;
+            }
+        }
+        var cjs = _sw_combo_spec(js, axes, idx, k);
+        if (run_job(cjs) != 0) { failures = failures + 1; }
+        if (is_random == 0) {
+            # odometer increment
+            a = na - 1;
+            var carry = 1;
+            while (a >= 0) {
+                if (carry == 0) { a = 0 - 1; }
+                else {
+                    var cell = vec_get(idx, a);
+                    var v = load64(cell) + 1;
+                    if (v < vec_len(_sw_axis_values(vec_get(axes, a)))) {
+                        store64(cell, v);
+                        carry = 0;
+                    } else { store64(cell, 0); }
+                    a = a - 1;
+                }
+            }
+        }
+        k = k + 1;
+    }
+    runstore_set_sweep(0);
+    ifr_print_cstr("sweep "); fmt_int(sid);
+    ifr_print_cstr(" complete: "); fmt_int(combos - failures);
+    ifr_print_cstr("/"); fmt_int(combos);
+    ifr_print_cstr(" combos exited 0"); println("");
+    if (failures == 0) { return 0; }
+    return 1;
+}
+
+fn sweep_ls(): i64 {
+    var db = _sw_open_table();
+    if (db == 0) { return 1; }
+    var rs = patra_query(db, "SELECT id, name, mode, combos, started FROM sweeps");
+    if (rs == 0) { println("ifran: sweeps query failed"); return 1; }
+    var n = patra_result_count(rs);
+    println("id | name | mode | combos | started");
+    var i = 0;
+    while (i < n) {
+        fmt_int(patra_result_get_int(rs, i, 0)); ifr_print_cstr(" | ");
+        _rs_print_str(rs, i, 1); ifr_print_cstr(" | ");
+        _rs_print_str(rs, i, 2); ifr_print_cstr(" | ");
+        fmt_int(patra_result_get_int(rs, i, 3)); ifr_print_cstr(" | ");
+        fmt_int(patra_result_get_int(rs, i, 4));
+        println("");
+        i = i + 1;
+    }
+    patra_result_free(rs);
+    return 0;
+}

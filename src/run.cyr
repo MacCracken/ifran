@@ -119,7 +119,7 @@ fn run_job(js): i64 {
         }
         var ai = 0;
         while (ai < vec_len(argv)) {
-            if (streq(vec_get(argv, ai), "{dataset}") == 1) { vec_set(argv, ai, dpath); }
+            vec_set(argv, ai, sweep_subst(vec_get(argv, ai), "dataset", dpath));
             ai = ai + 1;
         }
     }
