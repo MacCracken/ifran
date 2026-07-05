@@ -21,7 +21,7 @@ entirely as recorded ifran jobs. Detail: CHANGELOG `[2.0.0]` +
 Ordered by expected pull, each with its trigger. None is calendared; a lane
 opens when its trigger fires or the maintainer pulls it forward.
 
-### Lane 1 — executor hardening (2.1-track) — ✅ DONE 2026-07-05 (`[Unreleased]`)
+### Lane 1 — executor hardening — ✅ SHIPPED as 2.1.0 (2026-07-05)
 - **Job timeout + reaper** — `timeout_s` enforced (poll-paced capture,
   SIGKILL + `timed-out`/exit-137; the audit's one named limitation closed);
   child PID recorded on the row at fork, and `ifran reap` orphans `running`

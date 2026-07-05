@@ -6,6 +6,14 @@
 
 ## Version
 
+**2.1.0 — RELEASED 2026-07-05 (Lane 1 executor hardening).** `timeout_s`
+enforcement (poll-paced capture, SIGKILL → `timed-out`/137) · child PID
+recorded on the run row + `ifran reap` (signal-0 probe; orphans only
+definitely-dead rows) · quoted `args` (escapes; unterminated rejects loud) ·
+`ifran show <id>` (full record + 4 KB line-aligned log tail). Suite 77→**100**;
+all proven live. Detail in CHANGELOG `[2.1.0]`. The `rust-old/` removal window
+is now OPEN (~2.1/2.2 per the hold) — a user call, not automatic.
+
 **2.0.0 — RELEASED + TAGGED 2026-07-05.** The Cyrius port shipped whole (the
 M0–M6 arc + stabilization + cmdit CLI, 2026-07-04→05); cut detail in
 CHANGELOG `[2.0.0]`, the port record in [`port-ledger.md`](port-ledger.md).
@@ -15,9 +23,10 @@ rewritten; ADR 0001 + `examples/` seeded).
 
 ## Surface (frozen 2.x — `docs/api.md`)
 
-Jobs (`run`/`runs`) · operator keys (`keys`) · signed model store (`store`) ·
-datasets + real dedup (`dataset`) · sweeps (`sweep`/`sweeps`) · evals + the
-benchmark store (`eval`/`evals`) · preferences + JSONL export (`pref`).
+Jobs (`run`/`runs`/`show`/`reap`, quoted args + `timeout_s` — 2.1) · operator
+keys (`keys`) · signed model store (`store`) · datasets + real dedup
+(`dataset`) · sweeps (`sweep`/`sweeps`) · evals + the benchmark store
+(`eval`/`evals`) · preferences + JSONL export (`pref`).
 CLI on **cmdit** (generated help/version/errors). Exit codes: `run` = child's,
 `eval` = the gate, usage = 2.
 
@@ -49,12 +58,10 @@ trigger.
 
 ## In flight / next
 
-**Lane 1 executor hardening LANDED 2026-07-05 (`[Unreleased]`, the 2.1
-opener — awaiting cut)**: `timeout_s` enforcement (poll-paced capture, SIGKILL
-→ `timed-out`/137), child-PID-on-row + `ifran reap` (signal-0 probe, orphans
-only definitely-dead rows), quoted `args`, `ifran show <id>` (full record +
-log tail). Suite 77→**100**; proven live. Remaining lanes in
-[`roadmap.md`](roadmap.md); `rust-old/` removal window opens ~2.1/2.2. **Lane 2 CLOSED 2026-07-05** (anukūlana 1.1.1 `--sk` — operator-key
+Nothing in flight — Lane 1 shipped as 2.1.0 (see Version above); remaining
+lanes with their triggers live in [`roadmap.md`](roadmap.md), and the
+`rust-old/` removal window is open (user call). **Lane 2 CLOSED 2026-07-05**
+(anukūlana 1.1.1 `--sk` — operator-key
 producer signing; `store add` records `verified` end-to-end, proven on the
 real checkpoint). **Lane 3 CLOSED same day** (tarka **1.1.2** `--pref` JSONL
 ingestion — DPO/IPO/KTO train from an ifran-curated export; e2e proven).

@@ -7,6 +7,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-07-05
+
 **Lane 1 — executor hardening (the 2.1 opener): timeout/reaper, quoted args,
 `ifran show`.** The audit's one named limitation (no timeout enforcement) and
 the two M1-scope conveniences, all additive on the frozen 2.x surface.
