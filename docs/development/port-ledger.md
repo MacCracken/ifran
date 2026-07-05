@@ -1,0 +1,75 @@
+# ifran — Port Ledger (Rust → Cyrius)
+
+> The module-by-module disposition of the 53.6k-line Rust tree (`rust-old/`,
+> reference-only) and the running record of what has landed in Cyrius. The
+> strategic plan lives in agnosticos
+> [`planning/ifran-port.md`](https://github.com/MacCracken/agnosticos/blob/main/docs/development/planning/ifran-port.md);
+> this file is the in-repo tracker. `rust-old/` is the **reference oracle** —
+> read it, never modify it; it is dismissed entirely when the port reaches v1.0
+> parity-of-purpose (NOT line parity — most of it deliberately does not port).
+
+## Disposition map (from the 2026-07-04 survey)
+
+### PORTS — the control-plane core (this repo's Cyrius side)
+
+| `rust-old/src/` | Cyrius home (planned) | Milestone | Status |
+|---|---|---|---|
+| `train/job`, `train/executor`, `train/approval` | `src/job*.cyr` — job manager/scheduler; drives sibling binaries as child processes | M1 | pending |
+| `train/checkpoint`, `registry`, `storage`, `versioning` | `src/store*.cyr` — tula+sigil checkpoint/model store (**crisp internal boundary** — the named first-extraction candidate) | M2 | pending |
+| `train/dataset`, `dataset` | `src/dataset*.cyr` | M3 | pending |
+| `train/experiment`, `experiment` | `src/sweep*.cyr` (grid/random; BBO is a later separate lane) | M4 | pending |
+| `eval` | `src/eval*.cyr` | M5 | pending |
+| `preference`, `rlhf` | `src/pref*.cyr` (feeds tarka's DPO/KL/IPO/KTO) | M6 | pending |
+| `budget`, `audit` (thin parts) | job quotas + a libro-backed run journal | M1/M2 | pending |
+| `types`, `config`, `cli` | `src/types.cyr` / `src/config.cyr` (bayan CYML) / `src/main.cyr` | M0–M1 | scaffolded |
+
+### DOES NOT PORT (owned elsewhere, or dead by design)
+
+| `rust-old/src/` | Fate |
+|---|---|
+| `backends/` (15-engine broker + router/cost/health/circuit-breaker) | **DEAD** — anti-sovereign (murti re-derivation); local inference = rosnet/tentib via hoosh; foreign engines → mehman |
+| `server/` (axum REST, ~21 groups) | not carried by default — interface question open (CLI-first now; bote-MCP when SY re-wires; decide by M2) |
+| `lineage` | → **itihas** (integrate) |
+| `marketplace` | → **mela** |
+| `fleet` | → **seema** (its own later port) |
+| `rag` | → **mneme** (future retrieval lane) |
+| `hardware` | → **ai-hwaccel** |
+| `tenant` | deferred (single-operator sovereign box first) |
+| `train/methods`, `train/scripts` (the Python shells), `train/distributed` | the siblings ARE the methods; distributed → seema-stage |
+| `bridge`, `pull`, `training_events`, OTLP telemetry | dead / re-derived minimally (events → the journal) |
+| **fake dedup / fake perplexity** (per the 2026-06-25 mining) | **do not port** — build real ones or omit |
+
+### Rust-era docs (in `docs/`)
+
+`backends.md`, `fleet-management.md`, `multi-tenancy.md`, `bridge-protocol.md`,
+`hardware-acceleration.md`, `api-reference.md` describe surfaces that do NOT
+port — they are reference for `rust-old/` and get pruned as milestones close
+(same eventual-dismissal path as the code). `training.md` /
+`evaluation-guide.md` / `cli-reference.md` get rewritten per milestone.
+
+## Milestones
+
+- **M0 — scaffold + inventory. ✅ DONE 2026-07-04.** `cyrius port` ran (Rust
+  tree + Cargo/Cross/cargo-config/osv strays → `rust-old/`); skeleton builds
+  (`build/ifran` prints ready, 2/2 scaffold tests); `cyrius.cyml` corrected to
+  `${file:VERSION}` + the repo's actual license; this ledger committed.
+- **M1 — job core.** Proof: `ifran run <job.cyml>` drives a real sibling binary
+  end-to-end and persists the run record.
+- **M2 — checkpoint/model store** (tula+sigil; key management lands).
+- **M3 — datasets** · **M4 — sweeps** · **M5 — eval runner** · **M6 —
+  preference store**.
+- **v1.0** — an attn11/tarka/anukūlana workflow runs entirely as ifran jobs;
+  `rust-old/` dismissed.
+
+## Open questions (maintainer calls)
+
+1. **License.** The Rust ifran is **AGPL-3.0** (the LICENSE file); the rest of
+   the ecosystem is GPL-3.0-only. The manifest currently matches the LICENSE
+   file. Relicensing the port is the maintainer's call — flag stands until
+   decided.
+2. **Interface surface** (decide by M2): CLI-first now; the Rust REST boundary
+   is not carried by default; **bote-MCP** is the agnos-native candidate when
+   SY re-wires off its HTTP proxy.
+3. **Versioning across the port**: VERSION stays at the Rust line (1.3.0) until
+   the first Cyrius cut; precedent (goonj/naad/svara) ships the completed port
+   as the next major (→ 2.0.0).

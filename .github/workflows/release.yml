@@ -2,415 +2,84 @@ name: Release
 
 on:
   push:
-    tags:
-      - "[0-9]*"
+    tags: ['[0-9]+.[0-9]+.[0-9]+*']
 
 permissions:
   contents: write
-  packages: write
-  id-token: write
-  security-events: write
-
-env:
-  CARGO_TERM_COLOR: always
-  REGISTRY: ghcr.io
-  IMAGE_NAME: maccracken/ifran
 
 jobs:
-  ci-gate:
+  ci:
     name: CI Gate
     uses: ./.github/workflows/ci.yml
-    secrets: inherit
 
-  build-release:
-    name: Build Release (${{ matrix.target }})
-    needs: ci-gate
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-latest
-            use-cross: false
-            arch: amd64
-          - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-latest
-            use-cross: true
-            arch: arm64
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Rust environment
-        id: setup
-        uses: ./.github/actions/setup-rust-env
-        with:
-          targets: ${{ matrix.target }}
-          cache-prefix: release-${{ matrix.target }}
-          install-cross: ${{ matrix.use-cross }}
-
-      - name: Build release (native)
-        if: matrix.use-cross == false
-        run: cargo build --all-features --release --target ${{ matrix.target }}
-
-      - name: Build release (cross)
-        if: matrix.use-cross == true
-        run: cross build --all-features --release --target ${{ matrix.target }}
-
-      - name: Create release tarball
-        run: |
-          VERSION=${{ steps.setup.outputs.project-version }}
-          TARBALL_NAME="ifran-${VERSION}-linux-${{ matrix.arch }}"
-          mkdir -p "${TARBALL_NAME}"
-
-          cp target/${{ matrix.target }}/release/ifran "${TARBALL_NAME}/"
-          cp target/${{ matrix.target }}/release/ifran-server "${TARBALL_NAME}/"
-          cp LICENSE "${TARBALL_NAME}/"
-          cp README.md "${TARBALL_NAME}/"
-
-          if [ -d docs ]; then
-            cp -r docs "${TARBALL_NAME}/"
-          fi
-
-          tar czf "${TARBALL_NAME}.tar.gz" "${TARBALL_NAME}"
-          sha256sum "${TARBALL_NAME}.tar.gz" > "${TARBALL_NAME}.tar.gz.sha256"
-
-      - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-${{ matrix.arch }}
-          path: |
-            ifran-*.tar.gz
-            ifran-*.tar.gz.sha256
-          retention-days: 7
-
-  generate-sbom:
-    name: Generate SBOM
-    needs: ci-gate
+  release:
+    name: Build & Release
+    needs: [ci]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4 (pinned — CVE-21)
 
-      - name: Setup Rust environment
-        uses: ./.github/actions/setup-rust-env
-        with:
-          cache-prefix: sbom
-
-      - name: Install cargo-cyclonedx
-        run: cargo install cargo-cyclonedx --locked
-
-      - name: Generate CycloneDX SBOM (JSON)
-        run: cargo cyclonedx --format json
-
-      - name: Generate CycloneDX SBOM (XML)
-        run: cargo cyclonedx --format xml
-
-      - name: Install cargo-license
-        run: cargo install cargo-license --locked
-
-      - name: Generate license report (JSON)
-        run: cargo license --json > license-report.json
-
-      - name: Generate license report (TXT)
-        run: cargo license > license-report.txt
-
-      - name: Upload SBOM artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: sbom
-          path: |
-            *bom.cdx.json
-            *bom.cdx.xml
-            license-report.json
-            license-report.txt
-          retention-days: 90
-
-  publish:
-    name: Publish to crates.io
-    needs: [ci-gate, build-release]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Rust environment
-        uses: ./.github/actions/setup-rust-env
-        with:
-          cache-prefix: publish
-
-      - name: Verify version matches tag
+      - name: Verify version consistency
+        # VERSION is the single source of truth; cyrius.cyml derives it
+        # via version = "${file:VERSION}". Both must equal the pushed tag
+        # (matches patra / sigil).
         run: |
           FILE_VERSION=$(cat VERSION | tr -d '[:space:]')
-          TAG_VERSION="${GITHUB_REF_NAME}"
-          [ "$FILE_VERSION" = "$TAG_VERSION" ] || { echo "VERSION mismatch: file=$FILE_VERSION tag=$TAG_VERSION"; exit 1; }
-
-      - name: Publish to crates.io
-        run: cargo publish --all-features
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
-  create-release:
-    name: Create GitHub Release
-    needs: [build-release, generate-sbom, publish]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Read VERSION
-        id: version
-        run: |
-          VERSION=$(cat VERSION | tr -d '[:space:]')
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
-      - name: Determine if pre-release
-        id: prerelease
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          if [[ "$VERSION" == *-* ]]; then
-            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          CYML_RAW=$(grep '^version = ' cyrius.cyml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          if [ "$CYML_RAW" = "\${file:VERSION}" ]; then
+              CYML_VERSION="$FILE_VERSION"
           else
-            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+              CYML_VERSION="$CYML_RAW"
           fi
+          TAG="${GITHUB_REF_NAME}"
+          [ "$FILE_VERSION" = "$TAG" ] || { echo "VERSION ($FILE_VERSION) != tag ($TAG)"; exit 1; }
+          [ "$CYML_VERSION" = "$TAG" ] || { echo "cyrius.cyml ($CYML_RAW) != tag ($TAG)"; exit 1; }
+          echo "Version verified: $TAG (cyml: $CYML_RAW)"
 
-      - name: Generate release notes
-        id: changelog
+      - name: Install Cyrius toolchain
+        # Canonical installer — see ci.yml for rationale.
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -E '^[0-9]' | head -n 2 | tail -n 1 || echo "")
-          CURRENT_TAG="${GITHUB_REF_NAME}"
+          set -e
+          CYRIUS_VERSION="$(grep '^cyrius = ' cyrius.cyml | head -1 | sed 's/cyrius = "\(.*\)"/\1/')"
+          echo "Installing Cyrius $CYRIUS_VERSION"
+          curl -sSf https://raw.githubusercontent.com/MacCracken/cyrius/main/scripts/install.sh | \
+            CYRIUS_VERSION="$CYRIUS_VERSION" sh
+          echo "$HOME/.cyrius/bin" >> "$GITHUB_PATH"
 
-          # Count stats
-          if [ -n "$PREVIOUS_TAG" ]; then
-            COMMIT_COUNT=$(git rev-list "${PREVIOUS_TAG}..${CURRENT_TAG}" --count --no-merges 2>/dev/null || echo "?")
-            FILES_CHANGED=$(git diff "${PREVIOUS_TAG}..${CURRENT_TAG}" --stat | tail -1 | grep -oP '\d+ file' | grep -oP '\d+' || echo "?")
-          else
-            COMMIT_COUNT=$(git rev-list --count --no-merges HEAD 2>/dev/null || echo "?")
-            FILES_CHANGED="?"
-          fi
-          TEST_COUNT=$(grep -r '#\[test\]' src/ tests/ --include='*.rs' | wc -l || echo "?")
-          BENCH_COUNT=$(grep -r 'bench_function' benches/ --include='*.rs' | wc -l || echo "?")
-          FUZZ_COUNT=$(ls fuzz/fuzz_targets/*.rs 2>/dev/null | wc -l || echo "0")
+      - name: Resolve dependencies
+        run: cyrius deps
 
-          cat > changelog.md << 'EOF'
-          ## Ifran ${VERSION}
+      - name: Build
+        run: |
+          mkdir -p build
+          cyrius build src/main.cyr build/${{ github.event.repository.name }}
 
-          | | |
-          |---|---|
-          | **Commits** | ${COMMIT_COUNT} |
-          | **Files changed** | ${FILES_CHANGED} |
-          | **Tests** | ${TEST_COUNT} |
-          | **Benchmarks** | ${BENCH_COUNT} |
-          | **Fuzz targets** | ${FUZZ_COUNT} |
-          | **License** | AGPL-3.0-only |
-          | **crates.io** | [ifran](https://crates.io/crates/ifran) |
+      - name: Extract changelog
+        # Pull the tagged section out of CHANGELOG.md for the release body.
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          BODY=$(awk "/^## \\[$TAG\\]/{found=1; next} /^## \\[/{if(found) exit} found{print}" CHANGELOG.md)
+          [ -n "$BODY" ] || BODY="No changelog entry for $TAG."
+          echo "$BODY" > /tmp/release-body.md
 
-          EOF
+      - name: Source tarball + checksums
+        # The source tarball + SHA256SUMS are what `cyrius deps` fetches and
+        # sha256-verifies downstream — without them this project cannot be
+        # consumed as a dependency. This is the release artifact, not just
+        # the built binary.
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          NAME="${{ github.event.repository.name }}"
+          git archive --format=tar.gz --prefix="$NAME-$TAG/" -o "$NAME-$TAG.tar.gz" HEAD
+          sha256sum "$NAME-$TAG.tar.gz" build/"$NAME" > SHA256SUMS 2>/dev/null \
+            || sha256sum "$NAME-$TAG.tar.gz" > SHA256SUMS
 
-          # Variable expansion in heredoc
-          sed -i "s/\${VERSION}/${VERSION}/g" changelog.md
-          sed -i "s/\${COMMIT_COUNT}/${COMMIT_COUNT}/g" changelog.md
-          sed -i "s/\${FILES_CHANGED}/${FILES_CHANGED}/g" changelog.md
-          sed -i "s/\${TEST_COUNT}/${TEST_COUNT}/g" changelog.md
-          sed -i "s/\${BENCH_COUNT}/${BENCH_COUNT}/g" changelog.md
-          sed -i "s/\${FUZZ_COUNT}/${FUZZ_COUNT}/g" changelog.md
-
-          # Extract CHANGELOG.md section for this version
-          if [ -f CHANGELOG.md ]; then
-            SECTION=$(sed -n "/^## \[${VERSION}\]/,/^## \[/p" CHANGELOG.md | sed '1d;$d')
-            if [ -n "$SECTION" ]; then
-              echo "### What's Changed" >> changelog.md
-              echo "" >> changelog.md
-              echo "$SECTION" >> changelog.md
-              echo "" >> changelog.md
-            fi
-          fi
-
-          echo "---" >> changelog.md
-          echo "" >> changelog.md
-          echo "<details><summary>Commits</summary>" >> changelog.md
-          echo "" >> changelog.md
-
-          if [ -n "$PREVIOUS_TAG" ]; then
-            git log "${PREVIOUS_TAG}..${CURRENT_TAG}" --pretty=format:"- %s (\`%h\`)" --no-merges >> changelog.md
-          else
-            git log --pretty=format:"- %s (\`%h\`)" --no-merges -20 >> changelog.md
-          fi
-
-          echo "" >> changelog.md
-          echo "</details>" >> changelog.md
-          echo "" >> changelog.md
-
-          if [ -n "$PREVIOUS_TAG" ]; then
-            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREVIOUS_TAG}...${CURRENT_TAG}" >> changelog.md
-          fi
-
-          cat >> changelog.md << 'ASSETS'
-
-          ---
-
-          ### Install
-
-          **Cargo:**
-          ```bash
-          cargo install ifran
-          ```
-
-          **Binary:**
-          ```bash
-          tar xzf ifran-*-linux-amd64.tar.gz
-          cd ifran-*/
-          ./ifran serve
-          # API at http://localhost:8420
-          ```
-
-          **Container:**
-          ```bash
-          docker pull ghcr.io/maccracken/ifran:latest
-          docker run -p 8420:8420 ghcr.io/maccracken/ifran:latest
-          ```
-
-          ### Downloads
-
-          | Platform | Architecture | File |
-          |----------|-------------|------|
-          | Linux | x86_64 (amd64) | `ifran-*-linux-amd64.tar.gz` |
-          | Linux | aarch64 (arm64) | `ifran-*-linux-arm64.tar.gz` |
-          | Container | multi-arch | `ghcr.io/maccracken/ifran` |
-
-          Each tarball includes `ifran` (CLI) and `ifran-server` (API server), plus LICENSE, README, and docs.
-          SHA-256 checksums are provided as `.sha256` files alongside each tarball.
-
-          ### Supply Chain
-
-          SBOM (CycloneDX JSON/XML) and license reports are attached for compliance auditing.
-
-          ASSETS
-
-      - name: Download release artifacts (amd64)
-        uses: actions/download-artifact@v4
+      - name: Create release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2 (pinned — CVE-21)
         with:
-          name: release-amd64
-          path: artifacts/release-amd64
-
-      - name: Download release artifacts (arm64)
-        uses: actions/download-artifact@v4
-        with:
-          name: release-arm64
-          path: artifacts/release-arm64
-
-      - name: Download SBOM artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: sbom
-          path: artifacts/sbom
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: "Ifran ${{ steps.version.outputs.version }}"
-          body_path: changelog.md
-          prerelease: ${{ steps.prerelease.outputs.is_prerelease }}
-          make_latest: ${{ steps.prerelease.outputs.is_prerelease == 'false' }}
+          name: "${{ github.event.repository.name }} ${{ github.ref_name }}"
+          body_path: /tmp/release-body.md
           files: |
-            artifacts/release-amd64/*
-            artifacts/release-arm64/*
-            artifacts/sbom/*
-          generate_release_notes: false
-
-  container:
-    name: Publish Container Images
-    needs: [build-release]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Read VERSION
-        id: version
-        run: |
-          VERSION=$(cat VERSION | tr -d '[:space:]')
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
-      - name: Download release artifacts (amd64)
-        uses: actions/download-artifact@v4
-        with:
-          name: release-amd64
-          path: artifacts/amd64
-
-      - name: Download release artifacts (arm64)
-        uses: actions/download-artifact@v4
-        with:
-          name: release-arm64
-          path: artifacts/arm64
-
-      - name: Stage binaries for Docker build
-        run: |
-          mkdir -p bin/amd64 bin/arm64
-
-          # Extract amd64 binaries
-          tar xzf artifacts/amd64/ifran-*-linux-amd64.tar.gz
-          cp ifran-*-linux-amd64/ifran bin/amd64/ifran
-          cp ifran-*-linux-amd64/ifran-server bin/amd64/ifran-server
-          chmod +x bin/amd64/*
-
-          # Extract arm64 binaries
-          tar xzf artifacts/arm64/ifran-*-linux-arm64.tar.gz
-          cp ifran-*-linux-arm64/ifran bin/arm64/ifran
-          cp ifran-*-linux-arm64/ifran-server bin/arm64/ifran-server
-          chmod +x bin/arm64/*
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Determine if pre-release
-        id: prerelease
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          if [[ "$VERSION" == *-* ]]; then
-            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=${{ steps.version.outputs.version }}
-            type=raw,value=latest,enable=${{ steps.prerelease.outputs.is_prerelease == 'false' }}
-
-      - name: Build and push multi-arch container image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/Dockerfile.release
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            VERSION=${{ steps.version.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            ${{ github.event.repository.name }}-${{ github.ref_name }}.tar.gz
+            SHA256SUMS
+            build/${{ github.event.repository.name }}

@@ -1,0 +1,17 @@
+[package]
+name = "ifran"
+version = "${file:VERSION}"
+description = "ifran (عرفان) — the AGNOS training control plane: jobs, checkpoint store, datasets, sweeps, eval, preference data — thin over the sovereign ML siblings (Cyrius port; the Rust tree lives in rust-old/, reference-only)"
+# ⚠ license matches the repo's existing LICENSE file (AGPL-3.0 — the Rust
+# ifran's choice). Whether the Cyrius port relicenses to the ecosystem's
+# GPL-3.0-only is the maintainer's call — flagged in docs/development/port-ledger.md.
+license = "AGPL-3.0-only"
+language = "cyrius"
+cyrius = "6.4.3"
+
+[build]
+entry = "src/main.cyr"
+output = "ifran"
+
+[deps]
+stdlib = ["string", "fmt", "alloc", "vec", "str", "syscalls", "io", "args", "assert"]

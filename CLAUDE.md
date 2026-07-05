@@ -1,87 +1,83 @@
-# Ifran — LLM Manager / Trainer
+# ifran — Claude Code Instructions
+
+> **Core rule**: this file is **preferences, process, and procedures** —
+> durable rules that change rarely. Volatile state (current version,
+> module line counts, port progress, test counts, consumers) lives in
+> [`docs/development/state.md`](docs/development/state.md).
+> Do not inline state here.
 
 ## Project Identity
 
+**ifran** (عرفان — *gnosis*) — the AGNOS **training control plane**: job
+manager/scheduler, tula+sigil checkpoint store, dataset curation, sweep runner,
+eval runner, preference/annotation store — **thin over the sovereign ML
+siblings** (attn11/tarka/tentib/prajna/anukūlana own ALL the math; ifran drives
+their binaries as jobs). Cyrius port of 53.6k lines of Rust (preserved at
+`rust-old/`, reference-only, eventual dismissal).
 
-- **Type**: Flat crate with binaries (`ifran-server`, `ifran`)
-- **License**: GPL-3.0-only
-- **MSRV**: 1.89
-- **Version**: Semver (MAJOR.MINOR.PATCH)
-- **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
-- **Philosophy**: [AGNOS Philosophy & Intention](https://github.com/MacCracken/agnosticos/blob/main/docs/philosophy.md)
-- **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-standards.md)
-- **Recipes**: [zugot](https://github.com/MacCracken/zugot) — takumi build recipes
+- **Type**: Port (Rust → Cyrius); binary + control-plane services
+- **License**: AGPL-3.0 (the Rust ifran's license — the LICENSE file; whether
+  the port relicenses to the ecosystem's GPL-3.0-only is the maintainer's call,
+  flagged in `docs/development/port-ledger.md`)
+- **Language**: Cyrius (toolchain pinned in `cyrius.cyml [package].cyrius`)
+- **Version**: `VERSION` at the project root is the source of truth — do not inline the number here
+- **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-standards.md) · [First-Party Documentation](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-documentation.md)
 
+## Goal
 
-## Development Process
+Own **the orchestration around a training run — never the math**: submit/run/
+track jobs that drive the sovereign ML siblings' binaries, store their
+checkpoints (tula format, sigil-signed — real key management lands HERE),
+curate datasets, sweep hyperparameters, run evals, hold preference data. Thin
+over existing homes (lineage→itihas, serving→hoosh, marketplace→mela,
+fleet→seema, GPU→mabda/ai-hwaccel); the Rust `backends/` broker is DEAD by
+design (murti re-derivation) and does not port. Decomposition + disposition
+map: `docs/development/port-ledger.md` + agnosticos `planning/ifran-port.md`.
 
-### P(-1): Scaffold Hardening (before any new features)
+## Current State
 
-0. Read roadmap, CHANGELOG, and open issues — know what was intended before auditing what was built
-1. Test + benchmark sweep of existing code
-2. Cleanliness check: `cargo fmt --check`, `cargo clippy --all-features --all-targets -- -D warnings`, `cargo audit`, `cargo deny check`
-3. Get baseline benchmarks (`./scripts/bench-history.sh`)
-4. Initial refactor + audit (performance, memory, security, edge cases)
-5. Cleanliness check — must be clean after audit
-6. Additional tests/benchmarks from observations
-7. Post-audit benchmarks — prove the wins
-8. Repeat audit if heavy
-9. Documentation audit — ADRs, source citations, guides, examples (see Documentation Standards in first-party-standards.md)
+> Volatile state lives in [`docs/development/state.md`](docs/development/state.md) —
+> port progress, surface parity, in-flight work. Refreshed every release.
 
-### Development Loop (continuous)
+This file (`CLAUDE.md`) is durable rules.
 
-1. Work phase — new features, roadmap items, bug fixes
-2. Cleanliness check: `cargo fmt --check`, `cargo clippy --all-features --all-targets -- -D warnings`, `cargo audit`, `cargo deny check`
-3. Test + benchmark additions for new code
-4. Run benchmarks (`./scripts/bench-history.sh`)
-5. Audit phase — review performance, memory, security, throughput, correctness
-6. Cleanliness check — must be clean after audit
-7. Deeper tests/benchmarks from audit observations
-8. Run benchmarks again — prove the wins
-9. If audit heavy → return to step 5
-10. Documentation — update CHANGELOG, roadmap, docs, ADRs for design decisions, source citations for algorithms/formulas, update docs/sources.md, guides and examples for new API surface, verify recipe version in zugot
-11. Version check — VERSION, Cargo.toml, recipe (in zugot) all in sync
-12. Return to step 1
+## Scaffolding
 
-### Key Principles
+Project was scaffolded with `cyrius port`. Original Rust at `rust-old/` is the reference oracle — do not modify it; cross-check the port against it.
 
-- **Never skip benchmarks.** Numbers don't lie. The CSV history is the proof.
-- **Tests + benchmarks are the way.** Minimum 80%+ coverage target.
-- **Own the stack.** If an AGNOS crate wraps an external lib, depend on the AGNOS crate.
-- **No magic.** Every operation is measurable, auditable, traceable.
-- **`#[non_exhaustive]`** on all public enums.
-- **`#[must_use]`** on all pure functions.
-- **`#[inline]`** on hot-path functions.
-- **`write!` over `format!`** — avoid temporary allocations.
-- **Cow over clone** — borrow when you can, allocate only when you must.
-- **Vec arena over HashMap** — when indices are known, direct access beats hashing.
-- **Feature-gate optional deps** — consumers pull only what they need.
-- **tracing on all operations** — structured logging for audit trail.
+## Quick Start
 
-## Documentation Structure
-
-```
-Root files (required):
-  README.md, CHANGELOG.md, CLAUDE.md, CONTRIBUTING.md, SECURITY.md, CODE_OF_CONDUCT.md, LICENSE
-
-docs/ (required):
-  architecture/overview.md — module map, data flow, consumers
-  development/roadmap.md — completed, backlog, future, v1.0 criteria
-
-docs/ (when earned):
-  adr/ — architectural decision records
-  guides/ — usage guides, integration patterns
-  examples/ — worked examples
-  standards/ — external spec conformance
-  compliance/ — regulatory, audit, security compliance
-  sources.md — source citations for algorithms/formulas (required for science/math crates)
+```sh
+cyrius deps                              # resolve dependencies
+cyrius build src/main.cyr build/ifran    # compile
+cyrius test                              # run tests/*.tcyr
 ```
 
-## DO NOT
-- **Do not commit or push** — the user handles all git operations (commit, push, tag)
+## Key Principles
 
-- **NEVER use `gh` CLI** — use `curl` to GitHub API only
-- Do not add unnecessary dependencies — keep it lean
-- Do not `unwrap()` or `panic!()` in library code
-- Do not skip benchmarks before claiming performance improvements
-- Do not commit `target/` or `Cargo.lock` (library crates only)
+- **Cross-check against `rust-old/`** — the port's correctness bar is "matches what Rust did". Diverge only with an ADR.
+- **Correctness over cleverness** — if the Cyrius behavior diverges silently from Rust, the bugs win
+- Test after every change, not after the feature is "done"
+- ONE change at a time — never bundle unrelated changes
+- Build with `cyrius build`, not raw `cat file | cc5` — the manifest auto-resolves deps
+- Source files only need project includes — stdlib auto-resolves from `cyrius.cyml`
+- `var buf[N]` = N **bytes**, not N entries
+
+## Rules (Hard Constraints)
+
+- **Do not commit or push** — the user handles all git operations
+- **Never use `gh` CLI** — use `curl` to the GitHub API if needed
+- Do not modify `rust-old/` — it's the parity oracle
+- Do not skip tests before claiming changes work
+- Do not modify `lib/` files (vendored stdlib / dep symlinks)
+- Do not hardcode toolchain versions in CI YAML — `cyrius = "X.Y.Z"` in `cyrius.cyml` is the source of truth
+
+## Documentation
+
+- [`docs/adr/`](docs/adr/) — Architecture Decision Records (*why X over Y?*)
+- [`docs/architecture/`](docs/architecture/) — Non-obvious constraints
+- [`docs/guides/`](docs/guides/) — Task-oriented how-tos
+- [`docs/examples/`](docs/examples/) — Runnable examples
+- [`docs/development/state.md`](docs/development/state.md) — Live state
+- [`docs/development/roadmap.md`](docs/development/roadmap.md) — Milestones through v1.0
+

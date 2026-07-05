@@ -1,0 +1,13 @@
+# ifran — Cyrius port
+# Ported from 53612 lines of Rust
+
+# Stdlib auto-included via cyrius.cyml
+
+fn main() {
+    alloc_init();
+    println("ifran ready");
+    return 0;
+}
+
+var r = main();
+syscall(SYS_EXIT, r);

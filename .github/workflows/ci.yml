@@ -2,340 +2,49 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
-    branches: [main, develop]
-  workflow_call:
+    branches: [main]
+  workflow_call:   # reusable: release.yml gates on this CI workflow
 
-permissions:
-  contents: read
-  security-events: write
-
-env:
-  CARGO_TERM_COLOR: always
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build (${{ matrix.target }})
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-latest
-            use-cross: false
-          - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-latest
-            use-cross: true
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Rust environment
-        id: setup
-        uses: ./.github/actions/setup-rust-env
-        with:
-          targets: ${{ matrix.target }}
-          cache-prefix: build-${{ matrix.target }}
-          install-cross: ${{ matrix.use-cross }}
-
-      - name: Build (native)
-        if: matrix.use-cross == false
-        run: cargo build --all-features --release --target ${{ matrix.target }}
-
-      - name: Build (cross)
-        if: matrix.use-cross == true
-        run: cross build --all-features --release --target ${{ matrix.target }}
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: binaries-${{ matrix.target }}
-          path: |
-            target/${{ matrix.target }}/release/ifran
-            target/${{ matrix.target }}/release/ifran-server
-          retention-days: 7
-
-  fmt:
-    name: Formatting
+  build-and-test:
+    name: Build & Test
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4 (pinned — CVE-21)
 
-      - name: Setup Rust environment
-        uses: ./.github/actions/setup-rust-env
-        with:
-          cache-prefix: fmt
-
-      - name: Check formatting
-        run: cargo fmt -- --check
-
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Rust environment
-        uses: ./.github/actions/setup-rust-env
-        with:
-          cache-prefix: clippy
-
-      - name: Run Clippy
-        run: cargo clippy --all-features --all-targets -- -D warnings
-
-  audit:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Rust environment
-        uses: ./.github/actions/setup-rust-env
-        with:
-          cache-prefix: audit
-
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
-
-      - name: Run cargo audit
-        run: cargo audit
-
-  deny:
-    name: Dependency Policy
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Rust environment
-        uses: ./.github/actions/setup-rust-env
-        with:
-          cache-prefix: deny
-
-      - name: Install cargo-deny
-        run: cargo install cargo-deny --locked
-
-      - name: Run cargo deny
-        run: cargo deny check
-
-  trivy:
-    name: Trivy Scan
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Run Trivy filesystem scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: fs
-          scan-ref: .
-          severity: CRITICAL,HIGH
-          format: sarif
-          output: trivy-results.sarif
-
-      - name: Upload Trivy SARIF results
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: trivy-results.sarif
-
-  outdated:
-    name: Outdated Dependencies
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    continue-on-error: true
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Rust environment
-        uses: ./.github/actions/setup-rust-env
-        with:
-          cache-prefix: outdated
-
-      - name: Install cargo-outdated
-        run: cargo install cargo-outdated --locked
-
-      - name: Run cargo outdated
+      - name: Install Cyrius toolchain
+        # The cyrius.cyml [package].cyrius pin is the single source of
+        # truth for the toolchain version — never hardcode it here. Read
+        # the pin and hand it to the canonical upstream installer, which
+        # fetches + lays out $HOME/.cyrius/{bin,lib}. Do NOT hand-roll
+        # curl+tar+cp — scripts/install.sh is the supported entry point
+        # (matches patra / sigil).
         run: |
-          # sha2 0.10 and hmac 0.12 are intentionally held — hmac 0.13 (needed for sha2 0.11) is pre-release.
-          # Exclude both from the check; fail on any other outdated root dep.
-          cargo outdated --root-deps-only --exit-code 1 --exclude sha2 --exclude hmac
+          set -e
+          CYRIUS_VERSION="$(grep '^cyrius = ' cyrius.cyml | head -1 | sed 's/cyrius = "\(.*\)"/\1/')"
+          echo "Installing Cyrius $CYRIUS_VERSION"
+          curl -sSf https://raw.githubusercontent.com/MacCracken/cyrius/main/scripts/install.sh | \
+            CYRIUS_VERSION="$CYRIUS_VERSION" sh
+          echo "$HOME/.cyrius/bin" >> "$GITHUB_PATH"
 
-  test:
-    name: Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Resolve dependencies
+        run: cyrius deps
 
-      - name: Setup Rust environment
-        uses: ./.github/actions/setup-rust-env
-        with:
-          cache-prefix: test
-
-      - name: Run tests
-        run: cargo test --all-features
-
-  coverage:
-    name: Coverage
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: test
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Rust environment
-        uses: ./.github/actions/setup-rust-env
-        with:
-          cache-prefix: coverage
-
-      - name: Install cargo-tarpaulin
-        run: cargo install cargo-tarpaulin --locked
-
-      - name: Run coverage
+      - name: Build
         run: |
-          cargo tarpaulin --all-features \
-            --out xml \
-            --output-dir coverage \
-            --fail-under 70 \
-            --timeout 300 \
-            --exclude-files 'src/storage/pg.rs' \
-            --exclude-files 'src/fleet/redis_coordinator.rs'
+          mkdir -p build
+          cyrius build src/main.cyr build/${{ github.event.repository.name }}
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          files: coverage/cobertura.xml
-          fail_ci_if_error: false
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-
-  benchmarks:
-    name: Benchmarks
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    if: github.event_name == 'push'
-    continue-on-error: true
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Rust environment
-        uses: ./.github/actions/setup-rust-env
-        with:
-          cache-prefix: bench
-
-      - name: Run benchmarks
-        run: cargo bench --all-features
-
-  docs:
-    name: Documentation
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Verify required documentation files exist
-        run: |
-          missing=0
-          for file in README.md docs/development/roadmap.md CONTRIBUTING.md SECURITY.md LICENSE; do
-            if [ ! -f "$file" ]; then
-              echo "::error::Missing required documentation file: $file"
-              missing=1
-            else
-              echo "Found: $file"
-            fi
-          done
-          if [ "$missing" -eq 1 ]; then
-            exit 1
-          fi
-
-      - name: Setup Rust environment
-        uses: ./.github/actions/setup-rust-env
-        with:
-          cache-prefix: docs
-
-      - name: Build documentation
-        run: cargo doc --all-features --no-deps
-        env:
-          RUSTDOCFLAGS: "-D warnings"
-
-  container:
-    name: Container Build Verification
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    if: github.event_name == 'push'
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build container image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/Dockerfile
-          push: false
-          load: true
-          tags: ifran:ci-test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Smoke test container
-        run: |
-          docker run --rm -d --name ifran-test -p 8420:8420 ifran:ci-test
-          echo "Waiting for server to start..."
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8420/health > /dev/null 2>&1; then
-              echo "Health check passed on attempt $i"
-              break
-            fi
-            sleep 1
-          done
-          curl -sf http://localhost:8420/health | grep -q "ok"
-          echo "GET /health: ok"
-          READY_CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8420/ready)
-          echo "GET /ready: HTTP ${READY_CODE}"
-          if [ "$READY_CODE" != "200" ] && [ "$READY_CODE" != "503" ]; then
-            echo "Unexpected status from /ready"
-            exit 1
-          fi
-          curl -sf http://localhost:8420/system/status | grep -q "version"
-          echo "GET /system/status: ok"
-          docker logs ifran-test
-          docker stop ifran-test
-
-  license:
-    name: License Check
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Check LICENSE contains AGPL-3.0
-        run: |
-          if grep -q "GNU AFFERO GENERAL PUBLIC LICENSE" LICENSE; then
-            echo "LICENSE file contains AGPL-3.0"
-          else
-            echo "::error::LICENSE file does not contain AGPL-3.0"
-            exit 1
-          fi
+      - name: Test
+        # v5.6.28: bare `cyrius test` picks up the [build].test entry
+        # AND auto-discovers tests/*.tcyr — avoids the previous
+        # `cyrius test src/test.cyr` form that hard-failed when the
+        # stub didn't exist (Issue 1) and also wouldn't ever exercise
+        # tests/${proj}.tcyr.
+        run: cyrius test

@@ -1,23 +1,22 @@
 # Architecture Decision Records
 
-ADRs document significant architectural decisions made during development.
+Decisions about ifran — what we chose, the context, and the consequences we accept. Use these when a future reader would reasonably ask *"why did we do it this way?"*
+
+## Conventions
+
+- **Filename**: `NNNN-kebab-case-title.md`, zero-padded to four digits. Never renumber.
+- **One decision per ADR.** If a decision supersedes a prior one, add a new ADR and set the old one's status to `Superseded by NNNN`.
+- **Status lifecycle**: `Proposed` → `Accepted` → (optionally) `Superseded` or `Deprecated`.
+- Use [`template.md`](template.md) as the starting point.
+
+## ADR vs. architecture note vs. guide
+
+| Kind | Lives in | Answers |
+|---|---|---|
+| ADR | `docs/adr/` | *Why did we choose X over Y?* |
+| Architecture note | `docs/architecture/` | *What non-obvious constraint is true about the code?* |
+| Guide | `docs/guides/` | *How do I do X?* |
 
 ## Index
 
-- [ADR-001: Rust as primary language](001-rust-language.md)
-- [ADR-002: Trait-based backend pluggability](002-backend-traits.md)
-- [ADR-003: Training via subprocess/Docker](003-training-executors.md)
-- [ADR-004: gRPC for SY bridge](004-grpc-bridge.md)
-- [ADR-005: Semver versioning](005-calver-versioning.md)
-- [ADR-006: Tauri for desktop](006-tauri-desktop.md)
-- [ADR-007: rustls over OpenSSL](007-rustls-tls.md)
-- [ADR-008: Agnosticos system integration](008-agnosticos-integration.md)
-- [ADR-009: API security hardening](009-security-hardening.md)
-
-## Format
-
-Each ADR follows this structure:
-- **Status**: Accepted / Superseded / Deprecated
-- **Context**: What prompted the decision
-- **Decision**: What was decided
-- **Consequences**: What follows from the decision
+_No ADRs yet. Add the first as `0001-kebab-case-title.md`._
