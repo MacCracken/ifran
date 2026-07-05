@@ -12,10 +12,19 @@ Everything operates on the current working directory's workspace: `ifran.db`
   (fork+pipe+execve, stdout+stderr captured to `runs/logs/run-<id>.log`),
   record the run; **ifran's exit = the child's exit**.
 - `ifran runs` — list run records (id, name, status, exit, ms, sweep, log).
+- `ifran show <run-id>` *(2.1)* — one run's full record (incl. pid) + the log
+  tail (last 4 KB, line-aligned).
+- `ifran reap` *(2.1)* — un-stick `running` rows orphaned by a killed ifran:
+  a row is orphaned only when its recorded PID is definitely gone (signal-0
+  probe); live PIDs are left alone (another ifran may own them). Idempotent.
 
-Job spec (`[job]`): `name` · `bin` (absolute) · `args` (space-split;
+Job spec (`[job]`): `name` · `bin` (absolute) · `args` (space-split, with
+`"double quotes"` grouping spaced args *(2.1)* — `\"`/`\\` escape inside
+quotes; carry quotes through CYML with a TOML `'''…'''` literal string;
 `{dataset}` and sweep `{axis}` placeholders substitute within tokens) ·
-`logdir` (default `runs/logs`) · `dataset` (an `ifran dataset` id).
+`logdir` (default `runs/logs`) · `dataset` (an `ifran dataset` id) ·
+`timeout_s` *(2.1)* (0/absent = none; on expiry the child is SIGKILLed and
+the run records `timed-out`, exit 137).
 
 ## Keys & the model store
 - `ifran keys init` / `keys show` — operator Ed25519 keypair (getrandom →

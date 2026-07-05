@@ -7,6 +7,42 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**Lane 1 — executor hardening (the 2.1 opener): timeout/reaper, quoted args,
+`ifran show`.** The audit's one named limitation (no timeout enforcement) and
+the two M1-scope conveniences, all additive on the frozen 2.x surface.
+
+### Added
+- **Job timeout** — `timeout_s` in the `[job]` spec (0/absent = none). The
+  capture loop is now poll-paced (`poll` on the pipe, 200 ms ticks); on expiry
+  the child is **SIGKILLed**, the pipe drains to EOF, and the run records
+  status **`timed-out`** (exit 137 = 128+SIGKILL from waitpid, honestly).
+  Negative values reject at parse.
+- **Reaper — `ifran reap`** — un-sticks `running` rows orphaned by a killed
+  ifran. The executor now records the **child PID on the run row the moment
+  the fork returns** (new `pid` column; error-ignored ALTER migration for
+  older dbs); reap marks a row `orphaned` only when that PID is definitely
+  gone (signal-0 probe) or was never recorded — a live PID is left alone
+  (another ifran may own it). Conservative by design (PID reuse can make a
+  dead child look alive; reap again later). Idempotent.
+- **Quoted args** — the space-split limitation lifts: `"double quotes"` in
+  `args` group spaced arguments (quotes stripped; `\"` and `\\` escape inside
+  quotes; unterminated quote rejects loud, nothing spawned). Carry quotes
+  through the CYML layer with a TOML `'''…'''` literal string.
+- **`ifran show <run-id>`** — the drill-down: one run's full record (name,
+  bin, args, started, duration, exit, status, sweep, **pid**, log path) + the
+  log tail (last 4 KB, aligned to the next line boundary).
+- **Tests** (`tests/ifran.tcyr` 77→**100**): quoted-group/strip/escape +
+  unterminated-quote reject + `timeout_s` parse/negative-reject; a real
+  timeout run (sleep 30 killed at ~1 s, status/pid asserted on the row); the
+  reaper both ways (dead-pid row orphaned, live-pid row left alone).
+
+### Proof (live)
+`printf "%s|" "hello world" tail` through a job spec → `hello world|tail|`
+(one arg); `sleep 30` with `timeout_s = 1` → `timed-out` (exit 137) in
+1001 ms; `ifran run` killed mid-job → row stuck `running` → `reap` refuses
+while the child lives ("0 of 1"), orphans it once the PID is gone; `show`
+prints the full record + log tail.
+
 ### Changed — post-release documentation sweep (2026-07-05)
 - **`docs/development/roadmap.md` rewritten**: the shipped-2.0.0 summary + the
   **seven post-2.0 lanes** with triggers (executor hardening [2.1-track:

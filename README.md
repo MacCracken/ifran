@@ -14,7 +14,8 @@ primitives; ifran drives their binaries as **jobs** and holds everything around
 them:
 
 - **Jobs** — CYML specs → fork+pipe+execve with full output capture, exit-code
-  propagation, and a patra-backed run store (`ifran run` / `runs`).
+  propagation, quoted-args + `timeout_s` enforcement (2.1), and a patra-backed
+  run store (`ifran run` / `runs` / `show` / `reap`).
 - **Model store** — signed `.tula` artifacts: tula structural validation,
   Ed25519 verification against the **operator key** (`ifran keys`), sha256
   content addressing with dedup, tamper-detecting re-verification

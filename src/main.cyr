@@ -59,6 +59,8 @@ fn main(): i64 {
     cmdit_verb(h, "eval", "run a gate as a recorded eval (exit = the gate)");              # 7
     cmdit_verb(h, "evals", "list the benchmark store");                                    # 8
     cmdit_verb(h, "pref", "preferences: new | pair | good | bad | ls | export");           # 9
+    cmdit_verb(h, "show", "one run's full record + log tail: <run-id>");                   # 10
+    cmdit_verb(h, "reap", "mark running rows whose PID is gone as orphaned");              # 11
 
     var r = cmdit_dispatch(h);
     if (r == CMDIT_HELP) { cmdit_help(h); return CMDIT_EXIT_OK; }
@@ -79,6 +81,14 @@ fn main(): i64 {
         return e;
     }
     if (v == 1) { return runstore_list(); }
+    if (v == 10) {                                   # show <run-id>
+        if (vc < 2) { println("ifran: show needs a <run-id>"); return CMDIT_EXIT_USAGE; }
+        return runstore_show(atoi(_cli_tok(va, 1)));
+    }
+    if (v == 11) {                                   # reap
+        if (runstore_reap() < 0) { return 1; }
+        return 0;
+    }
     if (v == 2) {                                    # keys init|show
         var kh = cmdit_new("ifran keys");
         cmdit_verb(kh, "init", "generate the operator keypair (refuses to overwrite)");

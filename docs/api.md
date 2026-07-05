@@ -21,9 +21,14 @@ semantics worth naming:
 - **Exit codes**: `ifran run` exits with the CHILD's exit code (127 = exec
   failed, 128+sig = signaled, −1→1 orchestration failure); `ifran eval` exits
   with the GATE. CI-composable by construction.
-- **Spec formats** (bayan TOML/CYML): `[job]` (name/bin/args/logdir/dataset),
+- **Spec formats** (bayan TOML/CYML): `[job]`
+  (name/bin/args/logdir/dataset/timeout_s — `timeout_s` added 2.1),
   `[sweep]` + `[sweep.grid]` (mode/samples/seed + axes), `[eval]` (+ metric).
-  `{dataset}` / `{axis}` placeholders substitute within tokens.
+  `{dataset}` / `{axis}` placeholders substitute within tokens; `args`
+  supports `"double quotes"` for spaced args (2.1).
+- **Run statuses**: `running` → `done` / `failed` / `spawn-failed` /
+  `timed-out` (2.1: `timeout_s` expiry, SIGKILL) / `orphaned` (2.1: set by
+  `ifran reap` on rows whose recorded PID is gone).
 - **Workspace layout**: `ifran.db` (patra tables: runs, sweeps, evals, models,
   datasets, psets, prefs), `ifran-store/<sha16>.tula`, `ifran-data/<sha16>.txt`,
   `runs/logs/run-<id>.log`, `$HOME/.ifran/operator.{sk,pk}`.
@@ -55,9 +60,9 @@ semantics worth naming:
 
 - `_`-prefixed internals; buffer caps (`RUN_LOG_MAX`) and dir defaults
   (overridable via the `*_set_*` fns).
-- Known M-scope limitations (documented, lift as 2.x minors): space-split args
-  (no quoting), no job timeout enforcement, single-predicate WHERE usage,
-  space-separated axis values.
+- Known M-scope limitations (documented, lift as 2.x minors):
+  single-predicate WHERE usage, space-separated axis values. *(Lifted in 2.1:
+  quoted args + job timeout/reaper — Lane 1.)*
 - **Named additive lane**: tarka file-ingestion of the preference export
   (user-authorized tarka cut) · producers signing with the operator key
   (anukūlana `--sk`) · a bote-MCP interface when SY re-wires · the BBO sweep

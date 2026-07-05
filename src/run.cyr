@@ -6,10 +6,15 @@
 # discards the exit status — the executor needs it, and merges stderr into the
 # log instead of /dev/null: training output lives on both streams).
 #
-# M1 scope notes (each a later minor, recorded not hidden):
+# Scope notes:
 #   * capture is bounded (RUN_LOG_MAX; truncation marked in the log; the child
 #     keeps writing into a closed pipe after cap → SIGPIPE ends it, recorded)
-#   * no timeout enforcement yet (a reaper/timeout lands with the scheduler)
+#   * timeout (Lane 1): the capture loop is poll-paced; when `timeout_s`
+#     expires the child is SIGKILLed, the pipe drains to EOF, and the run
+#     records status `timed-out` (exit = 128+9 from waitpid, honestly).
+#   * the child PID is recorded on the run row the moment the fork returns —
+#     that's what `ifran reap` checks to un-stick rows orphaned by a killed
+#     ifran (see runstore_reap).
 
 fn RUN_LOG_MAX(): i64 { return 4 * 1024 * 1024; }   # 4 MB captured output
 
@@ -18,11 +23,10 @@ var _run_last_log = 0;
 fn run_last_id(): i64 { return _run_last_id; }
 fn run_last_log(): i64 { return _run_last_log; }
 
-# fork + pipe + execve; fills buf with the child's stdout+stderr (<= buflen),
-# stores the exit code (0..255, 127 = exec failed, 128+sig on signal) into
-# out_exit. Returns bytes captured, or -1 on orchestration failure.
-fn _run_spawn_capture(args, buf, buflen, out_exit): i64 {
-    store64(out_exit, 0 - 1);
+# fork + pipe + execve. Fills out_pid/out_rfd; returns 0, or -1 on failure.
+# Split from the capture loop so run_job can record the PID on the run row
+# BEFORE blocking on the pipe (the reaper's evidence).
+fn _run_spawn(args, out_pid, out_rfd): i64 {
     var argc = vec_len(args);
     if (argc < 1) { return 0 - 1; }
     var cmd = vec_get(args, 0);
@@ -50,12 +54,50 @@ fn _run_spawn_capture(args, buf, buflen, out_exit): i64 {
         sys_exit(127);
     }
     sys_close(wfd);
+    store64(out_pid, pid);
+    store64(out_rfd, rfd);
+    return 0;
+}
+
+# poll-paced capture + wait. Reads the child's merged output into buf
+# (<= buflen); if timeout_ms > 0 and the deadline passes, SIGKILLs the child
+# (out_timedout <- 1) and keeps draining to EOF. Stores the exit code (0..255,
+# 127 = exec failed, 128+sig on signal) into out_exit; returns bytes captured.
+fn _run_capture_wait(pid, rfd, buf, buflen, timeout_ms, out_exit, out_timedout): i64 {
+    store64(out_exit, 0 - 1);
+    store64(out_timedout, 0);
+    var deadline = 0;
+    if (timeout_ms > 0) { deadline = clock_now_ms() + timeout_ms; }
     var total = 0;
     var rgo = 1;
     while (rgo == 1) {
-        var n = sys_read(rfd, buf + total, buflen - total);
-        if (n <= 0) { rgo = 0; }
-        else { total = total + n; if (total >= buflen) { rgo = 0; } }
+        # pollfd { i32 fd; i16 events; i16 revents } — events=POLLIN(1)
+        var pfd[8];
+        store32(&pfd, rfd);
+        store32(&pfd + 4, 1);
+        var wait = 200;
+        if (deadline != 0) {
+            var left = deadline - clock_now_ms();
+            if (left < 0) { left = 0; }
+            if (left < wait) { wait = left; }
+        }
+        var pr = syscall(7, &pfd, 1, wait);           # poll — 7→230 on Darwin
+        if (pr > 0) {
+            var n = sys_read(rfd, buf + total, buflen - total);
+            if (n <= 0) { rgo = 0; }
+            else { total = total + n; if (total >= buflen) { rgo = 0; } }
+        }
+        if (rgo == 1) {
+            if (deadline != 0) {
+                if (clock_now_ms() >= deadline) {
+                    if (load64(out_timedout) == 0) {
+                        store64(out_timedout, 1);
+                        sys_kill(pid, 9);             # SIGKILL; pipe EOFs, loop drains
+                        deadline = 0;
+                    }
+                }
+            }
+        }
     }
     sys_close(rfd);
     var stbuf[4];
@@ -141,12 +183,22 @@ fn run_job(js): i64 {
 
     var buf = alloc(RUN_LOG_MAX());
     var exitp = alloc(8);
+    var tmop = alloc(8);
+    var pidp = alloc(8);
+    var rfdp = alloc(8);
     var t0 = clock_now_ms();
-    var nread = _run_spawn_capture(argv, buf, RUN_LOG_MAX() - 64, exitp);
+    var nread = 0 - 1;
+    var exit_code = 0 - 1;
+    if (_run_spawn(argv, pidp, rfdp) == 0) {
+        runstore_set_pid(id, load64(pidp));           # reaper evidence, pre-block
+        nread = _run_capture_wait(load64(pidp), load64(rfdp), buf, RUN_LOG_MAX() - 64,
+        jobspec_timeout(js) * 1000, exitp, tmop);
+        exit_code = load64(exitp);
+    }
     var dur = clock_now_ms() - t0;
-    var exit_code = load64(exitp);
     var status = "done";
     if (nread < 0) { status = "spawn-failed"; nread = 0; exit_code = 0 - 1; }
+    elif (load64(tmop) == 1) { status = "timed-out"; }
     elif (exit_code != 0) { status = "failed"; }
     if (nread >= RUN_LOG_MAX() - 64) {
         var mark = "\n[ifran: output truncated at cap]\n";

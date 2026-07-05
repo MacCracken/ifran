@@ -36,6 +36,31 @@ fn test_jobspec(): i64 {
     var nosec = "name = \"x\"\n";
     _t_write(p, nosec);
     assert_eq(jobspec_parse(p), 0, "missing [job] section rejected");
+
+    # ---- Lane 1 (2.1): quoted args + timeout_s --------------------------------
+    # a TOML literal string ('...') carries the double quotes to the splitter
+    var q1 = "[job]\nname = \"q\"\nbin = \"/bin/echo\"\nargs = '''pre \"two words\" post'''\n";
+    _t_write(p, q1);
+    var qjs = jobspec_parse(p);
+    assert_nonnull(qjs, "quoted-args spec parses");
+    assert_eq(vec_len(jobspec_argv(qjs)), 4, "quoted group = one arg (bin + 3)");
+    assert(streq(vec_get(jobspec_argv(qjs), 2), "two words"), "quotes group + strip");
+    assert(streq(vec_get(jobspec_argv(qjs), 3), "post"), "post-quote token intact");
+    var q3 = "[job]\nname = \"q\"\nbin = \"/bin/echo\"\nargs = '''dangling \"open'''\n";
+    _t_write(p, q3);
+    assert_eq(jobspec_parse(p), 0, "unterminated quote rejected");
+    var t1s = "[job]\nname = \"t\"\nbin = \"/bin/echo\"\ntimeout_s = 42\n";
+    _t_write(p, t1s);
+    var tjs = jobspec_parse(p);
+    assert_nonnull(tjs, "timeout spec parses");
+    assert_eq(jobspec_timeout(tjs), 42, "timeout_s parsed");
+    assert_eq(jobspec_timeout(js), 0, "absent timeout_s -> 0");
+
+    # the escape path, driven directly (dodges the CYML escaping layer):
+    var ev = vec_new();
+    assert_eq(_js_split_args("a \"b \\\" c\" d", ev), 0, "escape split ok");
+    assert_eq(vec_len(ev), 3, "three tokens");
+    assert(streq(vec_get(ev, 1), "b \" c"), "backslash-quote escapes inside quotes");
     return 0;
 }
 
@@ -72,6 +97,47 @@ fn test_run_and_store(): i64 {
     assert_eq(patra_result_get_int(rs, 0, 2), 0, "run 1 exit 0");
     assert_eq(patra_result_get_int(rs, 1, 2), 127, "run 2 exit 127");
     patra_result_free(rs);
+
+    # ---- Lane 1 (2.1): timeout enforcement ------------------------------------
+    var tsp1 = "[job]\nname = \"sleepy\"\nbin = \"/usr/bin/sleep\"\nargs = \"30\"\n";
+    var tsp2 = "logdir = \"/tmp/ifran_test_logs\"\ntimeout_s = 1\n";
+    var tsb = str_builder_new();
+    str_builder_add_cstr(tsb, tsp1);
+    str_builder_add_cstr(tsb, tsp2);
+    var tspec = str_cstr(str_builder_build(tsb));
+    _t_write(p, tspec);
+    var js3 = jobspec_parse(p);
+    assert_nonnull(js3, "timeout spec parses");
+    var tt0 = clock_now_ms();
+    var rc3 = run_job(js3);
+    var tdur = clock_now_ms() - tt0;
+    assert_eq(rc3, 137, "timed-out child exits 128+SIGKILL");
+    assert(tdur < 5000, "timeout enforced well before the 30 s sleep");
+    var rs2 = patra_query(db, "SELECT status, pid FROM runs WHERE id = 3");
+    assert_nonnull(rs2, "run 3 queried");
+    var stp = patra_result_get_str(rs2, 0, 0);
+    var stl = patra_result_get_str_len(rs2, 0, 0);
+    assert_eq(stl, 9, "status len = timed-out");
+    assert_eq(load8(stp), 116, "status starts 't' (timed-out)");
+    assert_gt(patra_result_get_int(rs2, 0, 1), 0, "child pid recorded on the row");
+    patra_result_free(rs2);
+
+    # ---- Lane 1 (2.1): reaper -------------------------------------------------
+    # a fake `running` row with a definitely-dead pid gets orphaned; live rows
+    # are left alone (probe our own pid as the live case)
+    var oid = runstore_start("orphan", "/bin/echo", "x", 0);
+    assert_gt(oid, 0, "fake running row inserted");
+    runstore_set_pid(oid, 999999999);
+    var reaped = runstore_reap();
+    assert_eq(reaped, 1, "dead-pid running row reaped");
+    var rs3 = patra_query(db, "SELECT status FROM runs WHERE id = 4");
+    assert_eq(patra_result_get_str_len(rs3, 0, 0), 8, "status len = orphaned");
+    assert_eq(load8(patra_result_get_str(rs3, 0, 0)), 111, "status starts 'o' (orphaned)");
+    patra_result_free(rs3);
+    var lid = runstore_start("alive", "/bin/echo", "x", 0);
+    runstore_set_pid(lid, sys_getpid());
+    assert_eq(runstore_reap(), 0, "live-pid running row left alone");
+    runstore_finish(lid, 0, 0, "done", "");
     return 0;
 }
 
@@ -198,7 +264,7 @@ fn test_datasets(): i64 {
     assert_eq(jobspec_dataset(js), did, "dataset id parsed");
     assert_eq(run_job(js), 0, "cat-the-dataset job runs");
     var buf = alloc(256);
-    var n = file_read_all("/tmp/ifran_test_logs/run-3.log", buf, 256);
+    var n = file_read_all(run_last_log(), buf, 256);
     assert_gt(n, 0, "dataset-job log written");
     assert_eq(load8(buf), 97, "log begins with the corpus content ('a')");
 
@@ -230,7 +296,7 @@ fn test_sweeps(): i64 {
     # a combo log shows real substitution (grid order: last axis fastest ->
     # combo #0 = steps=10 lr=0.1)
     var buf = alloc(128);
-    var n = file_read_all("/tmp/ifran_test_logs/run-5.log", buf, 128);
+    var n = file_read_all(_run_log_path("/tmp/ifran_test_logs", run_last_id() - 5), buf, 128);
     assert_gt(n, 0, "combo log written");
     assert_eq(load8(buf + 2), 49, "combo 0 got steps=10 ('1')");
 

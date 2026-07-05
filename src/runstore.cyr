@@ -35,13 +35,14 @@ fn runstore_open(): i64 {
     if (_rs_db == 0) { println("ifran: cannot open ifran.db"); return 0; }
     # idempotent create (patra_exec errors on an existing table; ignored)
     var c1 = "CREATE TABLE runs (id INT AUTOINCREMENT, name STR, bin STR, args STR, ";
-    var c2 = "started INT, duration_ms INT, exit_code INT, status STR, log STR, sweep INT)";
+    var c2 = "started INT, duration_ms INT, exit_code INT, status STR, log STR, sweep INT, pid INT)";
     var sb = str_builder_new();
     str_builder_add_cstr(sb, c1);
     str_builder_add_cstr(sb, c2);
     patra_exec(_rs_db, str_cstr(str_builder_build(sb)));
-    # schema migration for pre-M4 dbs (error-ignored when the column exists)
+    # schema migrations for older dbs (error-ignored when the column exists)
     patra_exec(_rs_db, "ALTER TABLE runs ADD COLUMN sweep INT");
+    patra_exec(_rs_db, "ALTER TABLE runs ADD COLUMN pid INT");    # Lane 1 (2.1)
     return _rs_db;
 }
 
@@ -86,6 +87,130 @@ fn runstore_finish(id, exit_code, duration_ms, status, log_path): i64 {
     if (patra_exec_returning(db, stmt, affp) != 0) { patra_finalize(stmt); return 0 - 1; }
     patra_finalize(stmt);
     return 0;
+}
+
+# record the child PID the moment the fork returns (the reaper's evidence)
+fn runstore_set_pid(id, pid): i64 {
+    var db = runstore_open();
+    if (db == 0) { return 0 - 1; }
+    var stmt = patra_prepare(db, "UPDATE runs SET pid = ? WHERE id = ?");
+    if (stmt == 0) { return 0 - 1; }
+    patra_bind_int(stmt, 0, pid);
+    patra_bind_int(stmt, 1, id);
+    var affp = alloc(8);
+    if (patra_exec_returning(db, stmt, affp) != 0) { patra_finalize(stmt); return 0 - 1; }
+    patra_finalize(stmt);
+    return 0;
+}
+
+fn RUNSTORE_TAIL(): i64 { return 4096; }             # `show` log-tail bytes
+
+# `ifran show <id>` — one run's full record + the log tail
+fn runstore_show(id): i64 {
+    var db = runstore_open();
+    if (db == 0) { return 1; }
+    var q = "SELECT id, name, bin, args, started, duration_ms, exit_code, status, log, sweep, pid ";
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, q);
+    str_builder_add_cstr(sb, "FROM runs WHERE id = ?");
+    var stmt = patra_prepare(db, str_cstr(str_builder_build(sb)));
+    if (stmt == 0) { return 1; }
+    patra_bind_int(stmt, 0, id);
+    var rs = patra_query_prepared(db, stmt);
+    patra_finalize(stmt);
+    if (rs == 0) { println("ifran: query failed"); return 1; }
+    if (patra_result_count(rs) < 1) {
+        patra_result_free(rs);
+        println("ifran: no such run id");
+        return 1;
+    }
+    ifr_print_cstr("run:      "); fmt_int(patra_result_get_int(rs, 0, 0)); println("");
+    ifr_print_cstr("name:     "); _rs_print_str(rs, 0, 1); println("");
+    ifr_print_cstr("bin:      "); _rs_print_str(rs, 0, 2); println("");
+    ifr_print_cstr("args:     "); _rs_print_str(rs, 0, 3); println("");
+    ifr_print_cstr("started:  "); fmt_int(patra_result_get_int(rs, 0, 4)); println(" (epoch s)");
+    ifr_print_cstr("duration: "); fmt_int(patra_result_get_int(rs, 0, 5)); println(" ms");
+    ifr_print_cstr("exit:     "); fmt_int(patra_result_get_int(rs, 0, 6)); println("");
+    ifr_print_cstr("status:   "); _rs_print_str(rs, 0, 7); println("");
+    ifr_print_cstr("sweep:    "); fmt_int(patra_result_get_int(rs, 0, 9)); println("");
+    ifr_print_cstr("pid:      "); fmt_int(patra_result_get_int(rs, 0, 10)); println("");
+    ifr_print_cstr("log:      "); _rs_print_str(rs, 0, 8); println("");
+    # log tail (last RUNSTORE_TAIL bytes, from the line boundary after the cut)
+    var lp = patra_result_get_str(rs, 0, 8);
+    var ll = patra_result_get_str_len(rs, 0, 8);
+    if (lp != 0) { if (ll > 0) {
+            var lpath = alloc(ll + 1);
+            var ci = 0;
+            while (ci < ll) { store8(lpath + ci, load8(lp + ci)); ci = ci + 1; }
+            store8(lpath + ll, 0);
+            var cap = RUNSTORE_TAIL();
+            var fd = file_open(lpath, 0, 0);
+            if (fd >= 0) {
+                var fsz = xlseek(fd, 0, 2);           # SEEK_END -> size
+                var tbuf = alloc(cap + 1);
+                var off = 0;
+                if (fsz > cap) { off = fsz - cap; }
+                if (fsz > 0) {
+                    xlseek(fd, off, 0);
+                    var tn = sys_read(fd, tbuf, cap);
+                    file_close(fd);
+                    if (tn > 0) {
+                        # start at the next line boundary when we cut mid-line
+                        var tstart = 0;
+                        if (off > 0) {
+                            var sc = 0;
+                            var scanning = 1;
+                            while (scanning == 1) {
+                                if (sc >= tn) { scanning = 0; }
+                                elif (load8(tbuf + sc) == 10) { tstart = sc + 1; scanning = 0; }
+                                sc = sc + 1;
+                            }
+                        }
+                        println("--- log tail ---");
+                        syscall(1, 1, tbuf + tstart, tn - tstart);
+                    }
+                } else { file_close(fd); }
+            }
+        } }
+    patra_result_free(rs);
+    return 0;
+}
+
+# `ifran reap` — un-stick `running` rows orphaned by a killed ifran: a row is
+# reaped only when its recorded PID is DEFINITELY gone (sys_kill(pid, 0) fails)
+# or was never recorded; a live PID is left alone (another ifran may own it).
+# Conservative by design — PID reuse can make a dead child look alive; reap
+# again later. Returns the number of rows reaped, or -1.
+fn runstore_reap(): i64 {
+    var db = runstore_open();
+    if (db == 0) { return 0 - 1; }
+    var stmt = patra_prepare(db, "SELECT id, pid FROM runs WHERE status = ?");
+    if (stmt == 0) { return 0 - 1; }
+    patra_bind_text(stmt, 0, "running", 7);
+    var rs = patra_query_prepared(db, stmt);
+    patra_finalize(stmt);
+    if (rs == 0) { println("ifran: query failed"); return 0 - 1; }
+    var n = patra_result_count(rs);
+    var reaped = 0;
+    var i = 0;
+    while (i < n) {
+        var rid = patra_result_get_int(rs, i, 0);
+        var pid = patra_result_get_int(rs, i, 1);
+        var dead = 0;
+        if (pid <= 0) { dead = 1; }                   # pre-2.1 row: pid never recorded
+        elif (sys_kill(pid, 0) != 0) { dead = 1; }    # signal-0 probe: ESRCH = gone
+        if (dead == 1) {
+            runstore_finish(rid, 0 - 1, 0, "orphaned", "");
+            ifr_print_cstr("reaped run "); fmt_int(rid);
+            ifr_print_cstr(" (pid "); fmt_int(pid); println(" gone) -> orphaned");
+            reaped = reaped + 1;
+        }
+        i = i + 1;
+    }
+    patra_result_free(rs);
+    ifr_print_cstr("reap: "); fmt_int(reaped);
+    ifr_print_cstr(" of "); fmt_int(n); println(" running rows orphaned");
+    return reaped;
 }
 
 # `ifran runs` — newest-last listing

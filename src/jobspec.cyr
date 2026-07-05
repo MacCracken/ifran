@@ -4,12 +4,18 @@
 #   [job]
 #   name = "lora-demo"                     # required, <= 63 chars
 #   bin  = "/path/to/anukulana"            # required, absolute path
-#   args = "gpt2-lora /path/model.safetensors"   # optional; space-split (M1
-#                                          # limitation: no quoted/spaced args)
+#   args = "gpt2-lora /path/model.safetensors"   # optional; space-split, with
+#                                          # "double quotes" grouping spaced args
+#                                          # (\" and \\ escape inside quotes; use
+#                                          # TOML ''' literal strings so quotes
+#                                          # survive the CYML layer)
 #   logdir = "runs/logs"                   # optional, default "runs/logs"
 #   dataset = 3                            # optional: an `ifran dataset` id; the
 #                                          # literal {dataset} in args resolves to
 #                                          # its stored path at run time
+#   timeout_s = 600                        # optional; 0/absent = no timeout. On
+#                                          # expiry the child is SIGKILLed and the
+#                                          # run records status `timed-out`
 #
 # Parsed via bayan's TOML surface (never hand-rolled). Malformed / missing
 # required fields -> 0 (fail loud at the CLI, nothing spawned).
@@ -17,33 +23,61 @@
 # Spec record layout (flat, 8B slots):
 #   +0  name  (cstr)   +8  bin (cstr)   +16 argv (vec of cstr, argv[0]=bin)
 #   +24 logdir (cstr)  +32 dataset id (i64, 0 = none)
+#   +40 timeout_s (i64, 0 = none)
 
 fn jobspec_name(js): i64 { return load64(js); }
 fn jobspec_bin(js): i64 { return load64(js + 8); }
 fn jobspec_argv(js): i64 { return load64(js + 16); }
 fn jobspec_logdir(js): i64 { return load64(js + 24); }
 fn jobspec_dataset(js): i64 { return load64(js + 32); }
+fn jobspec_timeout(js): i64 { return load64(js + 40); }
 
-# split a cstring on single spaces into a vec of fresh cstrs (M1: no quoting)
+# split a cstring into a vec of fresh cstrs: spaces separate tokens, "double
+# quotes" group spaced args (quotes stripped; \" and \\ escape inside quotes —
+# a quoted empty "" yields an empty arg). Returns 0, or -1 on an unterminated
+# quote (fail loud, nothing spawned).
 fn _js_split_args(s, out_vec): i64 {
     var n = strlen(s);
-    var start = 0;
+    var tok = alloc(n + 1);
+    var tl = 0;
+    var have = 0;
+    var inq = 0;
     var i = 0;
-    while (i <= n) {
-        var at_end = 0;
-        if (i == n) { at_end = 1; }
-        elif (load8(s + i) == 32) { at_end = 1; }
-        if (at_end == 1) {
-            if (i > start) {
-                var w = alloc(i - start + 1);
-                var k = 0;
-                while (k < i - start) { store8(w + k, load8(s + start + k)); k = k + 1; }
-                store8(w + (i - start), 0);
-                vec_push(out_vec, w);
+    while (i < n) {
+        var c = load8(s + i);
+        if (inq == 1) {
+            if (c == 92) {                            # backslash escape
+                var e = 0;
+                if (i + 1 < n) { e = load8(s + i + 1); }
+                if (e == 34) { store8(tok + tl, 34); tl = tl + 1; i = i + 2; }
+                elif (e == 92) { store8(tok + tl, 92); tl = tl + 1; i = i + 2; }
+                else { store8(tok + tl, c); tl = tl + 1; i = i + 1; }
             }
-            start = i + 1;
+            elif (c == 34) { inq = 0; i = i + 1; }
+            else { store8(tok + tl, c); tl = tl + 1; i = i + 1; }
         }
-        i = i + 1;
+        elif (c == 34) { inq = 1; have = 1; i = i + 1; }
+        elif (c == 32) {
+            if (have == 1) {
+                var w = alloc(tl + 1);
+                var k = 0;
+                while (k < tl) { store8(w + k, load8(tok + k)); k = k + 1; }
+                store8(w + tl, 0);
+                vec_push(out_vec, w);
+                tl = 0;
+                have = 0;
+            }
+            i = i + 1;
+        }
+        else { store8(tok + tl, c); tl = tl + 1; have = 1; i = i + 1; }
+    }
+    if (inq == 1) { return 0 - 1; }
+    if (have == 1) {
+        var w2 = alloc(tl + 1);
+        var k2 = 0;
+        while (k2 < tl) { store8(w2 + k2, load8(tok + k2)); k2 = k2 + 1; }
+        store8(w2 + tl, 0);
+        vec_push(out_vec, w2);
     }
     return 0;
 }
@@ -81,13 +115,18 @@ fn jobspec_from_pairs(pairs): i64 {
     var bin = _js_get_cstr(pairs, "bin");
     if (bin == 0) { println("ifran: [job] missing `bin`"); return 0; }
     if (load8(bin) != 47) { println("ifran: `bin` must be an absolute path"); return 0; }
-    var js = alloc(40);
+    var js = alloc(48);
     store64(js, name);
     store64(js + 8, bin);
     var argv = vec_new();
     vec_push(argv, bin);
     var args = _js_get_cstr(pairs, "args");
-    if (args != 0) { _js_split_args(args, argv); }
+    if (args != 0) {
+        if (_js_split_args(args, argv) != 0) {
+            println("ifran: [job] `args` has an unterminated quote");
+            return 0;
+        }
+    }
     store64(js + 16, argv);
     var logdir = _js_get_cstr(pairs, "logdir");
     if (logdir == 0) { logdir = "runs/logs"; }
@@ -95,5 +134,11 @@ fn jobspec_from_pairs(pairs): i64 {
     var dsv = toml_get(pairs, "dataset");
     if (dsv != 0) { store64(js + 32, str_to_int(dsv)); }
     else { store64(js + 32, 0); }
+    var tov = toml_get(pairs, "timeout_s");
+    if (tov != 0) {
+        var tosec = str_to_int(tov);
+        if (tosec < 0) { println("ifran: [job] `timeout_s` must be >= 0"); return 0; }
+        store64(js + 40, tosec);
+    } else { store64(js + 40, 0); }
     return js;
 }

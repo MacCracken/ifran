@@ -49,8 +49,13 @@ trigger.
 
 ## In flight / next
 
-Nothing in flight. The post-2.0 lanes (ordered, with triggers) live in
-[`roadmap.md`](roadmap.md): Lane 1 executor hardening (timeout/reaper,
-quoting, `show`) is the natural 2.1 opener; `rust-old/` removal window opens
-~2.1/2.2. Cross-repo lanes (anukūlana `--sk`, tarka pref-ingestion, bote-MCP)
-wait on their triggers/authorizations.
+**Lane 1 executor hardening LANDED 2026-07-05 (`[Unreleased]`, the 2.1
+opener — awaiting cut)**: `timeout_s` enforcement (poll-paced capture, SIGKILL
+→ `timed-out`/137), child-PID-on-row + `ifran reap` (signal-0 probe, orphans
+only definitely-dead rows), quoted `args`, `ifran show <id>` (full record +
+log tail). Suite 77→**100**; proven live. Remaining lanes in
+[`roadmap.md`](roadmap.md); `rust-old/` removal window opens ~2.1/2.2. **Lane 2 CLOSED 2026-07-05** (anukūlana 1.1.1 `--sk` — operator-key
+producer signing; `store add` records `verified` end-to-end, proven on the
+real checkpoint). **Lane 3 CLOSED same day** (tarka **1.1.2** `--pref` JSONL
+ingestion — DPO/IPO/KTO train from an ifran-curated export; e2e proven).
+Remaining cross-repo lane (bote-MCP) waits on the SY re-wire trigger.

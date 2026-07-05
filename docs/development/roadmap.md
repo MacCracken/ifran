@@ -21,24 +21,30 @@ entirely as recorded ifran jobs. Detail: CHANGELOG `[2.0.0]` +
 Ordered by expected pull, each with its trigger. None is calendared; a lane
 opens when its trigger fires or the maintainer pulls it forward.
 
-### Lane 1 — executor hardening (2.1-track; no external gate)
-- **Job timeout + reaper** — `timeout_s` in the job spec, enforced (kill +
-  `timed-out` status); also un-sticks `running` rows orphaned by a killed
-  ifran. The audit's one named limitation.
-- **Quoted args** — lift the space-split limitation (quoting in `args`).
-- **`ifran show <run-id>`** — one run's full record + log tail (the listing
-  tables exist; this is the drill-down).
+### Lane 1 — executor hardening (2.1-track) — ✅ DONE 2026-07-05 (`[Unreleased]`)
+- **Job timeout + reaper** — `timeout_s` enforced (poll-paced capture,
+  SIGKILL + `timed-out`/exit-137; the audit's one named limitation closed);
+  child PID recorded on the row at fork, and `ifran reap` orphans `running`
+  rows whose PID is definitely gone (signal-0 probe; live rows left alone).
+- **Quoted args** — `"double quotes"` group spaced args (escapes; unterminated
+  rejects loud). Carry through CYML with `'''…'''`.
+- **`ifran show <run-id>`** — full record (incl. pid) + 4 KB line-aligned log
+  tail. Suite 77→100; all proven live (printf-grouping, 1 s kill of a 30 s
+  sleep, kill-ifran-mid-job → reap).
 
-### Lane 2 — operator-key producer signing (cross-repo, user-confirmed)
-- anukūlana grows an additive `--sk <path>` so its artifacts sign with the
-  operator key → `store add` records **`verified`** end-to-end (today:
-  `signed-unknown-key`, honest but weaker). Small additive anukūlana minor;
-  needs the user's per-repo go.
+### Lane 2 — operator-key producer signing (cross-repo) — ✅ DONE 2026-07-05
+- Shipped as **anukūlana 1.1.1**: `gpt2-tula … --sk <operator.sk>` signs with
+  the operator key (64 B seed||pk, exactly `keys init`'s layout; loader
+  `anuk_sk_load`, pk = sk+32). Proven end-to-end: fresh `keys init` →
+  `gpt2-tula --sk` on the real checkpoint → `store add` records **`verified`**
+  for both artifacts → `store verify` sig-verified.
 
-### Lane 3 — tarka preference ingestion (cross-repo, user-authorized)
-- tarka grows a file-ingestion flag for the JSONL export (`pref export`) so
-  DPO/IPO/KTO train from ifran-curated sets. tarka is 1.x-frozen — this is a
-  user-authorized additive tarka cut; ifran's side is already done.
+### Lane 3 — tarka preference ingestion (cross-repo) — ✅ DONE 2026-07-05
+- Shipped as **tarka 1.1.2** (additive): `tarka --pref <prefs.jsonl>`
+  ingests the `pref export` JSONL (bayan parse + akshara byte vocab) and trains
+  DPO/IPO/KTO full-batch via the existing FD-gated primitives. Proven
+  end-to-end on a real ifran-curated set (3 pairs + 4 thumbs): DPO/IPO rank
+  3/3 with loss to ~0, KTO gap 0→238 — the curate→export→align loop is closed.
 
 ### Lane 4 — the bote-MCP interface (trigger: SY re-wires)
 - The agnos-native control surface: expose run/store/dataset/eval verbs as
