@@ -2,6 +2,8 @@
 
 **عرفان — *gnosis*. The AGNOS training control plane.**
 
+**2.0.0** — the Rust→Cyrius port, shipped 2026-07-05 (GPL-3.0-only).
+
 ifran owns **the orchestration around a training run — never the math**. The
 sovereign ML siblings ([attn11](https://github.com/MacCracken/attn11) /
 [tarka](https://github.com/MacCracken/tarka) /
@@ -27,7 +29,7 @@ them:
 - **Preferences** — DPO/IPO pairs + KTO thumbs, exported as escaped JSONL for
   tarka's preference surface (`pref new/pair/good/bad/ls/export`).
 
-**Proven end-to-end** (the port's v1.0 acceptance): in one workspace, attn11
+**Proven end-to-end** (the port's acceptance): in one workspace, attn11
 trained (job + 3-combo sweep) on an ifran-curated dataset, anukūlana's
 HF-fidelity oracle ran as a gated eval (`maxrel=0.000001049` captured), its
 NF4 checkpoint + adapter landed in the signed store, and tarka's full gate
@@ -51,9 +53,12 @@ cyrius test tests/ifran.tcyr             # 77 checks
 
 ## Docs
 
+- [`docs/guides/getting-started.md`](docs/guides/getting-started.md) — the golden path (+ runnable [`examples/`](examples/))
 - [`docs/cli-reference.md`](docs/cli-reference.md) — the command surface
 - [`docs/api.md`](docs/api.md) — the frozen 2.x surface · [`STABILITY.md`](STABILITY.md)
 - [`SECURITY.md`](SECURITY.md) · [`docs/audit/`](docs/audit/) · [`docs/benchmarks.md`](docs/benchmarks.md)
+- [`docs/adr/0001-port-decomposition.md`](docs/adr/0001-port-decomposition.md) — why the port decomposed
+- [`docs/development/roadmap.md`](docs/development/roadmap.md) — the post-2.0 lanes
 - [`docs/development/port-ledger.md`](docs/development/port-ledger.md) — the
   Rust→Cyrius disposition map + milestone record
 

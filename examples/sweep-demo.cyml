@@ -1,0 +1,11 @@
+# A hyperparameter sweep: the grid expands to 3 combos ({steps} substitutes
+# within tokens); every combo is a first-class run tagged with the sweep id.
+# Random mode: mode = "random" + samples = N + seed = K (deterministic draws).
+[sweep]
+name = "attn11-steps-sweep"
+bin = "/home/macro/Repos/attn11/build/attn11"
+args = "--preset --corpus {dataset} --steps {steps}"
+logdir = "runs/logs"
+dataset = 1
+[sweep.grid]
+steps = "10 20 40"

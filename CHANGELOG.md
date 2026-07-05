@@ -7,6 +7,28 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed — post-release documentation sweep (2026-07-05)
+- **`docs/development/roadmap.md` rewritten**: the shipped-2.0.0 summary + the
+  **seven post-2.0 lanes** with triggers (executor hardening [2.1-track:
+  timeout/reaper, quoted args, `show`] · operator-key producer signing
+  [anukūlana `--sk`, user-confirmed] · tarka pref-ingestion [user-authorized]
+  · bote-MCP [SY re-wire] · BBO sweeps [demand] · approval/quotas/journal
+  [server-stage] · distributed [seema-stage]) + the rust-old removal window
+  (~2.1/2.2) + the model-store extraction watch.
+- **Rust-era records relocated to `rust-old/docs/`**: the 10 Rust ADRs
+  (rust-language/backend-traits/grpc/tauri/rustls/redis/…) join the
+  previously-moved product docs — everything Rust leaves in one piece later.
+- **ADR 0001 seeded** (the port decomposition: no monolith boundary, dead
+  broker, one thin repo, no math, CLI-first) + **`examples/`** grown
+  (train-job/sweep-demo/eval-fidelity specs, referenced by the new guide).
+- **Rewritten for the shipped control plane**: `docs/guides/getting-started.md`
+  (the golden path + workspace model), `docs/development/dependency-watch.md`
+  (real pins — the Rust redis/tokio watch retired), `docs/development/README.md`
+  (cyrius loop — rustup/protoc/CUDA gone), CLAUDE.md (port-complete framing:
+  parity-of-PURPOSE bar, orchestration-never-math principles, the frozen-2.x
+  + delegation postures, gotcha pointers), `state.md` (clean live-state
+  rewrite), README (release status + doc links).
+
 ## [2.0.0] — 2026-07-05
 
 **THE CYRIUS PORT SHIPS.** ifran is reborn as the AGNOS **training control

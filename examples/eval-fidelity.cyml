@@ -1,0 +1,9 @@
+# A gate as a recorded eval: anukulana's HF-fidelity oracle. The exit code IS
+# the gate; `metric` pulls the number after "maxrel" from the log into the
+# benchmark store.
+[eval]
+name = "anukulana-hf-fidelity"
+bin = "/home/macro/Repos/anukulana/build/anukulana"
+args = "gpt2-oracle /home/macro/models/gpt2/model.safetensors /home/macro/Repos/anukulana/tests/fixtures/gpt2_oracle_v1.bin"
+logdir = "runs/logs"
+metric = "maxrel"

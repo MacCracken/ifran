@@ -12,10 +12,11 @@
 manager/scheduler, tula+sigil checkpoint store, dataset curation, sweep runner,
 eval runner, preference/annotation store — **thin over the sovereign ML
 siblings** (attn11/tarka/tentib/prajna/anukūlana own ALL the math; ifran drives
-their binaries as jobs). Cyrius port of 53.6k lines of Rust (preserved at
-`rust-old/`, reference-only, eventual dismissal).
+their binaries as jobs). **The Cyrius port SHIPPED as 2.0.0 (2026-07-05)**;
+the Rust line (53.6k lines) is preserved at `rust-old/` (reference-only,
+original AGPL, held until ~2.1/2.2).
 
-- **Type**: Port (Rust → Cyrius); binary + control-plane services
+- **Type**: Binary (CLI on cmdit) + control-plane services; completed Rust→Cyrius port
 - **License**: GPL-3.0-only (relicensed at the port cut per the ecosystem
   policy — GPL-3.0-only everywhere, AGPL reserved for desktop apps; the Rust
   line in `rust-old/` keeps its original AGPL)
@@ -41,43 +42,60 @@ map: `docs/development/port-ledger.md` + agnosticos `planning/ifran-port.md`.
 
 This file (`CLAUDE.md`) is durable rules.
 
-## Scaffolding
+## The port (complete)
 
-Project was scaffolded with `cyrius port`. Original Rust at `rust-old/` is the reference oracle — do not modify it; cross-check the port against it.
+Scaffolded with `cyrius port`; shipped 2.0.0. The bar was **parity of
+PURPOSE, not line parity** — most of the Rust tree deliberately did not port
+(ADR 0001: dead broker, owned homes, fake primitives). `rust-old/` is
+historical reference only — do not modify; removal ~2.1/2.2.
 
 ## Quick Start
 
 ```sh
-cyrius deps                              # resolve dependencies
-cyrius build src/main.cyr build/ifran    # compile
-cyrius test                              # run tests/*.tcyr
+cyrius deps                              # patra/sigil/tula/cmdit + stdlib
+cyrius build src/main.cyr build/ifran
+cyrius test tests/ifran.tcyr             # the suite — all against /tmp
 ```
+
+Golden path + workspace model: `docs/guides/getting-started.md` +
+`examples/`.
 
 ## Key Principles
 
-- **Cross-check against `rust-old/`** — the port's correctness bar is "matches what Rust did". Diverge only with an ADR.
-- **Correctness over cleverness** — if the Cyrius behavior diverges silently from Rust, the bugs win
-- Test after every change, not after the feature is "done"
-- ONE change at a time — never bundle unrelated changes
-- Build with `cyrius build`, not raw `cat file | cc5` — the manifest auto-resolves deps
-- Source files only need project includes — stdlib auto-resolves from `cyrius.cyml`
-- `var buf[N]` = N **bytes**, not N entries
+- **Orchestration, never math** — anything that computes a gradient/loss/
+  metric belongs in a sibling; ifran spawns, records, stores. If a change
+  smells like training science, it's in the wrong repo.
+- **Exit codes ARE the contract** — `run` = the child's, `eval` = the gate
+  (frozen in `docs/api.md`); usage errors = 2.
+- **The 2.x surface is FROZEN** (`docs/api.md` + `STABILITY.md`) — additions
+  are additive minors; schema changes ship with in-place migrations (the M4
+  `ALTER TABLE` precedent).
+- **Delegate parsing** — tula/bayan/patra own their formats; ifran should
+  parse no non-operator bytes itself (the audit's standing posture). Any new
+  foreign-input parser follows the anukūlana rule: wrap-safe bounds +
+  null-checked allocs + fuzz in the same cut.
+- **Patra/bayan gotchas are recorded** — CHANGELOG "Porting notes" (0-based
+  binds, no implicit rowid, type-keyword column names, toml_get returns Str,
+  map_set is string-keyed, print is 2-arg). Read before touching the stores.
+- Test after every change; ONE change at a time; build with `cyrius build`;
+  `var buf[N]` local = N **bytes**.
 
 ## Rules (Hard Constraints)
 
 - **Do not commit or push** — the user handles all git operations
 - **Never use `gh` CLI** — use `curl` to the GitHub API if needed
-- Do not modify `rust-old/` — it's the parity oracle
+- Do not modify `rust-old/` — historical reference (removal ~2.1/2.2 is its own confirmed step)
 - Do not skip tests before claiming changes work
 - Do not modify `lib/` files (vendored stdlib / dep symlinks)
 - Do not hardcode toolchain versions in CI YAML — `cyrius = "X.Y.Z"` in `cyrius.cyml` is the source of truth
 
 ## Documentation
 
-- [`docs/adr/`](docs/adr/) — Architecture Decision Records (*why X over Y?*)
-- [`docs/architecture/`](docs/architecture/) — Non-obvious constraints
-- [`docs/guides/`](docs/guides/) — Task-oriented how-tos
-- [`docs/examples/`](docs/examples/) — Runnable examples
-- [`docs/development/state.md`](docs/development/state.md) — Live state
-- [`docs/development/roadmap.md`](docs/development/roadmap.md) — Milestones through v1.0
+- [`docs/api.md`](docs/api.md) + [`STABILITY.md`](STABILITY.md) — the frozen 2.x surface
+- [`docs/cli-reference.md`](docs/cli-reference.md) · [`docs/guides/getting-started.md`](docs/guides/getting-started.md) · [`examples/`](examples/)
+- [`docs/adr/`](docs/adr/) — decisions (0001 = the port decomposition)
+- [`docs/development/state.md`](docs/development/state.md) — live state
+- [`docs/development/roadmap.md`](docs/development/roadmap.md) — the post-2.0 lanes
+- [`docs/development/port-ledger.md`](docs/development/port-ledger.md) — the port record (historical)
+- [`SECURITY.md`](SECURITY.md) · [`docs/audit/`](docs/audit/) · [`docs/benchmarks.md`](docs/benchmarks.md)
 

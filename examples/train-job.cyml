@@ -1,0 +1,9 @@
+# A training job: attn11 trains on an ifran-managed dataset. The {dataset}
+# placeholder resolves to the stored corpus path at run time.
+# Usage: ifran dataset add <corpus> && ifran run examples/train-job.cyml
+[job]
+name = "attn11-train"
+bin = "/home/macro/Repos/attn11/build/attn11"
+args = "--preset --corpus {dataset} --steps 30"
+logdir = "runs/logs"
+dataset = 1
