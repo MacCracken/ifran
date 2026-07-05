@@ -1,8 +1,12 @@
-# ifran (عرفان) — the AGNOS training control plane. M1: the job core.
-# Ported from Rust (rust-old/, reference oracle); the siblings own the math,
-# ifran owns the orchestration.
+# ifran (عرفان) — the AGNOS training control plane. CLI on cmdit (the
+# ecosystem CLI/arg lib): verb dispatch, generated --help/--version, standard
+# exit codes. The Rust tree lives in rust-old/ (reference oracle).
+#
+# Exit-code semantics (frozen, docs/api.md): `run` exits with the CHILD's exit
+# code and `eval` with the GATE — beyond cmdit's 0/1/2 convention by design
+# (CI composability); usage errors are CMDIT_EXIT_USAGE (2).
 
-# Stdlib + patra/sigil/tula auto-included via cyrius.cyml
+# Stdlib + patra/sigil/tula/cmdit auto-included via cyrius.cyml
 include "src/jobspec.cyr"
 include "src/runstore.cyr"
 include "src/run.cyr"
@@ -13,133 +17,159 @@ include "src/sweep.cyr"
 include "src/eval.cyr"
 include "src/pref.cyr"
 
-fn usage(): i64 {
-    println("ifran - AGNOS training control plane");
-    println("");
-    println("usage: ifran <command> [args]");
-    println("  run <job.cyml>   execute a job spec (spawns the sibling binary,");
-    println("                   captures its output, records the run)");
-    println("  runs             list recorded runs (ifran.db)");
-    println("  keys init|show   operator Ed25519 keypair (~/.ifran)");
-    println("  store add <file.tula> [name]   validate+verify+ingest an artifact");
-    println("  store ls                       list the model store");
-    println("  store verify <id>              re-check hash/structure/signature");
-    println("  dataset add <file> [name]      ingest a text corpus");
-    println("  dataset ls                     list datasets");
-    println("  dataset dedup <id>             derive an exact-line-deduped dataset");
-    println("  sweep <spec.cyml>              expand + run a parameter sweep (grid/random)");
-    println("  sweeps                         list sweeps");
-    println("  eval <spec.cyml>               run a gate as a recorded eval (+ metric)");
-    println("  evals                          list the benchmark store");
-    println("  pref new <name>                create a preference set");
-    println("  pref pair <set> <prompt> <chosen> <rejected>   add a DPO/IPO pair");
-    println("  pref good|bad <set> <prompt> <completion>      add a KTO thumb");
-    println("  pref ls                        list sets (pair/unary counts)");
-    println("  pref export <set> <out.jsonl>  export a set as JSONL");
-    println("  version          print the version");
-    return 0;
+# Embedded version literal — bumped as part of cut mechanics (VERSION file is
+# the source of truth; keep in sync at each cut).
+fn IFRAN_VERSION(): i64 { return "1.3.0"; }
+
+# slice accessor: token i of a verb-remainder argv (cstr*)
+fn _cli_tok(argv, i): i64 { return load64(argv + i * 8); }
+
+# grouped verbs: dispatch a child handle over the parent's remainder slice.
+# Returns the child handle (caller reads cmdit_verb_matched + the sub-slice),
+# or 0 after printing help/error (out_rc holds the exit code).
+fn _cli_sub(h, child, out_rc): i64 {
+    var r = cmdit_dispatch_argv(child, cmdit_verb_argc(h), cmdit_verb_argv(h));
+    if (r == CMDIT_HELP) { cmdit_help(child); store64(out_rc, CMDIT_EXIT_OK); return 0; }
+    if (r == CMDIT_RESULT_ERR) { cmdit_print_error(child); store64(out_rc, CMDIT_EXIT_USAGE); return 0; }
+    if (cmdit_verb_matched(child) < 0) { cmdit_help(child); store64(out_rc, CMDIT_EXIT_USAGE); return 0; }
+    return child;
+}
+
+fn _cli_need(child, n, what): i64 {
+    if (cmdit_verb_argc(child) < n + 1) {           # +1: slice[0] = the sub-verb
+        ifr_print_cstr("ifran: missing ");
+        ifr_print_cstr(what);
+        println("");
+        return 0;
+    }
+    return 1;
 }
 
 fn main(): i64 {
     alloc_init();
     args_init();
-    if (argc() < 2) { usage(); return 0; }
-    var cmd = argv(1);
-    if (streq(cmd, "run") == 1) {
-        if (argc() < 3) { println("ifran: run needs a <job.cyml>"); return 1; }
-        var js = jobspec_parse(argv(2));
-        if (js == 0) { return 1; }
-        var rc = run_job(js);
-        if (rc < 0) { return 1; }
-        return rc;
+    var h = cmdit_new("ifran");
+    cmdit_verb(h, "run", "execute a job spec: spawn, capture, record (exit = child's)");   # 0
+    cmdit_verb(h, "runs", "list recorded runs");                                           # 1
+    cmdit_verb(h, "keys", "operator Ed25519 keypair: init | show");                        # 2
+    cmdit_verb(h, "store", "signed model store: add <file> [name] | ls | verify <id>");    # 3
+    cmdit_verb(h, "dataset", "corpora: add <file> [name] | ls | dedup <id>");              # 4
+    cmdit_verb(h, "sweep", "expand + run a parameter sweep (grid / seeded random)");       # 5
+    cmdit_verb(h, "sweeps", "list sweeps");                                                # 6
+    cmdit_verb(h, "eval", "run a gate as a recorded eval (exit = the gate)");              # 7
+    cmdit_verb(h, "evals", "list the benchmark store");                                    # 8
+    cmdit_verb(h, "pref", "preferences: new | pair | good | bad | ls | export");           # 9
+
+    var r = cmdit_dispatch(h);
+    if (r == CMDIT_HELP) { cmdit_help(h); return CMDIT_EXIT_OK; }
+    if (r == CMDIT_VERSION) { cmdit_version(h, IFRAN_VERSION()); return CMDIT_EXIT_OK; }
+    if (r == CMDIT_RESULT_ERR) { cmdit_print_error(h); return CMDIT_EXIT_USAGE; }
+    var v = cmdit_verb_matched(h);
+    if (v < 0) { cmdit_help(h); return CMDIT_EXIT_OK; }
+    var va = cmdit_verb_argv(h);
+    var vc = cmdit_verb_argc(h);
+    var rc = alloc(8);
+
+    if (v == 0) {                                    # run <job.cyml>
+        if (vc < 2) { println("ifran: run needs a <job.cyml>"); return CMDIT_EXIT_USAGE; }
+        var js = jobspec_parse(_cli_tok(va, 1));
+        if (js == 0) { return CMDIT_EXIT_USAGE; }
+        var e = run_job(js);
+        if (e < 0) { return 1; }
+        return e;
     }
-    if (streq(cmd, "runs") == 1) { return runstore_list(); }
-    if (streq(cmd, "keys") == 1) {
-        if (argc() < 3) { println("ifran: keys needs init|show"); return 1; }
-        if (streq(argv(2), "init") == 1) { return keys_init(); }
-        if (streq(argv(2), "show") == 1) { return keys_show(); }
-        println("ifran: keys needs init|show");
-        return 1;
+    if (v == 1) { return runstore_list(); }
+    if (v == 2) {                                    # keys init|show
+        var kh = cmdit_new("ifran keys");
+        cmdit_verb(kh, "init", "generate the operator keypair (refuses to overwrite)");
+        cmdit_verb(kh, "show", "print the operator public key (hex)");
+        if (_cli_sub(h, kh, rc) == 0) { return load64(rc); }
+        if (cmdit_verb_matched(kh) == 0) { return keys_init(); }
+        return keys_show();
     }
-    if (streq(cmd, "store") == 1) {
-        if (argc() < 3) { println("ifran: store needs add|ls|verify"); return 1; }
-        if (streq(argv(2), "ls") == 1) { return store_ls(); }
-        if (streq(argv(2), "add") == 1) {
-            if (argc() < 4) { println("ifran: store add needs a <file.tula>"); return 1; }
-            var nm = argv(4);
-            if (argc() < 5) { nm = argv(3); }
-            if (store_add(argv(3), nm) < 0) { return 1; }
+    if (v == 3) {                                    # store add|ls|verify
+        var sh = cmdit_new("ifran store");
+        cmdit_verb(sh, "add", "validate + verify + ingest a .tula artifact: <file> [name]");
+        cmdit_verb(sh, "ls", "list the model store");
+        cmdit_verb(sh, "verify", "re-check hash/structure/signature: <id>");
+        if (_cli_sub(h, sh, rc) == 0) { return load64(rc); }
+        var sv = cmdit_verb_matched(sh);
+        var sa = cmdit_verb_argv(sh);
+        if (sv == 0) {
+            if (_cli_need(sh, 1, "<file.tula>") == 0) { return CMDIT_EXIT_USAGE; }
+            var nm = _cli_tok(sa, 1);
+            if (cmdit_verb_argc(sh) >= 3) { nm = _cli_tok(sa, 2); }
+            if (store_add(_cli_tok(sa, 1), nm) < 0) { return 1; }
             return 0;
         }
-        if (streq(argv(2), "verify") == 1) {
-            if (argc() < 4) { println("ifran: store verify needs an <id>"); return 1; }
-            return store_verify(atoi(argv(3)));
-        }
-        println("ifran: store needs add|ls|verify");
-        return 1;
+        if (sv == 1) { return store_ls(); }
+        if (_cli_need(sh, 1, "<id>") == 0) { return CMDIT_EXIT_USAGE; }
+        return store_verify(atoi(_cli_tok(sa, 1)));
     }
-    if (streq(cmd, "dataset") == 1) {
-        if (argc() < 3) { println("ifran: dataset needs add|ls|dedup"); return 1; }
-        if (streq(argv(2), "ls") == 1) { return dataset_ls(); }
-        if (streq(argv(2), "add") == 1) {
-            if (argc() < 4) { println("ifran: dataset add needs a <file>"); return 1; }
-            var dn = argv(4);
-            if (argc() < 5) { dn = argv(3); }
-            if (dataset_add(argv(3), dn) < 0) { return 1; }
+    if (v == 4) {                                    # dataset add|ls|dedup
+        var dh = cmdit_new("ifran dataset");
+        cmdit_verb(dh, "add", "ingest a text corpus: <file> [name]");
+        cmdit_verb(dh, "ls", "list datasets");
+        cmdit_verb(dh, "dedup", "derive an exact-line-deduped child: <id>");
+        if (_cli_sub(h, dh, rc) == 0) { return load64(rc); }
+        var dv = cmdit_verb_matched(dh);
+        var da = cmdit_verb_argv(dh);
+        if (dv == 0) {
+            if (_cli_need(dh, 1, "<file>") == 0) { return CMDIT_EXIT_USAGE; }
+            var dn = _cli_tok(da, 1);
+            if (cmdit_verb_argc(dh) >= 3) { dn = _cli_tok(da, 2); }
+            if (dataset_add(_cli_tok(da, 1), dn) < 0) { return 1; }
             return 0;
         }
-        if (streq(argv(2), "dedup") == 1) {
-            if (argc() < 4) { println("ifran: dataset dedup needs an <id>"); return 1; }
-            if (dataset_dedup(atoi(argv(3))) < 0) { return 1; }
-            return 0;
-        }
-        println("ifran: dataset needs add|ls|dedup");
-        return 1;
+        if (dv == 1) { return dataset_ls(); }
+        if (_cli_need(dh, 1, "<id>") == 0) { return CMDIT_EXIT_USAGE; }
+        if (dataset_dedup(atoi(_cli_tok(da, 1))) < 0) { return 1; }
+        return 0;
     }
-    if (streq(cmd, "sweep") == 1) {
-        if (argc() < 3) { println("ifran: sweep needs a <spec.cyml>"); return 1; }
-        return sweep_run(argv(2));
+    if (v == 5) {                                    # sweep <spec.cyml>
+        if (vc < 2) { println("ifran: sweep needs a <spec.cyml>"); return CMDIT_EXIT_USAGE; }
+        return sweep_run(_cli_tok(va, 1));
     }
-    if (streq(cmd, "sweeps") == 1) { return sweep_ls(); }
-    if (streq(cmd, "eval") == 1) {
-        if (argc() < 3) { println("ifran: eval needs a <spec.cyml>"); return 1; }
-        return eval_run(argv(2));
+    if (v == 6) { return sweep_ls(); }
+    if (v == 7) {                                    # eval <spec.cyml>
+        if (vc < 2) { println("ifran: eval needs a <spec.cyml>"); return CMDIT_EXIT_USAGE; }
+        return eval_run(_cli_tok(va, 1));
     }
-    if (streq(cmd, "evals") == 1) { return eval_ls(); }
-    if (streq(cmd, "pref") == 1) {
-        if (argc() < 3) { println("ifran: pref needs new|pair|good|bad|ls|export"); return 1; }
-        var sub = argv(2);
-        if (streq(sub, "ls") == 1) { return pref_ls(); }
-        if (streq(sub, "new") == 1) {
-            if (argc() < 4) { println("ifran: pref new needs a <name>"); return 1; }
-            if (pref_new(argv(3)) < 0) { return 1; }
-            return 0;
-        }
-        if (streq(sub, "pair") == 1) {
-            if (argc() < 7) { println("ifran: pref pair needs <set> <prompt> <chosen> <rejected>"); return 1; }
-            if (pref_pair(atoi(argv(3)), argv(4), argv(5), argv(6)) < 0) { return 1; }
-            return 0;
-        }
-        if (streq(sub, "good") == 1) {
-            if (argc() < 6) { println("ifran: pref good needs <set> <prompt> <completion>"); return 1; }
-            if (pref_unary(atoi(argv(3)), argv(4), argv(5), 1) < 0) { return 1; }
-            return 0;
-        }
-        if (streq(sub, "bad") == 1) {
-            if (argc() < 6) { println("ifran: pref bad needs <set> <prompt> <completion>"); return 1; }
-            if (pref_unary(atoi(argv(3)), argv(4), argv(5), 0 - 1) < 0) { return 1; }
-            return 0;
-        }
-        if (streq(sub, "export") == 1) {
-            if (argc() < 5) { println("ifran: pref export needs <set> <out.jsonl>"); return 1; }
-            if (pref_export(atoi(argv(3)), argv(4)) < 0) { return 1; }
-            return 0;
-        }
-        println("ifran: pref needs new|pair|good|bad|ls|export");
-        return 1;
+    if (v == 8) { return eval_ls(); }
+    # v == 9: pref new|pair|good|bad|ls|export
+    var ph = cmdit_new("ifran pref");
+    cmdit_verb(ph, "new", "create a preference set: <name>");
+    cmdit_verb(ph, "pair", "add a DPO/IPO pair: <set> <prompt> <chosen> <rejected>");
+    cmdit_verb(ph, "good", "add a desirable KTO thumb: <set> <prompt> <completion>");
+    cmdit_verb(ph, "bad", "add an undesirable KTO thumb: <set> <prompt> <completion>");
+    cmdit_verb(ph, "ls", "list sets with pair/unary counts");
+    cmdit_verb(ph, "export", "export a set as escaped JSONL: <set> <out.jsonl>");
+    if (_cli_sub(h, ph, rc) == 0) { return load64(rc); }
+    var pv = cmdit_verb_matched(ph);
+    var pa = cmdit_verb_argv(ph);
+    if (pv == 0) {
+        if (_cli_need(ph, 1, "<name>") == 0) { return CMDIT_EXIT_USAGE; }
+        if (pref_new(_cli_tok(pa, 1)) < 0) { return 1; }
+        return 0;
     }
-    if (streq(cmd, "version") == 1) { println("ifran (cyrius port, M6)"); return 0; }
-    usage();
+    if (pv == 1) {
+        if (_cli_need(ph, 4, "<set> <prompt> <chosen> <rejected>") == 0) { return CMDIT_EXIT_USAGE; }
+        if (pref_pair(atoi(_cli_tok(pa, 1)), _cli_tok(pa, 2), _cli_tok(pa, 3), _cli_tok(pa, 4)) < 0) { return 1; }
+        return 0;
+    }
+    if (pv == 2) {
+        if (_cli_need(ph, 3, "<set> <prompt> <completion>") == 0) { return CMDIT_EXIT_USAGE; }
+        if (pref_unary(atoi(_cli_tok(pa, 1)), _cli_tok(pa, 2), _cli_tok(pa, 3), 1) < 0) { return 1; }
+        return 0;
+    }
+    if (pv == 3) {
+        if (_cli_need(ph, 3, "<set> <prompt> <completion>") == 0) { return CMDIT_EXIT_USAGE; }
+        if (pref_unary(atoi(_cli_tok(pa, 1)), _cli_tok(pa, 2), _cli_tok(pa, 3), 0 - 1) < 0) { return 1; }
+        return 0;
+    }
+    if (pv == 4) { return pref_ls(); }
+    if (_cli_need(ph, 2, "<set> <out.jsonl>") == 0) { return CMDIT_EXIT_USAGE; }
+    if (pref_export(atoi(_cli_tok(pa, 1)), _cli_tok(pa, 2)) < 0) { return 1; }
     return 0;
 }
 

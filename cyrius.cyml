@@ -2,10 +2,11 @@
 name = "ifran"
 version = "${file:VERSION}"
 description = "ifran (عرفان) — the AGNOS training control plane: jobs, checkpoint store, datasets, sweeps, eval, preference data — thin over the sovereign ML siblings (Cyrius port; the Rust tree lives in rust-old/, reference-only)"
-# ⚠ license matches the repo's existing LICENSE file (AGPL-3.0 — the Rust
-# ifran's choice). Whether the Cyrius port relicenses to the ecosystem's
-# GPL-3.0-only is the maintainer's call — flagged in docs/development/port-ledger.md.
-license = "AGPL-3.0-only"
+# Relicensed GPL-3.0-only at the port cut (maintainer decision 2026-07-05):
+# ecosystem policy is GPL-3.0-only, with AGPL reserved for DESKTOP apps —
+# ifran is a control-plane CLI/service. The AGPL Rust line remains in
+# rust-old/ under its original license.
+license = "GPL-3.0-only"
 language = "cyrius"
 cyrius = "6.4.3"
 
@@ -32,6 +33,15 @@ git = "https://github.com/MacCracken/sigil.git"
 path = "../sigil"
 tag = "3.10.0"
 modules = ["dist/sigil.cyr"]
+
+# cmdit — the ecosystem CLI/arg lib: verb dispatch + generated help/version +
+# the standard 0/1/2 exit convention (run/eval deliberately exceed it: their
+# exits ARE the child/gate codes).
+[deps.cmdit]
+git = "https://github.com/MacCracken/cmdit.git"
+path = "../cmdit"
+tag = "1.1.0"
+modules = ["dist/cmdit.cyr"]
 
 # tula — the sovereign weight-file format; the checkpoint store validates +
 # verifies every ingested artifact through tula_open/tula_verify.

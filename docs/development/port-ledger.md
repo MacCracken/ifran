@@ -96,13 +96,15 @@ port — they are reference for `rust-old/` and get pruned as milestones close
 
 ## Open questions (maintainer calls)
 
-1. **License.** The Rust ifran is **AGPL-3.0** (the LICENSE file); the rest of
-   the ecosystem is GPL-3.0-only. The manifest currently matches the LICENSE
-   file. Relicensing the port is the maintainer's call — flag stands until
-   decided.
-2. **Interface surface** (decide by M2): CLI-first now; the Rust REST boundary
-   is not carried by default; **bote-MCP** is the agnos-native candidate when
-   SY re-wires off its HTTP proxy.
-3. **Versioning across the port**: VERSION stays at the Rust line (1.3.0) until
-   the first Cyrius cut; precedent (goonj/naad/svara) ships the completed port
-   as the next major (→ 2.0.0).
+1. ~~License~~ — **RESOLVED (maintainer, 2026-07-05): GPL-3.0-only.** The
+   ecosystem policy is GPL-3.0-only with **AGPL reserved for desktop apps**;
+   ifran is a control-plane CLI/service. LICENSE + manifest swapped;
+   `rust-old/` keeps its original AGPL.
+2. **Interface surface**: operating CLI-first (the Rust REST boundary was not
+   carried); the standing plan is **bote-MCP when SY re-wires** — formal
+   ratification still the maintainer's, but nothing blocks on it.
+3. **Versioning**: the stabilization pass is COMPLETE (api.md/STABILITY/
+   SECURITY/audit/benchmarks, 2026-07-05) — **2.0.0 is ready to cut**
+   (maintainer bumps + tags). **`rust-old/` HELD (maintainer, 2026-07-05)**:
+   retained (with its docs, now in `rust-old/docs/`) for a release or two
+   past 2.0.0 before removal.

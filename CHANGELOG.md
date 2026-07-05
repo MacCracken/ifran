@@ -160,6 +160,46 @@ for the v1.0 cut is the stabilization pass (API freeze/audit/benchmarks per
 first-party standards) + the standing maintainer calls (license, interface,
 rust-old dismissal).
 
+### The 2.0 stabilization pass (2026-07-05) — ready to cut
+- **Relicensed GPL-3.0-only** (maintainer decision: ecosystem policy is
+  GPL-3.0-only with AGPL reserved for DESKTOP apps; ifran is a control-plane
+  CLI/service). `rust-old/` keeps its original AGPL.
+- **`rust-old/` HELD** (maintainer decision): retained for a release or two
+  past 2.0.0 before removal; its Rust-era docs relocated into `rust-old/docs/`
+  to travel with it (architecture/backends/fleet/multi-tenancy/bridge/
+  hardware/api-reference/training/eval/cli + sy-integration/training guides).
+- **README rewritten** for the control plane; **`docs/cli-reference.md`**
+  rewritten for the ported surface.
+- **`docs/api.md` + `STABILITY.md`** — the frozen 2.x surface: CLI semantics
+  (exit codes ARE the gates), spec formats, workspace layout, schemas (with
+  the in-place-migration precedent), export formats, module fns; the named
+  additive lane (tarka pref-ingestion, operator-key signing for producers,
+  bote-MCP when SY re-wires, BBO).
+- **`SECURITY.md`** rewritten (single-operator threat model; no-shell execve;
+  delegation-to-audited-surfaces posture) + **`docs/audit/2026-07-05-audit.md`**
+  — PASS, 0 code changes (the port parses no non-operator bytes itself:
+  tula/bayan/patra own their formats).
+- **`docs/benchmarks.md`** — orchestration overhead **~0.6 ms/job** (20-run
+  echo comparison) + the measured real workflows (attn11 train/sweep,
+  fidelity eval, QLoRA round-trip, 63.8 MB ingest, tarka gates).
+- Suite **77/77**; lint/fmt clean. **VERSION stays 1.3.0 until the maintainer
+  cuts 2.0.0** (the port-completion major, per the goonj/naad precedent).
+
+### Changed — CLI rebuilt on cmdit (2026-07-05)
+- **`src/main.cyr` rewritten on [cmdit](https://github.com/MacCracken/cmdit)**
+  (the ecosystem CLI/arg lib — know-the-ecosystem, replacing the hand-rolled
+  streq dispatch + hand-written help wall): top-level **verb dispatch** (10
+  verbs) + **child handles** for the grouped commands (keys/store/dataset/
+  pref), so `ifran --help`, `ifran store --help`, `--version`/`-V`, and
+  unknown-command errors (+ the command list, exit 2 = CMDIT_EXIT_USAGE) are
+  all **generated from the verb table** — no drift between parse and help.
+- Command names/arguments unchanged (behavior parity regressed against the
+  populated proof workspace: runs/store/dataset/eval/pref listings, keys, a
+  real run, verify, a fresh eval). `run`/`eval` still exit with the
+  child/gate code by design (documented in api.md — beyond cmdit's 0/1/2).
+- `[deps.cmdit]` 1.1.0; embedded version literal (`IFRAN_VERSION`) added to
+  the cut mechanics. Suite 77/77 unchanged (tests drive modules directly).
+
 ### Porting notes (patra/bayan RTFM-class, recorded for the port's continuation)
 - patra binds are **0-based**; an unbound slot defaults to INT 0 → a
   `PATRA_ERR_TYPE` (9) against a STR column.

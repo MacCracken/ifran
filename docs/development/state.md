@@ -36,9 +36,15 @@ maxrel=0.000001049 captured). **M6 (preference store) ✅ DONE 2026-07-05**: set
 thumbs + escaped JSONL export (bayan parse-back proven); suite **77/77**.
 **The v1.0 acceptance is DEMONSTRATED** — attn11 (train+sweep) + anukūlana
 (fidelity eval + stored artifacts) + tarka (ALL GATES PASS) ran entirely as
-ifran jobs in one workspace. **Next: the v1.0 stabilization pass** (api.md /
-STABILITY / audit / benchmarks) + the maintainer calls (license, interface,
-rust-old dismissal) → cut as 2.0.0 per the port precedent. NOT porting: `backends/` (dead broker), server/lineage/marketplace/
+ifran jobs in one workspace. **The stabilization pass is COMPLETE (2026-07-05)**: relicensed
+**GPL-3.0-only** (policy: AGPL = desktop apps only; rust-old keeps AGPL);
+`rust-old/` **HELD** for a release or two (its docs relocated into it); README
++ cli-reference rewritten; api.md/STABILITY/SECURITY/audit (PASS, 0 changes)/
+benchmarks (orchestration overhead ~0.6 ms/job) all landed. Suite **77/77**.
+**CLI rebuilt on cmdit** (verb dispatch + generated help/version/errors;
+`[deps.cmdit]` 1.1.0; behavior parity regressed; embedded `IFRAN_VERSION`
+literal joins cut mechanics). **2.0.0 is READY TO CUT** (maintainer bumps
+VERSION 1.3.0→2.0.0 + the `IFRAN_VERSION` literal + tags). NOT porting: `backends/` (dead broker), server/lineage/marketplace/
 fleet/rag/hardware (owned homes) — see the ledger.
 
 ## Toolchain

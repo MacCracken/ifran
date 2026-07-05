@@ -16,9 +16,9 @@ their binaries as jobs). Cyrius port of 53.6k lines of Rust (preserved at
 `rust-old/`, reference-only, eventual dismissal).
 
 - **Type**: Port (Rust → Cyrius); binary + control-plane services
-- **License**: AGPL-3.0 (the Rust ifran's license — the LICENSE file; whether
-  the port relicenses to the ecosystem's GPL-3.0-only is the maintainer's call,
-  flagged in `docs/development/port-ledger.md`)
+- **License**: GPL-3.0-only (relicensed at the port cut per the ecosystem
+  policy — GPL-3.0-only everywhere, AGPL reserved for desktop apps; the Rust
+  line in `rust-old/` keeps its original AGPL)
 - **Language**: Cyrius (toolchain pinned in `cyrius.cyml [package].cyrius`)
 - **Version**: `VERSION` at the project root is the source of truth — do not inline the number here
 - **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-standards.md) · [First-Party Documentation](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-documentation.md)
