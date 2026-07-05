@@ -7,6 +7,7 @@ include "src/keys.cyr"
 include "src/store.cyr"
 include "src/dataset.cyr"
 include "src/sweep.cyr"
+include "src/eval.cyr"
 
 fn _t_write(path, s): i64 {
     file_write_all(path, s, strlen(s));
@@ -274,6 +275,40 @@ fn test_sweeps(): i64 {
     return 0;
 }
 
+fn test_evals(): i64 {
+    var db = runstore_open();
+    # metric extraction unit checks
+    var out = "step 10 loss 1.2500 done\n";
+    var v = eval_extract_metric(out, strlen(out), "loss");
+    assert_nonnull(v, "metric found");
+    assert(streq(v, "1.2500"), "metric token extracted verbatim");
+    var v2 = eval_extract_metric(out, strlen(out), "maxrel=");
+    assert_eq(v2, 0, "absent metric extracts 0");
+    var out2 = "maxrel=0.000001049 PASS";
+    var v3 = eval_extract_metric(out2, strlen(out2), "maxrel");
+    assert(streq(v3, "0.000001049"), "'=' skipped before the number");
+
+    # passing eval with a metric, through the full runner
+    var spec = "[eval]\nname = \"toy-gate\"\nbin = \"/bin/echo\"\nargs = \"loss 0.75 ok\"\nlogdir = \"/tmp/ifran_test_logs\"\nmetric = \"loss\"\n";
+    file_write_all("/tmp/ifran_t_eval.cyml", spec, strlen(spec));
+    assert_eq(eval_run("/tmp/ifran_t_eval.cyml"), 0, "passing eval gates 0");
+    # failing eval: /bin/false -> gate 1
+    var fspec = "[eval]\nname = \"fail-gate\"\nbin = \"/bin/false\"\nlogdir = \"/tmp/ifran_test_logs\"\n";
+    file_write_all("/tmp/ifran_t_eval.cyml", fspec, strlen(fspec));
+    assert_eq(eval_run("/tmp/ifran_t_eval.cyml"), 1, "failing eval gates 1");
+
+    # the benchmark store holds both, with the metric value recorded
+    var rs = patra_query(db, "SELECT id, gate, value FROM evals");
+    assert_nonnull(rs, "evals query works");
+    assert_eq(patra_result_count(rs), 2, "two eval records");
+    assert_eq(patra_result_get_int(rs, 0, 1), 0, "eval 1 gate 0");
+    assert_eq(patra_result_get_int(rs, 1, 1), 1, "eval 2 gate 1");
+    var mv = patra_result_get_str(rs, 0, 2);
+    assert_eq(load8(mv), 48, "metric value recorded ('0'.75)");
+    patra_result_free(rs);
+    return 0;
+}
+
 fn main(): i64 {
     alloc_init();
     test_group("jobspec");
@@ -288,6 +323,8 @@ fn main(): i64 {
     test_datasets();
     test_group("sweeps");
     test_sweeps();
+    test_group("evals");
+    test_evals();
     return assert_summary();
 }
 

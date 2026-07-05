@@ -115,6 +115,26 @@ steps (10.8 s / 21.5 s / 42.9 s), every run recorded and tagged with the sweep
 id — **a hyperparameter sweep of real sovereign-ML training runs, orchestrated
 end-to-end.**
 
+### Added — M5 (the eval runner + benchmark store)
+- **`src/eval.cyr`** — an eval is a job whose EXIT CODE is the gate (exactly
+  the family's discipline: FD gates, fidelity oracles, parity fixtures all
+  exit 0/1) plus an optional **metric** pulled from the run log
+  (`metric = "maxrel"` finds the key and records the number after it —
+  verbatim, as printed; patra has no float column and the honest value is the
+  gate's own token). Evals run as ordinary recorded runs; the
+  `evals(name, run, gate, metric, value)` record references the run id.
+- **CLI**: `ifran eval <spec.cyml>` (exit = the gate) · `ifran evals`.
+- **`tests/ifran.tcyr`** 53→**64**: metric extraction units (verbatim token,
+  '='/':' skipping, absent-metric), passing + failing gates through the full
+  runner, benchmark-store contents.
+
+### The M5 proof
+The ecosystem's flagship gate as a recorded eval: `ifran eval` ran anukulana's
+**HF-fidelity oracle** — `eval 1 PASS (exit 0) maxrel=0.000001049 (run 5)` —
+the gate result AND its headline number captured into the benchmark store,
+referencing the underlying run record. **The siblings' own gates are now
+ifran-orchestrated, recorded benchmarks.**
+
 ### Porting notes (patra/bayan RTFM-class, recorded for the port's continuation)
 - patra binds are **0-based**; an unbound slot defaults to INT 0 → a
   `PATRA_ERR_TYPE` (9) against a STR column.

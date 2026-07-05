@@ -13,6 +13,11 @@
 
 fn RUN_LOG_MAX(): i64 { return 4 * 1024 * 1024; }   # 4 MB captured output
 
+var _run_last_id = 0;
+var _run_last_log = 0;
+fn run_last_id(): i64 { return _run_last_id; }
+fn run_last_log(): i64 { return _run_last_log; }
+
 # fork + pipe + execve; fills buf with the child's stdout+stderr (<= buflen),
 # stores the exit code (0..255, 127 = exec failed, 128+sig on signal) into
 # out_exit. Returns bytes captured, or -1 on orchestration failure.
@@ -129,6 +134,8 @@ fn run_job(js): i64 {
     if (id < 0) { println("ifran: run record insert failed"); return 0 - 1; }
     ifr_mkdir_p(jobspec_logdir(js));
     var log_path = _run_log_path(jobspec_logdir(js), id);
+    _run_last_id = id;
+    _run_last_log = log_path;
     ifr_print_cstr("run "); fmt_int(id);
     ifr_print_cstr(": "); ifr_print_cstr(args_joined); println("");
 

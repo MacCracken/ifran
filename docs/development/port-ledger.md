@@ -18,7 +18,7 @@
 | `train/checkpoint`, `registry`, `storage`, `versioning` | `src/keys.cyr` + `src/store.cyr` — tula+sigil store (**crisp internal boundary** — the named first-extraction candidate) | M2 | **✅ done** |
 | `train/dataset`, `dataset` | `src/dataset.cyr` | M3 | **✅ done** (text corpora; akshara-packed stores if a consumer wants them) |
 | `train/experiment`, `experiment` | `src/sweep.cyr` (grid + seeded-random; BBO stays a separate lane) | M4 | **✅ done** |
-| `eval` | `src/eval*.cyr` | M5 | pending |
+| `eval` | `src/eval.cyr` | M5 | **✅ done** |
 | `preference`, `rlhf` | `src/pref*.cyr` (feeds tarka's DPO/KL/IPO/KTO) | M6 | pending |
 | `budget`, `audit` (thin parts) | job quotas + a libro-backed run journal | M1/M2 | pending |
 | `types`, `config`, `cli` | `src/main.cyr` (CLI); specs are bayan CYML in `src/jobspec.cyr` | M0–M1 | **✅ done** |
@@ -79,7 +79,11 @@ port — they are reference for `rust-old/` and get pruned as milestones close
   substitution; combos = first-class runs tagged with the sweep id; pre-M4 db
   migration (ALTER TABLE). Suite 53/53. **Proof met:** a 3-combo attn11
   steps-sweep trained on the M3 dataset, 3/3 exit 0, durations scaling.
-- **M5 — eval runner** · **M6 — preference store**.
+- **M5 — eval runner. ✅ DONE 2026-07-05.** `src/eval.cyr`: exit-code gates +
+  verbatim metric extraction into the `evals` benchmark store (records
+  reference run ids). Suite 64/64. **Proof met:** anukulana's HF-fidelity
+  oracle ran as eval 1 — PASS, maxrel=0.000001049 captured.
+- **M6 — preference store**.
 - **v1.0** — an attn11/tarka/anukūlana workflow runs entirely as ifran jobs;
   `rust-old/` dismissed.
 

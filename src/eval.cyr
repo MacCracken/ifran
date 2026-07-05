@@ -1,0 +1,162 @@
+# @public — M5: the eval runner. An eval is a job whose EXIT CODE is the gate —
+# exactly the family's discipline (FD gates, the HF-fidelity oracle, parity
+# fixtures, tula round-trips all exit 0/1) — plus an optional METRIC pulled
+# from the run log into the benchmark store.
+#
+#   [eval]
+#   name = "anukulana-fidelity"     # + bin/args/logdir/dataset like [job]
+#   bin  = "/path/anukulana"
+#   args = "gpt2-oracle /path/model.safetensors /path/fixture.bin"
+#   metric = "maxrel"               # optional: find this key in the output and
+#                                   # record the number that follows it
+#
+# The eval runs as an ORDINARY recorded run (M1 executor) and the eval record
+# references it: evals(name, run, gate, metric, value). The metric value is
+# stored as the RAW matched token (a string) — patra has no float column and
+# the honest thing is the verbatim number the gate printed, not a re-encoding.
+#
+#   ifran eval <spec.cyml>    run + gate + extract + record (exit = the gate)
+#   ifran evals               list the benchmark store
+
+fn _ev_open_table(): i64 {
+    var db = runstore_open();
+    if (db == 0) { return 0; }
+    var c1 = "CREATE TABLE evals (id INT AUTOINCREMENT, name STR, run INT, gate INT, ";
+    var c2 = "metric STR, value STR, created INT)";
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, c1);
+    str_builder_add_cstr(sb, c2);
+    patra_exec(db, str_cstr(str_builder_build(sb)));
+    return db;
+}
+
+fn _ev_is_numch(c): i64 {
+    if (c >= 48) { if (c <= 57) { return 1; } }       # 0-9
+    if (c == 46) { return 1; }                        # .
+    if (c == 45) { return 1; }                        # -
+    if (c == 43) { return 1; }                        # +
+    if (c == 101) { return 1; }                       # e
+    if (c == 69) { return 1; }                        # E
+    return 0;
+}
+
+# find `key` in buf and return the first numeric token after it (fresh cstr),
+# skipping spaces / '=' / ':' between key and number. 0 if not found.
+fn eval_extract_metric(buf, n, key): i64 {
+    var kl = strlen(key);
+    var i = 0;
+    while (i + kl <= n) {
+        var hit = 1;
+        var j = 0;
+        while (j < kl) {
+            if (load8(buf + i + j) != load8(key + j)) { hit = 0; j = kl; }
+            j = j + 1;
+        }
+        if (hit == 1) {
+            var p = i + kl;
+            var skipping = 1;
+            while (skipping == 1) {
+                if (p >= n) { skipping = 0; }
+                else {
+                    var c = load8(buf + p);
+                    if (c == 32) { p = p + 1; }
+                    elif (c == 61) { p = p + 1; }     # '='
+                    elif (c == 58) { p = p + 1; }     # ':'
+                    else { skipping = 0; }
+                }
+            }
+            var start = p;
+            var go = 1;
+            while (go == 1) {
+                if (p >= n) { go = 0; }
+                elif (_ev_is_numch(load8(buf + p)) == 1) { p = p + 1; }
+                else { go = 0; }
+            }
+            var len = p - start;
+            if (len <= 0) { return 0; }
+            var out = alloc(len + 1);
+            memcpy(out, buf + start, len);
+            store8(out + len, 0);
+            return out;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+fn _ev_insert(db, name, run_id, gate, metric, value): i64 {
+    var q1 = "INSERT INTO evals (name, run, gate, metric, value, created) ";
+    var q2 = "VALUES (?, ?, ?, ?, ?, ?)";
+    var qsb = str_builder_new();
+    str_builder_add_cstr(qsb, q1);
+    str_builder_add_cstr(qsb, q2);
+    var stmt = patra_prepare(db, str_cstr(str_builder_build(qsb)));
+    if (stmt == 0) { return 0 - 1; }
+    patra_bind_text(stmt, 0, name, strlen(name));
+    patra_bind_int(stmt, 1, run_id);
+    patra_bind_int(stmt, 2, gate);
+    patra_bind_text(stmt, 3, metric, strlen(metric));
+    patra_bind_text(stmt, 4, value, strlen(value));
+    patra_bind_int(stmt, 5, clock_epoch_secs());
+    var idp = alloc(8);
+    if (patra_insert_returning(db, stmt, idp) != 0) { patra_finalize(stmt); return 0 - 1; }
+    patra_finalize(stmt);
+    return load64(idp);
+}
+
+# Run an eval spec. Exit = the GATE (the child's exit code; -1 orchestration).
+fn eval_run(path): i64 {
+    var sections = bayan_toml_parse_file(path);
+    var es = bayan_toml_get_sections(sections, "eval");
+    if (vec_len(es) == 0) { println("ifran: eval file has no [eval] section"); return 1; }
+    var pairs = bayan_toml_section_pairs(vec_get(es, 0));
+    var js = jobspec_from_pairs(pairs);
+    if (js == 0) { return 1; }
+    var metric = _js_get_cstr(pairs, "metric");
+    var db = _ev_open_table();
+    if (db == 0) { return 1; }
+    var gate = run_job(js);
+    if (gate < 0) { return 1; }
+    var value = 0;
+    if (metric != 0) {
+        var sizep = alloc(8);
+        var buf = _store_map_file(run_last_log(), sizep);
+        if (buf != 0) { value = eval_extract_metric(buf, load64(sizep), metric); }
+    }
+    if (metric == 0) { metric = "-"; }
+    if (value == 0) { value = "-"; }
+    var eid = _ev_insert(db, jobspec_name(js), run_last_id(), gate, metric, value);
+    if (eid < 0) { println("ifran: eval record insert failed"); return 1; }
+    ifr_print_cstr("eval "); fmt_int(eid);
+    if (gate == 0) { ifr_print_cstr(" PASS (exit 0)"); }
+    else { ifr_print_cstr(" FAIL (exit "); fmt_int(gate); ifr_print_cstr(")"); }
+    if (streq(metric, "-") == 0) {
+        ifr_print_cstr("  "); ifr_print_cstr(metric);
+        ifr_print_cstr("="); ifr_print_cstr(value);
+    }
+    ifr_print_cstr("  (run "); fmt_int(run_last_id());
+    ifr_print_cstr(")"); println("");
+    return gate;
+}
+
+fn eval_ls(): i64 {
+    var db = _ev_open_table();
+    if (db == 0) { return 1; }
+    var rs = patra_query(db, "SELECT id, name, gate, metric, value, run FROM evals");
+    if (rs == 0) { println("ifran: evals query failed"); return 1; }
+    var n = patra_result_count(rs);
+    println("id | name | gate | metric | value | run");
+    var i = 0;
+    while (i < n) {
+        fmt_int(patra_result_get_int(rs, i, 0)); ifr_print_cstr(" | ");
+        _rs_print_str(rs, i, 1); ifr_print_cstr(" | ");
+        fmt_int(patra_result_get_int(rs, i, 2)); ifr_print_cstr(" | ");
+        _rs_print_str(rs, i, 3); ifr_print_cstr(" | ");
+        _rs_print_str(rs, i, 4); ifr_print_cstr(" | ");
+        fmt_int(patra_result_get_int(rs, i, 5));
+        println("");
+        i = i + 1;
+    }
+    patra_result_free(rs);
+    return 0;
+}
