@@ -245,6 +245,28 @@ fn test_datasets(): i64 {
     assert_nonnull(dataset_path(id), "id resolves to a stored path");
     assert_eq(dataset_path(9999), 0, "dangling id resolves to 0");
 
+    # ---- 2.2: dataset validate ------------------------------------------------
+    assert_eq(dataset_validate(id), 0, "clean text corpus validates");
+    assert_eq(dataset_validate(9999), 1, "validate on dangling id fails");
+    # NUL contamination -> hard fail
+    var nulc = alloc(16);
+    memcpy(nulc, "ok\nbad", 6);
+    store8(nulc + 6, 0);
+    store8(nulc + 7, 10);
+    file_write_all("/tmp/ifran_t_nul.txt", nulc, 8);
+    var nid = dataset_add("/tmp/ifran_t_nul.txt", "nul");
+    assert_gt(nid, 0, "nul corpus ingests");
+    assert_eq(dataset_validate(nid), 1, "NUL bytes fail validation");
+    # JSONL mode: good lines pass, a junk line fails
+    var gj = "{\"a\":1}\n{\"b\":\"two\"}\n";
+    file_write_all("/tmp/ifran_t_good.jsonl", gj, strlen(gj));
+    var gid = dataset_add("/tmp/ifran_t_good.jsonl", "goodjsonl");
+    assert_eq(dataset_validate(gid), 0, "well-formed JSONL validates");
+    var bj = "{\"a\":1}\nnot json\n";
+    file_write_all("/tmp/ifran_t_bad.jsonl", bj, strlen(bj));
+    var bid = dataset_add("/tmp/ifran_t_bad.jsonl", "badjsonl");
+    assert_eq(dataset_validate(bid), 1, "junk JSONL line fails validation");
+
     # real line-dedup: 6 lines with 2 exact dups -> 4 kept, parent recorded
     var did = dataset_dedup(id);
     assert_gt(did, 0, "dedup derives a dataset");
@@ -274,6 +296,16 @@ fn test_datasets(): i64 {
     var js2 = jobspec_parse("/tmp/ifran_t_dsjob.cyml");
     assert_eq(run_job(js2), 0 - 1, "dangling dataset id fails loud");
     return 0;
+}
+
+fn _t_last_sweep(db): i64 {
+    var rs = patra_query(db, "SELECT id FROM sweeps");
+    if (rs == 0) { return 0; }
+    var n = patra_result_count(rs);
+    if (n == 0) { patra_result_free(rs); return 0; }
+    var last = patra_result_get_int(rs, n - 1, 0);
+    patra_result_free(rs);
+    return last;
 }
 
 fn _t_runs_in_sweep(db, sid): i64 {
@@ -339,6 +371,31 @@ fn test_sweeps(): i64 {
     var noax = "[sweep]\nname = \"x\"\nbin = \"/bin/echo\"\n";
     file_write_all("/tmp/ifran_t_sweep.cyml", noax, strlen(noax));
     assert_eq(sweep_parse("/tmp/ifran_t_sweep.cyml"), 0, "sweep without axes rejected");
+    # ---- 2.2: budgets — max_trials caps a 3x2 grid to 2 combos -----------------
+    var bspec1 = "[sweep]\nname = \"b\"\nbin = \"/bin/echo\"\nargs = \"v={v}\"\n";
+    var bspec2 = "logdir = \"/tmp/ifran_test_logs\"\nmax_trials = 2\n[sweep.grid]\nv = \"1 2 3 4 5 6\"\n";
+    var bsb = str_builder_new();
+    str_builder_add_cstr(bsb, bspec1);
+    str_builder_add_cstr(bsb, bspec2);
+    var bspec = str_cstr(str_builder_build(bsb));
+    file_write_all("/tmp/ifran_t_sweep.cyml", bspec, strlen(bspec));
+    var bsid_probe = run_last_id();
+    assert_eq(sweep_run("/tmp/ifran_t_sweep.cyml"), 0, "budgeted sweep runs clean");
+    assert_eq(run_last_id() - bsid_probe, 2, "max_trials=2 ran exactly 2 of 6 combos");
+    # negative budget rejects at parse
+    var nspec = "[sweep]\nname = \"n\"\nbin = \"/bin/echo\"\nmax_trials = -1\n[sweep.grid]\nv = \"1\"\n";
+    file_write_all("/tmp/ifran_t_sweep.cyml", nspec, strlen(nspec));
+    assert_eq(sweep_run("/tmp/ifran_t_sweep.cyml"), 1, "negative max_trials rejected");
+
+    # ---- 2.2: leaderboard — rank combos by a log metric ------------------------
+    # the echo combos print "v=N": metric key "v", min -> best v=1, max -> v=2
+    var lsid = _t_last_sweep(db);
+    assert_gt(lsid, 0, "budgeted sweep id found");
+    assert_eq(sweep_best(lsid, "v", 0), 0, "leaderboard (min) over combo logs");
+    assert_eq(sweep_best(lsid, "v", 1), 0, "leaderboard (max) over combo logs");
+    assert_eq(sweep_best(lsid, "nosuchmetric", 0), 1, "missing metric fails loud");
+    assert_eq(sweep_best(99999, "v", 0), 1, "unknown sweep id fails loud");
+
     return 0;
 }
 
@@ -381,19 +438,25 @@ fn test_prefs(): i64 {
     assert_gt(sid, 0, "preference set created");
     # a pair with EMBEDDED QUOTES + newline-ish text (the escaping case)
     var pr = "say \"hi\" politely";
-    assert_gt(pref_pair(sid, pr, "hello there", "yo"), 0, "pair added");
-    assert_gt(pref_pair(sid, "2+2?", "4", "5"), 0, "second pair added");
+    assert_gt(pref_pair(sid, pr, "hello there", "yo", 0), 0, "pair added");
+    assert_gt(pref_pair(sid, "2+2?", "4", "5", 85), 0, "second pair added (conf 85)");
     assert_gt(pref_unary(sid, "joke?", "a good one", 1), 0, "good thumb added");
     assert_gt(pref_unary(sid, "joke?", "a slur", 0 - 1), 0, "bad thumb added");
-    assert_eq(pref_pair(9999, "x", "y", "z"), 0 - 1, "unknown set rejected");
+    assert_eq(pref_pair(9999, "x", "y", "z", 0), 0 - 1, "unknown set rejected");
+    assert_eq(pref_pair(sid, "x", "y", "z", 101), 0 - 1, "conf > 100 rejected");
+    # 4-state (2.2): tie + bothbad rows over responses a/b
+    assert_gt(pref_tie(sid, "pick one", "resp a", "resp b"), 0, "tie added");
+    assert_gt(pref_bothbad(sid, "pick one", "bad a", "bad b"), 0, "bothbad added");
 
     var db = runstore_open();
     assert_eq(_pf_count(db, sid, "pair"), 2, "pair count");
     assert_eq(_pf_count(db, sid, "unary"), 2, "unary count");
+    assert_eq(_pf_count(db, sid, "tie"), 1, "tie count");
+    assert_eq(_pf_count(db, sid, "bothbad"), 1, "bothbad count");
 
     # export -> parse EVERY line back with bayan's JSON DOM (escaping proof)
     var out = "/tmp/ifran_t_prefs.jsonl";
-    assert_eq(pref_export(sid, out), 4, "export writes 4 rows");
+    assert_eq(pref_export(sid, out), 6, "export writes 6 rows");
     var buf = alloc(65536);
     var n = file_read_all(out, buf, 65536);
     assert_gt(n, 0, "export file written");
@@ -431,9 +494,36 @@ fn test_prefs(): i64 {
         }
         i = i + 1;
     }
-    assert_eq(lines, 4, "4 JSONL lines");
-    assert_eq(parsed, 4, "every line parses as a JSON object (bayan DOM)");
+    assert_eq(lines, 6, "6 JSONL lines");
+    assert_eq(parsed, 6, "every line parses as a JSON object (bayan DOM)");
     assert_eq(quoted_ok, 1, "embedded-quote prompt round-trips exactly");
+    # conf + 4-state present in the export text (substring checks)
+    var hits = 0;
+    var needles = vec_new();
+    vec_push(needles, "\"conf\":85");
+    vec_push(needles, "\"kind\":\"tie\"");
+    vec_push(needles, "\"kind\":\"bothbad\"");
+    vec_push(needles, "\"a\":\"resp a\"");
+    var w = 0;
+    while (w < vec_len(needles)) {
+        var nd = vec_get(needles, w);
+        var nl2 = strlen(nd);
+        var found = 0;
+        var q = 0;
+        while (q + nl2 <= n) {
+            var same2 = 1;
+            var r2 = 0;
+            while (r2 < nl2) {
+                if (load8(buf + q + r2) != load8(nd + r2)) { same2 = 0; r2 = nl2; }
+                r2 = r2 + 1;
+            }
+            if (same2 == 1) { found = 1; q = n; }
+            q = q + 1;
+        }
+        hits = hits + found;
+        w = w + 1;
+    }
+    assert_eq(hits, 4, "export carries conf, tie, bothbad, and a/b fields");
     return 0;
 }
 

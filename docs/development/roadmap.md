@@ -32,6 +32,39 @@ opens when its trigger fires or the maintainer pulls it forward.
   tail. Suite 77→100; all proven live (printf-grouping, 1 s kill of a 30 s
   sleep, kill-ifran-mid-job → reap).
 
+### Pre-removal audit triage — the four additives ✅ SHIPPED as 2.2.0 (2026-07-05)
+
+The `rust-old/` pre-removal audit
+([`../audit/2026-07-05-rust-old-preremoval.md`](../audit/2026-07-05-rust-old-preremoval.md))
+surfaced 8 real features with no Cyrius home. Triage (user 2026-07-05):
+
+**Landed (the four small additives):**
+- ✅ Sweep leaderboard — `sweep best <id> <metric> [min|max]`
+- ✅ Sweep budgets — `max_trials` + `time_budget_s`
+- ✅ `dataset validate <id>` — NUL/line/JSONL format checks
+- ✅ 4-state preferences (`pref tie|bothbad`) + pair `conf 0-100`
+
+**Roadmapped (each with its blocker; do not start without the trigger):**
+- **Experiment auto-loop** (train → eval → compare per combo, one
+  orchestration) — *blocked on a spec design decision*: an eval template
+  inside `[sweep]` (which metric, which gate, per-combo or post-hoc). The
+  leaderboard just landed as its query half; natural next 2.x once the spec
+  shape is chosen.
+- **Job priority queue** (Low/Normal/High/Critical) — *blocked on a
+  scheduler/daemon existing*: fork-per-invocation ifran has no queue to
+  prioritize. Revisit with Lane 6 (approval/quotas) / Lane 7 (distributed).
+- **Annotation sessions** (lifecycle, next-unannotated cursor, stats) —
+  *blocked on the GUI/Desktop lane*: an interactive collection workflow wants
+  a graphical annotation surface. NOTE: **puka is a desktop terminal, not an
+  annotation UI** — this waits for the coming GUI/Desktop items and is
+  **BACKLOGGED** until they exist. The 4-state store side (above) is ready
+  for it.
+- **Structured benchmark harness** (MMLU/HellaSwag/HumanEval formatters +
+  scorers) — *blocked on a serving/inference path*: the harness consumes
+  inference results; needs hoosh serving (or the Lane 4 re-wire) to have
+  something to score. The exit-code-gate + metric-extraction design stays
+  the deliberate default.
+
 ### Lane 2 — operator-key producer signing (cross-repo) — ✅ DONE 2026-07-05
 - Shipped as **anukūlana 1.1.1**: `gpt2-tula … --sk <operator.sk>` signs with
   the operator key (64 B seed||pk, exactly `keys init`'s layout; loader

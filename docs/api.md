@@ -23,7 +23,8 @@ semantics worth naming:
   with the GATE. CI-composable by construction.
 - **Spec formats** (bayan TOML/CYML): `[job]`
   (name/bin/args/logdir/dataset/timeout_s — `timeout_s` added 2.1),
-  `[sweep]` + `[sweep.grid]` (mode/samples/seed + axes), `[eval]` (+ metric).
+  `[sweep]` + `[sweep.grid]` (mode/samples/seed + axes; 2.2 budgets:
+  `max_trials`, `time_budget_s`), `[eval]` (+ metric).
   `{dataset}` / `{axis}` placeholders substitute within tokens; `args`
   supports `"double quotes"` for spaced args (2.1).
 - **Run statuses**: `running` → `done` / `failed` / `spawn-failed` /
@@ -32,8 +33,10 @@ semantics worth naming:
 - **Workspace layout**: `ifran.db` (patra tables: runs, sweeps, evals, models,
   datasets, psets, prefs), `ifran-store/<sha16>.tula`, `ifran-data/<sha16>.txt`,
   `runs/logs/run-<id>.log`, `$HOME/.ifran/operator.{sk,pk}`.
-- **Export formats**: preference JSONL
-  (`{"kind":"pair",...}` / `{"kind":"unary",...,"label":±1}`, escaped).
+- **Export formats**: preference JSONL, escaped — `{"kind":"pair",...}`
+  (+`"conf":N` when set, 2.2) / `{"kind":"unary",...,"label":±1}` /
+  `{"kind":"tie"/"bothbad",...,"a":...,"b":...}` (4-state, 2.2; pair/unary-only
+  consumers skip the new kinds loudly).
 
 ## Module surface (frozen)
 

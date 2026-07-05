@@ -7,6 +7,41 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.2.0] — 2026-07-05
+
+**Pre-removal audit additives — the four "small + real" features the Rust tree
+still held** (per `docs/audit/2026-07-05-rust-old-preremoval.md`; all additive
+on the frozen 2.x surface).
+
+### Added
+- **Sweep leaderboard — `ifran sweep best <sweep-id> <metric-key> [min|max]`**
+  — post-hoc ranking of a sweep's combos: reads each sweep-tagged run's log,
+  extracts the metric (the eval extractor: key, then `=`/`:`/spaces, then a
+  numeric token; `f64_parse`-validated), ranks by direction (default **min** —
+  losses), prints the full board + best run. Combos without an extractable
+  metric are skipped loudly.
+- **Sweep budgets** — `[sweep]` gains `max_trials` (caps combos RUN; the cap
+  is announced: "running X of Y grid combos") and `time_budget_s` (stop
+  launching new combos once the wall clock passes; the running combo
+  finishes — the per-combo half is the job template's own `timeout_s`).
+  Negative values reject at parse.
+- **`ifran dataset validate <id>`** — format checks before a training job
+  burns time: NUL-byte scan (binary contamination = hard fail), line stats
+  (count/empty/longest/trailing-newline), and JSONL mode (corpus opening with
+  `{` → per-line bayan parse, first 10 offenders reported, any = hard fail).
+- **4-state preferences + pair confidence** — `pref tie <set> <prompt> <a>
+  <b>` and `pref bothbad <set> <prompt> <a> <b>` (responses stored as a/b,
+  distinguished by kind) + optional `[conf 0-100]` on `pref pair` (preference
+  strength; new `conf` column with error-ignored ALTER migration). Export
+  carries `{"kind":"tie"/"bothbad",...,"a":...,"b":...}` and `"conf":N` on
+  pairs when set. **Consumers that only know pair/unary (tarka `--pref`) skip
+  the new kinds loudly — verified live** (1 pair ingested, 2 skipped).
+- **Tests** (`tests/ifran.tcyr` 100→**120**): budget cap (3 of 6 grid combos),
+  negative-budget reject, leaderboard min/max + missing-metric + unknown-id
+  fail-loud, validate (clean text / dangling id / NUL fail / good JSONL / bad
+  JSONL), tie/bothbad counts + conf range check + export round-trip with the
+  new fields.
+
 ## [2.1.0] — 2026-07-05
 
 **Lane 1 — executor hardening (the 2.1 opener): timeout/reaper, quoted args,

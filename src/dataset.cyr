@@ -238,3 +238,88 @@ fn dataset_dedup(id): i64 {
     str_builder_add_cstr(nsb, nb);
     return _ds_ingest(db, out, w, str_cstr(str_builder_build(nsb)), "text-dedup", id);
 }
+
+# ---- validation (2.2): `ifran dataset validate <id>` --------------------------
+# Format checks BEFORE a training job burns time on a bad corpus. Honest and
+# simple: byte-level stats (NUL bytes = binary contamination, hard fail),
+# line stats (count, empty, longest, trailing-newline), and — when the first
+# non-blank line opens with '{' — per-line JSONL parsing via bayan with the
+# first 10 offending line numbers reported (hard fail on any).
+# Exit 0 = clean; 1 = problems found (or no such dataset).
+fn dataset_validate(id): i64 {
+    var path = dataset_path(id);
+    if (path == 0) { println("ifran: no such dataset id"); return 1; }
+    var sizep = alloc(8);
+    var buf = _store_map_file(path, sizep);
+    if (buf == 0) { println("ifran: cannot read the stored corpus"); return 1; }
+    var size = load64(sizep);
+    var problems = 0;
+    # pass 1: byte stats + first non-blank char
+    var nuls = 0;
+    var firstch = 0;
+    var i = 0;
+    while (i < size) {
+        var c = load8(buf + i);
+        if (c == 0) { nuls = nuls + 1; }
+        if (firstch == 0) {
+            if (c != 10) { if (c != 13) { if (c != 32) { if (c != 9) { firstch = c; } } } }
+        }
+        i = i + 1;
+    }
+    # pass 2: line stats (+ JSONL mode when the corpus opens with '{')
+    var jsonl = 0;
+    if (firstch == 123) { jsonl = 1; }
+    var lines = 0;
+    var empties = 0;
+    var longest = 0;
+    var badj = 0;
+    var ls = 0;
+    i = 0;
+    while (i <= size) {
+        var atend = 0;
+        if (i == size) { if (i > ls) { atend = 1; } }
+        elif (load8(buf + i) == 10) { atend = 1; }
+        if (atend == 1) {
+            var ll = i - ls;
+            lines = lines + 1;
+            if (ll == 0) { empties = empties + 1; }
+            if (ll > longest) { longest = ll; }
+            if (jsonl == 1) { if (ll > 0) {
+                    var pairs = bayan_json_parse(str_new(buf + ls, ll));
+                    var ok = 0;
+                    if (pairs != 0) { if (vec_len(pairs) > 0) { ok = 1; } }
+                    if (ok == 0) {
+                        badj = badj + 1;
+                        if (badj <= 10) {
+                            ifr_print_cstr("  bad JSONL at line "); fmt_int(lines); println("");
+                        }
+                    }
+                } }
+            ls = i + 1;
+        }
+        i = i + 1;
+    }
+    ifr_print_cstr("dataset "); fmt_int(id);
+    ifr_print_cstr(": "); fmt_int(size);
+    ifr_print_cstr(" bytes, "); fmt_int(lines);
+    ifr_print_cstr(" lines ("); fmt_int(empties);
+    ifr_print_cstr(" empty, longest "); fmt_int(longest);
+    ifr_print_cstr(" B)");
+    if (jsonl == 1) { ifr_print_cstr(" [JSONL mode]"); }
+    println("");
+    if (size > 0) {
+        if (load8(buf + size - 1) != 10) { println("  note: no trailing newline"); }
+    }
+    if (nuls > 0) {
+        ifr_print_cstr("  FAIL: "); fmt_int(nuls);
+        println(" NUL bytes (binary contamination)");
+        problems = problems + 1;
+    }
+    if (badj > 0) {
+        ifr_print_cstr("  FAIL: "); fmt_int(badj);
+        println(" unparseable JSONL lines");
+        problems = problems + 1;
+    }
+    if (problems == 0) { println("  VALID"); return 0; }
+    return 1;
+}

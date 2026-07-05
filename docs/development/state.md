@@ -6,6 +6,16 @@
 
 ## Version
 
+**2.2.0 — RELEASED 2026-07-05 (the pre-removal-audit additives).** Sweep
+leaderboard (`sweep best <id> <metric> [min|max]` — eval-extractor metrics
+ranked by direction) · sweep budgets (`max_trials` announced cap +
+`time_budget_s` wall-clock stop) · `dataset validate <id>` (NUL/line/JSONL
+checks) · 4-state preferences (`pref tie|bothbad`, exported with `a`/`b`
+fields) + pair `conf 0-100` (new column, migrated). Suite **120**; all proven
+live incl. tarka `--pref` skipping the new kinds loudly. The other 4 audit
+items are roadmapped with blockers (roadmap § audit triage). Detail in
+CHANGELOG `[2.2.0]`.
+
 **2.1.0 — RELEASED 2026-07-05 (Lane 1 executor hardening).** `timeout_s`
 enforcement (poll-paced capture, SIGKILL → `timed-out`/137) · child PID
 recorded on the run row + `ifran reap` (signal-0 probe; orphans only
@@ -58,9 +68,17 @@ trigger.
 
 ## In flight / next
 
-Nothing in flight — Lane 1 shipped as 2.1.0 (see Version above); remaining
-lanes with their triggers live in [`roadmap.md`](roadmap.md), and the
-`rust-old/` removal window is open (user call). **Lane 2 CLOSED 2026-07-05**
+Nothing in flight — the audit-triage additives shipped as 2.2.0 (see Version
+above); the other 4 audit items are roadmapped with blockers (roadmap § audit
+triage; annotation sessions = GUI/Desktop lane, BACKLOGGED — puka is a
+desktop terminal, not an annotation UI). Remaining lanes with their triggers
+live in [`roadmap.md`](roadmap.md). The `rust-old/`
+removal window is open and the **pre-removal audit is DONE**
+([`../audit/2026-07-05-rust-old-preremoval.md`](../audit/2026-07-05-rust-old-preremoval.md)):
+zero business-logic loss; one ledger gap fixed (`lifecycle` → hoosh/murti-seam
+reference); remaining removal precondition = preserve the 3 SY-contract docs
+(`sy-integration`/`bridge-protocol`/`api-reference` — the Lane-4 parity
+target); the 8-item triage is DONE (4 landed, 4 roadmapped). **Lane 2 CLOSED 2026-07-05**
 (anukūlana 1.1.1 `--sk` — operator-key
 producer signing; `store add` records `verified` end-to-end, proven on the
 real checkpoint). **Lane 3 CLOSED same day** (tarka **1.1.2** `--pref` JSONL

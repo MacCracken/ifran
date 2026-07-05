@@ -41,11 +41,21 @@ the run records `timed-out`, exit 137).
 - `ifran dataset dedup <id>` — derive an exact-line-deduped child (first
   occurrence kept, parent recorded, in/out counts reported).
 - `ifran dataset ls`.
+- `ifran dataset validate <id>` *(2.2)* — format checks before training: NUL
+  scan (hard fail), line stats, JSONL per-line parse when the corpus opens
+  with `{` (first 10 offenders reported; any = fail). Exit 0 = VALID.
 
 ## Sweeps
 - `ifran sweep <spec.cyml>` — expand a `[sweep]` template over `[sweep.grid]`
   axes (grid = cartesian; `mode = "random"` + `samples` + `seed` =
-  deterministic draws) and run every combo as a sweep-tagged run.
+  deterministic draws) and run every combo as a sweep-tagged run. Budgets
+  *(2.2)*: `max_trials` caps combos run (announced); `time_budget_s` stops
+  launching new combos when the wall clock passes (the running combo
+  finishes).
+- `ifran sweep best <sweep-id> <metric-key> [min|max]` *(2.2)* — post-hoc
+  leaderboard: extract the metric from every combo log (eval-extractor
+  syntax), rank by direction (default min), print the board + best run.
+  Metric-less combos are skipped loudly.
 - `ifran sweeps`.
 
 ## Evals
@@ -55,6 +65,10 @@ the run records `timed-out`, exit 137).
 - `ifran evals`.
 
 ## Preferences
-- `ifran pref new <name>` · `pref pair <set> <prompt> <chosen> <rejected>` ·
+- `ifran pref new <name>` · `pref pair <set> <prompt> <chosen> <rejected>
+  [conf 0-100]` *(conf: preference strength, 2.2)* ·
+  `pref tie|bothbad <set> <prompt> <a> <b>` *(4-state, 2.2 — exported as
+  `"kind":"tie"/"bothbad"` with `a`/`b` fields; pair/unary-only consumers
+  skip them loudly)* ·
   `pref good|bad <set> <prompt> <completion>` · `pref ls` ·
   `pref export <set> <out.jsonl>` (escaped JSONL).

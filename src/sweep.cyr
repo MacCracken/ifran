@@ -71,12 +71,29 @@ fn sweep_parse(path): i64 {
     var seed = 1;
     var seedv = toml_get(pairs, "seed");
     if (seedv != 0) { seed = str_to_int(seedv); }
-    var sw = alloc(40);
+    # budgets (2.2): max_trials caps combos RUN; time_budget_s stops launching
+    # new combos once the wall clock passes (the running combo finishes; the
+    # per-combo half is the job template's own timeout_s)
+    var maxt = 0;
+    var mtv = toml_get(pairs, "max_trials");
+    if (mtv != 0) {
+        maxt = str_to_int(mtv);
+        if (maxt < 0) { println("ifran: [sweep] `max_trials` must be >= 0"); return 0; }
+    }
+    var tbud = 0;
+    var tbv = toml_get(pairs, "time_budget_s");
+    if (tbv != 0) {
+        tbud = str_to_int(tbv);
+        if (tbud < 0) { println("ifran: [sweep] `time_budget_s` must be >= 0"); return 0; }
+    }
+    var sw = alloc(56);
     store64(sw, js);
     store64(sw + 8, axes);
     store64(sw + 16, mode);
     store64(sw + 24, samples);
     store64(sw + 32, seed);
+    store64(sw + 40, maxt);
+    store64(sw + 48, tbud);
     return sw;
 }
 
@@ -193,54 +210,75 @@ fn sweep_run(path): i64 {
         combos = load64(sw + 24);
         if (combos <= 0) { println("ifran: random sweep needs samples > 0"); return 1; }
     } else { combos = _sw_combo_count(axes); }
+    var planned = combos;
+    var maxt = load64(sw + 40);
+    if (maxt > 0) { if (maxt < combos) { combos = maxt; } }
+    var tbud = load64(sw + 48);
     var sid = _sw_insert(db, jobspec_name(js), mode, combos);
     if (sid < 0) { println("ifran: sweep record insert failed"); return 1; }
     ifr_print_cstr("sweep "); fmt_int(sid);
     ifr_print_cstr(" ("); ifr_print_cstr(mode);
     ifr_print_cstr(", "); fmt_int(combos);
     ifr_print_cstr(" combos)"); println("");
+    if (combos < planned) {
+        ifr_print_cstr("  max_trials cap: running "); fmt_int(combos);
+        ifr_print_cstr(" of "); fmt_int(planned); println(" grid combos");
+    }
     runstore_set_sweep(sid);
+    var t0s = clock_epoch_secs();
     _sw_seed(load64(sw + 32));
     var na = vec_len(axes);
     var idx = vec_new();
     var a = 0;
     while (a < na) { var c0 = alloc(8); store64(c0, 0); vec_push(idx, c0); a = a + 1; }
     var failures = 0;
+    var ran = 0;
     var k = 0;
     while (k < combos) {
-        if (is_random == 1) {
-            a = 0;
-            while (a < na) {
-                var ax = vec_get(axes, a);
-                store64(vec_get(idx, a), _sw_next(vec_len(_sw_axis_values(ax))));
-                a = a + 1;
+        if (tbud > 0) {
+            if (clock_epoch_secs() - t0s >= tbud) {
+                ifr_print_cstr("  time budget ("); fmt_int(tbud);
+                ifr_print_cstr(" s) hit after "); fmt_int(ran);
+                println(" combos — stopping");
+                k = combos;
             }
         }
-        var cjs = _sw_combo_spec(js, axes, idx, k);
-        if (run_job(cjs) != 0) { failures = failures + 1; }
-        if (is_random == 0) {
-            # odometer increment
-            a = na - 1;
-            var carry = 1;
-            while (a >= 0) {
-                if (carry == 0) { a = 0 - 1; }
-                else {
-                    var cell = vec_get(idx, a);
-                    var v = load64(cell) + 1;
-                    if (v < vec_len(_sw_axis_values(vec_get(axes, a)))) {
-                        store64(cell, v);
-                        carry = 0;
-                    } else { store64(cell, 0); }
-                    a = a - 1;
+        if (k < combos) {
+            if (is_random == 1) {
+                a = 0;
+                while (a < na) {
+                    var ax = vec_get(axes, a);
+                    store64(vec_get(idx, a), _sw_next(vec_len(_sw_axis_values(ax))));
+                    a = a + 1;
                 }
             }
+            var cjs = _sw_combo_spec(js, axes, idx, k);
+            if (run_job(cjs) != 0) { failures = failures + 1; }
+            if (is_random == 0) {
+                # odometer increment
+                a = na - 1;
+                var carry = 1;
+                while (a >= 0) {
+                    if (carry == 0) { a = 0 - 1; }
+                    else {
+                        var cell = vec_get(idx, a);
+                        var v = load64(cell) + 1;
+                        if (v < vec_len(_sw_axis_values(vec_get(axes, a)))) {
+                            store64(cell, v);
+                            carry = 0;
+                        } else { store64(cell, 0); }
+                        a = a - 1;
+                    }
+                }
+            }
+            ran = ran + 1;
+            k = k + 1;
         }
-        k = k + 1;
     }
     runstore_set_sweep(0);
     ifr_print_cstr("sweep "); fmt_int(sid);
-    ifr_print_cstr(" complete: "); fmt_int(combos - failures);
-    ifr_print_cstr("/"); fmt_int(combos);
+    ifr_print_cstr(" complete: "); fmt_int(ran - failures);
+    ifr_print_cstr("/"); fmt_int(ran);
     ifr_print_cstr(" combos exited 0"); println("");
     if (failures == 0) { return 0; }
     return 1;
@@ -264,5 +302,117 @@ fn sweep_ls(): i64 {
         i = i + 1;
     }
     patra_result_free(rs);
+    return 0;
+}
+
+# ---- leaderboard (2.2): rank a sweep's combos by a log-extracted metric -------
+# `ifran sweep best <sweep-id> <metric-key> [min|max]` — post-hoc: reads each
+# sweep-tagged run's log, extracts the metric (the eval extractor: key then
+# =/:/spaces then a numeric token), ranks by direction (default min — losses).
+# Combos whose log lacks the metric are reported and skipped, loudly.
+fn sweep_best(sid, key, want_max): i64 {
+    var db = _sw_open_table();
+    if (db == 0) { return 1; }
+    var stmt = patra_prepare(db, "SELECT id, args, log FROM runs WHERE sweep = ?");
+    if (stmt == 0) { return 1; }
+    patra_bind_int(stmt, 0, sid);
+    var rs = patra_query_prepared(db, stmt);
+    patra_finalize(stmt);
+    if (rs == 0) { println("ifran: query failed"); return 1; }
+    var n = patra_result_count(rs);
+    if (n == 0) {
+        patra_result_free(rs);
+        println("ifran: no runs tagged with that sweep id");
+        return 1;
+    }
+    # gather (run id, value) rows; 24 B each: id, f64 value, args cstr
+    var rows = alloc(n * 24);
+    var have = 0;
+    var missing = 0;
+    var buf = alloc(RUN_LOG_MAX());
+    var i = 0;
+    while (i < n) {
+        var lp = patra_result_get_str(rs, i, 2);
+        var ll = patra_result_get_str_len(rs, i, 2);
+        var got = 0;
+        if (lp != 0) { if (ll > 0) {
+                var lpath = alloc(ll + 1);
+                memcpy(lpath, lp, ll);
+                store8(lpath + ll, 0);
+                var nread = file_read_all(lpath, buf, RUN_LOG_MAX());
+                if (nread > 0) {
+                    var vs = eval_extract_metric(buf, nread, key);
+                    if (vs != 0) {
+                        var vp = alloc(8);
+                        if (f64_parse_ok(vs, vp) == 1) {
+                            var row = rows + have * 24;
+                            store64(row, patra_result_get_int(rs, i, 0));
+                            store64(row + 8, load64(vp));
+                            var ap = patra_result_get_str(rs, i, 1);
+                            var al = patra_result_get_str_len(rs, i, 1);
+                            var ac = alloc(al + 1);
+                            memcpy(ac, ap, al);
+                            store8(ac + al, 0);
+                            store64(row + 16, ac);
+                            have = have + 1;
+                            got = 1;
+                        }
+                    }
+                }
+            } }
+        if (got == 0) { missing = missing + 1; }
+        i = i + 1;
+    }
+    patra_result_free(rs);
+    if (have == 0) {
+        ifr_print_cstr("ifran: metric `"); ifr_print_cstr(key);
+        println("` not found in any combo log");
+        return 1;
+    }
+    # selection sort by direction (combo counts are small)
+    var a = 0;
+    while (a < have - 1) {
+        var pick = a;
+        var b = a + 1;
+        while (b < have) {
+            var vb = load64(rows + b * 24 + 8);
+            var vp2 = load64(rows + pick * 24 + 8);
+            var better = f64_lt(vb, vp2);
+            if (want_max == 1) { better = f64_gt(vb, vp2); }
+            if (better == 1) { pick = b; }
+            b = b + 1;
+        }
+        if (pick != a) {
+            var t = 0;
+            while (t < 3) {
+                var tmp = load64(rows + a * 24 + t * 8);
+                store64(rows + a * 24 + t * 8, load64(rows + pick * 24 + t * 8));
+                store64(rows + pick * 24 + t * 8, tmp);
+                t = t + 1;
+            }
+        }
+        a = a + 1;
+    }
+    ifr_print_cstr("sweep "); fmt_int(sid);
+    ifr_print_cstr(" leaderboard by `"); ifr_print_cstr(key);
+    if (want_max == 1) { ifr_print_cstr("` (max)"); } else { ifr_print_cstr("` (min)"); }
+    println(":");
+    println("rank | run | value | args");
+    i = 0;
+    while (i < have) {
+        var row2 = rows + i * 24;
+        fmt_int(i + 1); ifr_print_cstr(" | ");
+        fmt_int(load64(row2)); ifr_print_cstr(" | ");
+        fmt_float(load64(row2 + 8), 6); ifr_print_cstr(" | ");
+        ifr_print_cstr(load64(row2 + 16)); println("");
+        i = i + 1;
+    }
+    if (missing > 0) {
+        ifr_print_cstr("("); fmt_int(missing);
+        println(" combos had no extractable metric — skipped)");
+    }
+    ifr_print_cstr("best: run "); fmt_int(load64(rows));
+    ifr_print_cstr(" ("); fmt_float(load64(rows + 8), 6);
+    println(")");
     return 0;
 }

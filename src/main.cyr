@@ -19,7 +19,7 @@ include "src/pref.cyr"
 
 # Embedded version literal — bumped as part of cut mechanics (VERSION file is
 # the source of truth; keep in sync at each cut).
-fn IFRAN_VERSION(): i64 { return "2.1.0"; }
+fn IFRAN_VERSION(): i64 { return "2.2.0"; }
 
 # slice accessor: token i of a verb-remainder argv (cstr*)
 fn _cli_tok(argv, i): i64 { return load64(argv + i * 8); }
@@ -53,12 +53,12 @@ fn main(): i64 {
     cmdit_verb(h, "runs", "list recorded runs");                                           # 1
     cmdit_verb(h, "keys", "operator Ed25519 keypair: init | show");                        # 2
     cmdit_verb(h, "store", "signed model store: add <file> [name] | ls | verify <id>");    # 3
-    cmdit_verb(h, "dataset", "corpora: add <file> [name] | ls | dedup <id>");              # 4
-    cmdit_verb(h, "sweep", "expand + run a parameter sweep (grid / seeded random)");       # 5
+    cmdit_verb(h, "dataset", "corpora: add <file> [name] | ls | dedup <id> | validate <id>");              # 4
+    cmdit_verb(h, "sweep", "run a sweep (grid/random; budgets) | best <id> <metric> [min|max]");       # 5
     cmdit_verb(h, "sweeps", "list sweeps");                                                # 6
     cmdit_verb(h, "eval", "run a gate as a recorded eval (exit = the gate)");              # 7
     cmdit_verb(h, "evals", "list the benchmark store");                                    # 8
-    cmdit_verb(h, "pref", "preferences: new | pair | good | bad | ls | export");           # 9
+    cmdit_verb(h, "pref", "preferences: new | pair | good | bad | tie | bothbad | ls | export");           # 9
     cmdit_verb(h, "show", "one run's full record + log tail: <run-id>");                   # 10
     cmdit_verb(h, "reap", "mark running rows whose PID is gone as orphaned");              # 11
 
@@ -121,6 +121,7 @@ fn main(): i64 {
         cmdit_verb(dh, "add", "ingest a text corpus: <file> [name]");
         cmdit_verb(dh, "ls", "list datasets");
         cmdit_verb(dh, "dedup", "derive an exact-line-deduped child: <id>");
+        cmdit_verb(dh, "validate", "format checks (NULs, lines, JSONL): <id>");
         if (_cli_sub(h, dh, rc) == 0) { return load64(rc); }
         var dv = cmdit_verb_matched(dh);
         var da = cmdit_verb_argv(dh);
@@ -132,12 +133,28 @@ fn main(): i64 {
             return 0;
         }
         if (dv == 1) { return dataset_ls(); }
+        if (dv == 3) {                               # validate <id>
+            if (_cli_need(dh, 1, "<id>") == 0) { return CMDIT_EXIT_USAGE; }
+            return dataset_validate(atoi(_cli_tok(da, 1)));
+        }
         if (_cli_need(dh, 1, "<id>") == 0) { return CMDIT_EXIT_USAGE; }
         if (dataset_dedup(atoi(_cli_tok(da, 1))) < 0) { return 1; }
         return 0;
     }
-    if (v == 5) {                                    # sweep <spec.cyml>
-        if (vc < 2) { println("ifran: sweep needs a <spec.cyml>"); return CMDIT_EXIT_USAGE; }
+    if (v == 5) {                                    # sweep <spec.cyml> | best <id> <metric> [min|max]
+        if (vc < 2) {
+            println("ifran: sweep needs a <spec.cyml> (or: best <id> <metric> [min|max])");
+            return CMDIT_EXIT_USAGE;
+        }
+        if (streq(_cli_tok(va, 1), "best") == 1) {
+            if (vc < 4) {
+                println("ifran: sweep best needs <sweep-id> <metric-key> [min|max]");
+                return CMDIT_EXIT_USAGE;
+            }
+            var wmax = 0;
+            if (vc >= 5) { if (streq(_cli_tok(va, 4), "max") == 1) { wmax = 1; } }
+            return sweep_best(atoi(_cli_tok(va, 2)), _cli_tok(va, 3), wmax);
+        }
         return sweep_run(_cli_tok(va, 1));
     }
     if (v == 6) { return sweep_ls(); }
@@ -152,6 +169,8 @@ fn main(): i64 {
     cmdit_verb(ph, "pair", "add a DPO/IPO pair: <set> <prompt> <chosen> <rejected>");
     cmdit_verb(ph, "good", "add a desirable KTO thumb: <set> <prompt> <completion>");
     cmdit_verb(ph, "bad", "add an undesirable KTO thumb: <set> <prompt> <completion>");
+    cmdit_verb(ph, "tie", "add a TIE over two responses: <set> <prompt> <a> <b>");
+    cmdit_verb(ph, "bothbad", "add a BOTHBAD over two responses: <set> <prompt> <a> <b>");
     cmdit_verb(ph, "ls", "list sets with pair/unary counts");
     cmdit_verb(ph, "export", "export a set as escaped JSONL: <set> <out.jsonl>");
     if (_cli_sub(h, ph, rc) == 0) { return load64(rc); }
@@ -162,9 +181,11 @@ fn main(): i64 {
         if (pref_new(_cli_tok(pa, 1)) < 0) { return 1; }
         return 0;
     }
-    if (pv == 1) {
-        if (_cli_need(ph, 4, "<set> <prompt> <chosen> <rejected>") == 0) { return CMDIT_EXIT_USAGE; }
-        if (pref_pair(atoi(_cli_tok(pa, 1)), _cli_tok(pa, 2), _cli_tok(pa, 3), _cli_tok(pa, 4)) < 0) { return 1; }
+    if (pv == 1) {                                   # pair <set> <prompt> <chosen> <rejected> [conf 0-100]
+        if (_cli_need(ph, 4, "<set> <prompt> <chosen> <rejected> [conf]") == 0) { return CMDIT_EXIT_USAGE; }
+        var conf = 0;
+        if (cmdit_verb_argc(ph) >= 6) { conf = atoi(_cli_tok(pa, 5)); }
+        if (pref_pair(atoi(_cli_tok(pa, 1)), _cli_tok(pa, 2), _cli_tok(pa, 3), _cli_tok(pa, 4), conf) < 0) { return 1; }
         return 0;
     }
     if (pv == 2) {
@@ -177,7 +198,17 @@ fn main(): i64 {
         if (pref_unary(atoi(_cli_tok(pa, 1)), _cli_tok(pa, 2), _cli_tok(pa, 3), 0 - 1) < 0) { return 1; }
         return 0;
     }
-    if (pv == 4) { return pref_ls(); }
+    if (pv == 4) {                                   # tie <set> <prompt> <a> <b>
+        if (_cli_need(ph, 4, "<set> <prompt> <a> <b>") == 0) { return CMDIT_EXIT_USAGE; }
+        if (pref_tie(atoi(_cli_tok(pa, 1)), _cli_tok(pa, 2), _cli_tok(pa, 3), _cli_tok(pa, 4)) < 0) { return 1; }
+        return 0;
+    }
+    if (pv == 5) {                                   # bothbad <set> <prompt> <a> <b>
+        if (_cli_need(ph, 4, "<set> <prompt> <a> <b>") == 0) { return CMDIT_EXIT_USAGE; }
+        if (pref_bothbad(atoi(_cli_tok(pa, 1)), _cli_tok(pa, 2), _cli_tok(pa, 3), _cli_tok(pa, 4)) < 0) { return 1; }
+        return 0;
+    }
+    if (pv == 6) { return pref_ls(); }
     if (_cli_need(ph, 2, "<set> <out.jsonl>") == 0) { return CMDIT_EXIT_USAGE; }
     if (pref_export(atoi(_cli_tok(pa, 1)), _cli_tok(pa, 2)) < 0) { return 1; }
     return 0;

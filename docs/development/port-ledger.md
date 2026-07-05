@@ -37,7 +37,21 @@
 | `tenant` | deferred (single-operator sovereign box first) |
 | `train/methods`, `train/scripts` (the Python shells), `train/distributed` | the siblings ARE the methods; distributed → seema-stage |
 | `bridge`, `pull`, `training_events`, OTLP telemetry | dead / re-derived minimally (events → the journal) |
+| `lifecycle` (model load/unload/swap, VRAM budgeting) | → the **hoosh/murti-seam** lane as *reference* (the dead broker's companion — loaded-model orchestration belongs to the serving side, never ifran). **Was MISSING from this map until the 2026-07-05 pre-removal audit** ([`../audit/2026-07-05-rust-old-preremoval.md`](../audit/2026-07-05-rust-old-preremoval.md)) |
 | **fake dedup / fake perplexity** (per the 2026-06-25 mining) | **do not port** — build real ones or omit |
+
+### Pre-removal audit (2026-07-05, at 2.1.0)
+
+The removal-window audit re-derived this map against the tree:
+[`../audit/2026-07-05-rust-old-preremoval.md`](../audit/2026-07-05-rust-old-preremoval.md).
+Zero business-logic loss in the shipped scope; one map gap fixed (`lifecycle`,
+above). **Before deleting `rust-old/`**: (a) preserve
+`rust-old/docs/{sy-integration,bridge-protocol,api-reference}.md` — they are
+the ONLY record of the `/api/v1/ifran/*` contract SY still proxies (the
+Lane-4 parity target); (b) triage the audit's 8-item missed-features list
+(leaderboard · sweep budgets · experiment auto-loop · dataset validate ·
+priority queue · 4-state pair labels · annotation sessions · benchmark
+harness) — small 2.x additives vs stage-gated waits.
 
 ### Rust-era docs (in `docs/`)
 
