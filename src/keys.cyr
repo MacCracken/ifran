@@ -1,0 +1,97 @@
+# @public — M2: operator key management. The seam the whole chain deliberately
+# left to the caller (tula's charter: "keys are the caller's"; anukulana's
+# demos use ephemeral keys) lands HERE: the control plane holds the operator's
+# Ed25519 keypair and verifies every artifact it stores against it.
+#
+#   ifran keys init    generate (getrandom entropy -> sigil ed25519_keypair);
+#                      REFUSES to overwrite an existing key
+#   ifran keys show    print the public key (hex)
+#
+# Layout: <keydir>/operator.sk (64 B seed||pk, file mode 0600) +
+# <keydir>/operator.pk (32 B). Default keydir: $HOME/.ifran (override for
+# tests via keys_set_dir).
+
+var _keys_dir = 0;
+
+fn keys_set_dir(p): i64 { _keys_dir = p; return 0; }
+
+fn keys_dir(): i64 {
+    if (_keys_dir != 0) { return _keys_dir; }
+    var home = getenv("HOME");
+    if (home == 0) { return ".ifran"; }
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, home);
+    str_builder_add_cstr(sb, "/.ifran");
+    return str_cstr(str_builder_build(sb));
+}
+
+fn _keys_path(fname): i64 {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, keys_dir());
+    str_builder_add_cstr(sb, "/");
+    str_builder_add_cstr(sb, fname);
+    return str_cstr(str_builder_build(sb));
+}
+
+fn _keys_hex(buf, n): i64 {
+    var digits = "0123456789abcdef";
+    var out = alloc(n * 2 + 1);
+    var i = 0;
+    while (i < n) {
+        var b = load8(buf + i);
+        store8(out + i * 2, load8(digits + ((b >> 4) & 0xF)));
+        store8(out + i * 2 + 1, load8(digits + (b & 0xF)));
+        i = i + 1;
+    }
+    store8(out + n * 2, 0);
+    return out;
+}
+
+# generate + persist; refuses to clobber. Returns 0 ok / 1 fail.
+fn keys_init(): i64 {
+    var skp = _keys_path("operator.sk");
+    if (file_exists(skp) == 1) {
+        println("ifran: operator key already exists — refusing to overwrite");
+        ifr_print_cstr("  "); ifr_print_cstr(skp); println("");
+        return 1;
+    }
+    ifr_mkdir_p(keys_dir());
+    var seed = alloc(32);
+    if (random_bytes(seed, 32) != 32) { println("ifran: getrandom failed"); return 1; }
+    var sk = alloc(64);
+    var pk = alloc(32);
+    ed25519_keypair(seed, sk, pk);
+    # 0600 on the secret: open(O_WRONLY|O_CREAT|O_TRUNC, 0600) then write
+    var fd = sys_open(skp, 577, 384);        # 0x241, mode 0600
+    if (fd < 0) { println("ifran: cannot write operator.sk"); return 1; }
+    sys_write(fd, sk, 64);
+    sys_close(fd);
+    file_write_all(_keys_path("operator.pk"), pk, 32);
+    ifr_print_cstr("operator key generated: ");
+    ifr_print_cstr(_keys_hex(pk, 32)); println("");
+    return 0;
+}
+
+# load the 64B secret key; 0 if absent
+fn keys_sk(): i64 {
+    var skp = _keys_path("operator.sk");
+    var sk = alloc(64);
+    if (file_read_all(skp, sk, 64) != 64) { return 0; }
+    return sk;
+}
+
+# load the 32B public key; 0 if absent
+fn keys_pk(): i64 {
+    var pkp = _keys_path("operator.pk");
+    var pk = alloc(32);
+    if (file_read_all(pkp, pk, 32) != 32) { return 0; }
+    return pk;
+}
+
+fn keys_show(): i64 {
+    var pk = keys_pk();
+    if (pk == 0) { println("ifran: no operator key (run `ifran keys init`)"); return 1; }
+    ifr_print_cstr("operator pk: ");
+    ifr_print_cstr(_keys_hex(pk, 32)); println("");
+    return 0;
+}

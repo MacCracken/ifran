@@ -3,6 +3,8 @@
 include "src/jobspec.cyr"
 include "src/runstore.cyr"
 include "src/run.cyr"
+include "src/keys.cyr"
+include "src/store.cyr"
 
 fn _t_write(path, s): i64 {
     file_write_all(path, s, strlen(s));
@@ -69,12 +71,94 @@ fn test_run_and_store(): i64 {
     return 0;
 }
 
+fn test_keys(): i64 {
+    keys_set_dir("/tmp/ifran_test_keys");
+    sys_unlink("/tmp/ifran_test_keys/operator.sk");
+    sys_unlink("/tmp/ifran_test_keys/operator.pk");
+    assert_eq(keys_init(), 0, "keys init generates");
+    assert_nonnull(keys_sk(), "sk loads");
+    assert_nonnull(keys_pk(), "pk loads");
+    assert_eq(keys_init(), 1, "keys init refuses to overwrite");
+    return 0;
+}
+
+fn _t_shp1(a): i64 { var s = alloc(8); store64(s, a); return s; }
+
+# build a small tula artifact in-memory; sk==0 -> unsigned
+fn _t_make_tula(path, sk): i64 {
+    var data = t_zeroes(64);
+    var b = tula_builder_new();
+    tula_builder_add(b, "w", TULA_DT_F64, _t_shp1(8), 1, data, 64);
+    var buf = 0;
+    if (sk != 0) { buf = tula_builder_finish_signed(b, sk); }
+    else { buf = tula_builder_finish(b); }
+    var total = tula_total_len(buf);
+    tula_write_file(path, buf, total);
+    return total;
+}
+
+fn t_zeroes(n): i64 { return alloc(n); }
+
+fn test_model_store(): i64 {
+    store_set_dir("/tmp/ifran_test_store");
+    var sk = keys_sk();
+
+    # operator-signed -> verified
+    _t_make_tula("/tmp/ifran_t_signed.tula", sk);
+    var id1 = store_add("/tmp/ifran_t_signed.tula", "signed");
+    assert_gt(id1, 0, "operator-signed artifact ingests");
+    # unsigned -> accepted, honest status
+    _t_make_tula("/tmp/ifran_t_unsigned.tula", 0);
+    var id2 = store_add("/tmp/ifran_t_unsigned.tula", "unsigned");
+    assert_gt(id2, 0, "unsigned artifact ingests (status recorded)");
+    # dedup: same content -> same id
+    var id3 = store_add("/tmp/ifran_t_signed.tula", "dup");
+    assert_eq(id3, id1, "content-addressed dedup returns the existing id");
+    # garbage -> structural reject
+    var g = "this is not a tula file at all, not even close......";
+    file_write_all("/tmp/ifran_t_garbage.tula", g, strlen(g));
+    assert_eq(store_add("/tmp/ifran_t_garbage.tula", "junk"), 0 - 1, "garbage REJECTED");
+
+    # sigstat truth: query the index
+    var db = runstore_open();
+    var stmt = patra_prepare(db, "SELECT sigstat FROM models WHERE id = ?");
+    patra_bind_int(stmt, 0, id1);
+    var rs = patra_query_prepared(db, stmt);
+    patra_finalize(stmt);
+    var p = patra_result_get_str(rs, 0, 0);
+    assert_eq(load8(p), 118, "operator-signed records `verified` (v)");
+    patra_result_free(rs);
+
+    # verify: green, then tamper the stored file -> hash-mismatch FAIL
+    assert_eq(store_verify(id1), 0, "verify green on the stored artifact");
+    var stmt2 = patra_prepare(db, "SELECT path FROM models WHERE id = ?");
+    patra_bind_int(stmt2, 0, id1);
+    var rs2 = patra_query_prepared(db, stmt2);
+    patra_finalize(stmt2);
+    var pp = patra_result_get_str(rs2, 0, 0);
+    var pl = patra_result_get_str_len(rs2, 0, 0);
+    var path = alloc(pl + 1);
+    memcpy(path, pp, pl);
+    store8(path + pl, 0);
+    patra_result_free(rs2);
+    var fbuf = alloc(4096);
+    var fn2 = file_read_all(path, fbuf, 4096);
+    store8(fbuf + fn2 - 3, load8(fbuf + fn2 - 3) ^ 1);
+    file_write_all(path, fbuf, fn2);
+    assert_eq(store_verify(id1), 1, "tampered stored file FAILS verify (hash)");
+    return 0;
+}
+
 fn main(): i64 {
     alloc_init();
     test_group("jobspec");
     test_jobspec();
     test_group("run+store");
     test_run_and_store();
+    test_group("keys");
+    test_keys();
+    test_group("model-store");
+    test_model_store();
     return assert_summary();
 }
 

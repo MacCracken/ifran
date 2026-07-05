@@ -16,9 +16,12 @@ flagged as a maintainer call). Disposition map + milestone tracker: [`port-ledge
 fork+pipe+execve with exit-code capture + stderr merge) + patra run store +
 CLI (`run`/`runs`); suite **18/18**; **proof met** — `ifran run
 examples/lora-demo.cyml` drove the real `anukulana gpt2-lora` end-to-end
-(33.6 s, exit 0, training log captured, run recorded). **Next: M2 — the
-checkpoint/model store** (tula+sigil; real key management lands there; the
-named first-extraction candidate). NOT porting: `backends/` (dead broker), server/lineage/marketplace/
+(33.6 s, exit 0, training log captured, run recorded). **M2 (checkpoint/model store) ✅ DONE same day**: operator key management
+(`keys init/show` — getrandom → sigil ed25519, 0600 secret, no-clobber) + the
+store (`store add/ls/verify` — tula structural validation, Ed25519 verify with
+honest per-artifact status, sigil-sha256 content addressing + dedup,
+tamper-detecting verify); suite **29/29**; **proof met** — keys → `gpt2-tula`
+job (80 s) → both artifacts ingested + verified. **Next: M3 — datasets.** NOT porting: `backends/` (dead broker), server/lineage/marketplace/
 fleet/rag/hardware (owned homes) — see the ledger.
 
 ## Toolchain

@@ -14,14 +14,14 @@
 
 | `rust-old/src/` | Cyrius home (planned) | Milestone | Status |
 |---|---|---|---|
-| `train/job`, `train/executor`, `train/approval` | `src/job*.cyr` — job manager/scheduler; drives sibling binaries as child processes | M1 | pending |
-| `train/checkpoint`, `registry`, `storage`, `versioning` | `src/store*.cyr` — tula+sigil checkpoint/model store (**crisp internal boundary** — the named first-extraction candidate) | M2 | pending |
+| `train/job`, `train/executor`, `train/approval` | `src/jobspec.cyr` + `src/run.cyr` + `src/runstore.cyr` | M1 | **✅ done** (approval/quotas later) |
+| `train/checkpoint`, `registry`, `storage`, `versioning` | `src/keys.cyr` + `src/store.cyr` — tula+sigil store (**crisp internal boundary** — the named first-extraction candidate) | M2 | **✅ done** |
 | `train/dataset`, `dataset` | `src/dataset*.cyr` | M3 | pending |
 | `train/experiment`, `experiment` | `src/sweep*.cyr` (grid/random; BBO is a later separate lane) | M4 | pending |
 | `eval` | `src/eval*.cyr` | M5 | pending |
 | `preference`, `rlhf` | `src/pref*.cyr` (feeds tarka's DPO/KL/IPO/KTO) | M6 | pending |
 | `budget`, `audit` (thin parts) | job quotas + a libro-backed run journal | M1/M2 | pending |
-| `types`, `config`, `cli` | `src/types.cyr` / `src/config.cyr` (bayan CYML) / `src/main.cyr` | M0–M1 | scaffolded |
+| `types`, `config`, `cli` | `src/main.cyr` (CLI); specs are bayan CYML in `src/jobspec.cyr` | M0–M1 | **✅ done** |
 
 ### DOES NOT PORT (owned elsewhere, or dead by design)
 
@@ -62,7 +62,13 @@ port — they are reference for `rust-old/` and get pruned as milestones close
   real `anukulana gpt2-lora` (33.6 s, exit 0, full log captured, run recorded).
   Porting notes (patra 0-based binds / no implicit rowid; bayan `toml_get`
   returns Str; `print` is 2-arg) → CHANGELOG.
-- **M2 — checkpoint/model store** (tula+sigil; key management lands).
+- **M2 — checkpoint/model store. ✅ DONE 2026-07-04.** `src/keys.cyr`
+  (operator Ed25519, getrandom entropy, 0600 secret, no-clobber) +
+  `src/store.cyr` (validate/verify/content-address/ingest; honest sig status;
+  tamper-detecting `verify`). Suite 29/29. **Proof met:** keys → job
+  (`gpt2-tula`, 80 s) → both artifacts ingested → verified. Follow-on:
+  producers signing with the operator key (additive anukulana `--sk`, or
+  sign-on-ingest).
 - **M3 — datasets** · **M4 — sweeps** · **M5 — eval runner** · **M6 —
   preference store**.
 - **v1.0** — an attn11/tarka/anukūlana workflow runs entirely as ifran jobs;

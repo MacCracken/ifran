@@ -2,10 +2,12 @@
 # Ported from Rust (rust-old/, reference oracle); the siblings own the math,
 # ifran owns the orchestration.
 
-# Stdlib + patra auto-included via cyrius.cyml
+# Stdlib + patra/sigil/tula auto-included via cyrius.cyml
 include "src/jobspec.cyr"
 include "src/runstore.cyr"
 include "src/run.cyr"
+include "src/keys.cyr"
+include "src/store.cyr"
 
 fn usage(): i64 {
     println("ifran - AGNOS training control plane");
@@ -14,6 +16,10 @@ fn usage(): i64 {
     println("  run <job.cyml>   execute a job spec (spawns the sibling binary,");
     println("                   captures its output, records the run)");
     println("  runs             list recorded runs (ifran.db)");
+    println("  keys init|show   operator Ed25519 keypair (~/.ifran)");
+    println("  store add <file.tula> [name]   validate+verify+ingest an artifact");
+    println("  store ls                       list the model store");
+    println("  store verify <id>              re-check hash/structure/signature");
     println("  version          print the version");
     return 0;
 }
@@ -32,7 +38,31 @@ fn main(): i64 {
         return rc;
     }
     if (streq(cmd, "runs") == 1) { return runstore_list(); }
-    if (streq(cmd, "version") == 1) { println("ifran (cyrius port, M1)"); return 0; }
+    if (streq(cmd, "keys") == 1) {
+        if (argc() < 3) { println("ifran: keys needs init|show"); return 1; }
+        if (streq(argv(2), "init") == 1) { return keys_init(); }
+        if (streq(argv(2), "show") == 1) { return keys_show(); }
+        println("ifran: keys needs init|show");
+        return 1;
+    }
+    if (streq(cmd, "store") == 1) {
+        if (argc() < 3) { println("ifran: store needs add|ls|verify"); return 1; }
+        if (streq(argv(2), "ls") == 1) { return store_ls(); }
+        if (streq(argv(2), "add") == 1) {
+            if (argc() < 4) { println("ifran: store add needs a <file.tula>"); return 1; }
+            var nm = argv(4);
+            if (argc() < 5) { nm = argv(3); }
+            if (store_add(argv(3), nm) < 0) { return 1; }
+            return 0;
+        }
+        if (streq(argv(2), "verify") == 1) {
+            if (argc() < 4) { println("ifran: store verify needs an <id>"); return 1; }
+            return store_verify(atoi(argv(3)));
+        }
+        println("ifran: store needs add|ls|verify");
+        return 1;
+    }
+    if (streq(cmd, "version") == 1) { println("ifran (cyrius port, M2)"); return 0; }
     usage();
     return 0;
 }

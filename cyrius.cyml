@@ -14,12 +14,29 @@ entry = "src/main.cyr"
 output = "ifran"
 
 [deps]
-stdlib = ["string", "fmt", "alloc", "freelist", "vec", "hashmap", "str", "syscalls", "io", "fs", "args", "assert", "result", "process", "chrono", "bayan", "flags", "tagged", "fnptr", "slice", "ct", "sync", "thread", "thread_local", "random", "keccak"]
+stdlib = ["string", "fmt", "alloc", "freelist", "vec", "hashmap", "str", "syscalls", "io", "fs", "args", "assert", "result", "process", "chrono", "bayan", "flags", "tagged", "fnptr", "slice", "ct", "sync", "thread", "thread_local", "random", "keccak", "bench", "math", "ganita"]
 
-# patra — the sovereign B+tree DB (run records: the `runs` table). Linux-first;
-# the agnos story rides patra's own agnos work, not ifran's.
+# patra — the sovereign B+tree DB (run records: the `runs` table; model index:
+# the `models` table). Linux-first; the agnos story rides patra's own work.
 [deps.patra]
 git = "https://github.com/MacCracken/patra.git"
 path = "../patra"
 tag = "1.12.8"
 modules = ["dist/patra.cyr"]
+
+# sigil — the crypto boundary: ed25519_* (tula's unresolved symbols, the
+# standard consumer-bundle pattern) + sha256 (content addressing) + keygen
+# entropy pairing with stdlib random (getrandom). MUST be included before tula.
+[deps.sigil]
+git = "https://github.com/MacCracken/sigil.git"
+path = "../sigil"
+tag = "3.10.0"
+modules = ["dist/sigil.cyr"]
+
+# tula — the sovereign weight-file format; the checkpoint store validates +
+# verifies every ingested artifact through tula_open/tula_verify.
+[deps.tula]
+git = "https://github.com/MacCracken/tula.git"
+path = "../tula"
+tag = "1.0.0"
+modules = ["dist/tula.cyr"]

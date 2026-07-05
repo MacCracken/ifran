@@ -1,0 +1,212 @@
+# @public — M2: the checkpoint/model store. Ingest the `.tula` artifacts jobs
+# produce: STRUCTURAL validation is tula's (`tula_open` — never store what
+# doesn't parse), AUTHENTICITY is Ed25519 vs the operator key, IDENTITY is
+# content-addressing (sigil sha256 → the store filename; dedup for free).
+#
+#   ifran store add <file.tula> [name]   validate -> verify -> hash -> copy -> index
+#   ifran store ls                       list the index
+#   ifran store verify <id>              re-validate + re-verify a stored artifact
+#
+# Signature policy (honest, recorded per artifact): `verified` (operator-signed,
+# checks out) · `signed-unknown-key` (signed, but not by the operator — e.g.
+# anukulana's ephemeral demo keys) · `unsigned`. A signature that is PRESENT
+# but FAILS verification against its OWN embedded claim is unknowable here
+# (tula sigs don't embed the pk); what we CAN reject is a file that fails
+# structural validation — always rejected.
+#
+# Layout: <storedir>/<sha256-hex16>.tula + the patra `models` index. Default
+# storedir "ifran-store" (cwd, beside ifran.db); override via store_set_dir.
+#
+# ⚠ EXTRACTION BOUNDARY (the plan's named first-extraction candidate): this
+# module + keys.cyr talk to the rest of ifran ONLY through their public fns —
+# keep it that way so the murti-seam/hoosh second consumer can lift them clean.
+
+var _store_dir = 0;
+
+fn store_set_dir(p): i64 { _store_dir = p; return 0; }
+
+fn store_dir(): i64 {
+    if (_store_dir != 0) { return _store_dir; }
+    return "ifran-store";
+}
+
+fn _store_open_table(): i64 {
+    var db = runstore_open();                # same ifran.db, second table
+    if (db == 0) { return 0; }
+    var c1 = "CREATE TABLE models (id INT AUTOINCREMENT, name STR, path STR, hash STR, ";
+    var c2 = "size INT, tensors INT, sigstat STR, ingested INT)";
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, c1);
+    str_builder_add_cstr(sb, c2);
+    patra_exec(db, str_cstr(str_builder_build(sb)));
+    return db;
+}
+
+# mmap a file read-only; returns ptr, size via out. 0 on failure.
+fn _store_map_file(path, out_size): i64 {
+    var fd = file_open(path, 0, 0);
+    if (fd < 0) { return 0; }
+    var size = xlseek(fd, 0, 2);
+    if (size <= 0) { file_close(fd); return 0; }
+    var addr = mmap_file_ro(fd, size);
+    file_close(fd);
+    if (addr == 0) { return 0; }
+    store64(out_size, size);
+    return addr;
+}
+
+fn _store_sigstat(r): i64 {
+    if (tula_is_signed(r) == 0) { return "unsigned"; }
+    var pk = keys_pk();
+    if (pk == 0) { return "signed-unknown-key"; }
+    var v = tula_verify(r, pk);
+    if (v == TULA_SIG_OK) { return "verified"; }
+    return "signed-unknown-key";
+}
+
+# find an existing row by content hash; returns id or 0
+fn _store_find_hash(db, hex): i64 {
+    var stmt = patra_prepare(db, "SELECT id FROM models WHERE hash = ?");
+    if (stmt == 0) { return 0; }
+    patra_bind_text(stmt, 0, hex, strlen(hex));
+    var rs = patra_query_prepared(db, stmt);
+    patra_finalize(stmt);
+    if (rs == 0) { return 0; }
+    var id = 0;
+    if (patra_result_count(rs) > 0) { id = patra_result_get_int(rs, 0, 0); }
+    patra_result_free(rs);
+    return id;
+}
+
+# Ingest an artifact. Returns the model id, or -1.
+fn store_add(path, name): i64 {
+    var db = _store_open_table();
+    if (db == 0) { return 0 - 1; }
+    var sizep = alloc(8);
+    var buf = _store_map_file(path, sizep);
+    if (buf == 0) { println("ifran: cannot read artifact"); return 0 - 1; }
+    var size = load64(sizep);
+    var r = tula_open(buf, size);
+    if (r == 0) {
+        println("ifran: artifact REJECTED (tula structural validation failed)");
+        return 0 - 1;
+    }
+    var sigstat = _store_sigstat(r);
+    var ntensors = tula_count(r);
+    var digest = alloc(32);
+    sha256(buf, size, digest);
+    var hex = _keys_hex(digest, 32);
+    var dup = _store_find_hash(db, hex);
+    if (dup != 0) {
+        ifr_print_cstr("already in store as id "); fmt_int(dup); println("");
+        return dup;
+    }
+    ifr_mkdir_p(store_dir());
+    var dst = _store_dst_path(hex);
+    file_write_all(dst, buf, size);
+    var ins = "INSERT INTO models (name, path, hash, size, tensors, sigstat, ingested) ";
+    var vals = "VALUES (?, ?, ?, ?, ?, ?, ?)";
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, ins);
+    str_builder_add_cstr(sb, vals);
+    var stmt = patra_prepare(db, str_cstr(str_builder_build(sb)));
+    if (stmt == 0) { return 0 - 1; }
+    patra_bind_text(stmt, 0, name, strlen(name));
+    patra_bind_text(stmt, 1, dst, strlen(dst));
+    patra_bind_text(stmt, 2, hex, strlen(hex));
+    patra_bind_int(stmt, 3, size);
+    patra_bind_int(stmt, 4, ntensors);
+    patra_bind_text(stmt, 5, sigstat, strlen(sigstat));
+    patra_bind_int(stmt, 6, clock_epoch_secs());
+    var idp = alloc(8);
+    if (patra_insert_returning(db, stmt, idp) != 0) { patra_finalize(stmt); return 0 - 1; }
+    patra_finalize(stmt);
+    var id = load64(idp);
+    ifr_print_cstr("stored id "); fmt_int(id);
+    ifr_print_cstr(" ("); ifr_print_cstr(sigstat);
+    ifr_print_cstr(", "); fmt_int(ntensors);
+    ifr_print_cstr(" tensors, "); fmt_int(size);
+    ifr_print_cstr(" bytes) "); ifr_print_cstr(dst); println("");
+    return id;
+}
+
+fn _store_dst_path(hex): i64 {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, store_dir());
+    str_builder_add_cstr(sb, "/");
+    var short = alloc(17);
+    var i = 0;
+    while (i < 16) { store8(short + i, load8(hex + i)); i = i + 1; }
+    store8(short + 16, 0);
+    str_builder_add_cstr(sb, short);
+    str_builder_add_cstr(sb, ".tula");
+    return str_cstr(str_builder_build(sb));
+}
+
+fn store_ls(): i64 {
+    var db = _store_open_table();
+    if (db == 0) { return 1; }
+    var rs = patra_query(db, "SELECT id, name, sigstat, tensors, size, hash FROM models");
+    if (rs == 0) { println("ifran: models query failed"); return 1; }
+    var n = patra_result_count(rs);
+    println("id | name | sig | tensors | bytes | hash");
+    var i = 0;
+    while (i < n) {
+        fmt_int(patra_result_get_int(rs, i, 0)); ifr_print_cstr(" | ");
+        _rs_print_str(rs, i, 1); ifr_print_cstr(" | ");
+        _rs_print_str(rs, i, 2); ifr_print_cstr(" | ");
+        fmt_int(patra_result_get_int(rs, i, 3)); ifr_print_cstr(" | ");
+        fmt_int(patra_result_get_int(rs, i, 4)); ifr_print_cstr(" | ");
+        _rs_print_str(rs, i, 5);
+        println("");
+        i = i + 1;
+    }
+    patra_result_free(rs);
+    return 0;
+}
+
+# Re-validate + re-verify a stored artifact (bit-rot / tamper check: the
+# content hash must still match, the structure must still parse, and the
+# signature status is re-derived). Returns 0 iff everything holds.
+fn store_verify(id): i64 {
+    var db = _store_open_table();
+    if (db == 0) { return 1; }
+    var stmt = patra_prepare(db, "SELECT path, hash FROM models WHERE id = ?");
+    if (stmt == 0) { return 1; }
+    patra_bind_int(stmt, 0, id);
+    var rs = patra_query_prepared(db, stmt);
+    patra_finalize(stmt);
+    if (rs == 0) { println("ifran: query failed"); return 1; }
+    if (patra_result_count(rs) == 0) {
+        println("ifran: no such model id");
+        patra_result_free(rs);
+        return 1;
+    }
+    var pathp = patra_result_get_str(rs, 0, 0);
+    var pathl = patra_result_get_str_len(rs, 0, 0);
+    var path = alloc(pathl + 1);
+    memcpy(path, pathp, pathl);
+    store8(path + pathl, 0);
+    var hashp = patra_result_get_str(rs, 0, 1);
+    var hashl = patra_result_get_str_len(rs, 0, 1);
+    var want = alloc(hashl + 1);
+    memcpy(want, hashp, hashl);
+    store8(want + hashl, 0);
+    patra_result_free(rs);
+    var sizep = alloc(8);
+    var buf = _store_map_file(path, sizep);
+    if (buf == 0) { println("ifran: stored file missing/unreadable"); return 1; }
+    var size = load64(sizep);
+    var digest = alloc(32);
+    sha256(buf, size, digest);
+    if (streq(_keys_hex(digest, 32), want) == 0) {
+        println("ifran: VERIFY FAIL — content hash mismatch (bit-rot/tamper)");
+        return 1;
+    }
+    var r = tula_open(buf, size);
+    if (r == 0) { println("ifran: VERIFY FAIL — structural validation"); return 1; }
+    ifr_print_cstr("verify id "); fmt_int(id);
+    ifr_print_cstr(": hash ok, structure ok, sig ");
+    ifr_print_cstr(_store_sigstat(r)); println("");
+    return 0;
+}

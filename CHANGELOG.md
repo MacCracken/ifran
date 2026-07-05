@@ -42,6 +42,30 @@ siblings own that). Disposition map + milestones:
 captured (the LoRA 8/8 PASS inside), run recorded and listed by `ifran runs`.
 **The first sovereign-ML training job orchestrated by the control plane.**
 
+### Added — M2 (the checkpoint/model store + operator keys)
+- **`src/keys.cyr`** — the key-management seam the whole chain left to the
+  caller lands here: `ifran keys init` (getrandom entropy → sigil
+  `ed25519_keypair`; secret at `~/.ifran/operator.sk` mode 0600; **refuses to
+  overwrite**) + `keys show`.
+- **`src/store.cyr`** — ingest the `.tula` artifacts jobs produce:
+  **structural validation** (tula_open — garbage rejected), **authenticity**
+  (Ed25519 vs the operator key; honest per-artifact status: `verified` /
+  `signed-unknown-key` / `unsigned`), **identity** (sigil sha256
+  content-addressing → dedup for free). `store add/ls/verify`; `verify`
+  re-checks hash (bit-rot/tamper), structure, and signature. Kept behind a
+  crisp module boundary — the plan's named first-extraction candidate.
+- **`tests/ifran.tcyr`** 18→**29**: keys (generate/load/no-clobber), store
+  (operator-signed → `verified`, unsigned honesty, content dedup, garbage
+  rejection, tamper → verify FAIL).
+
+### The M2 proof
+The full chain on the real checkpoint: `ifran keys init` → `ifran run`
+(anukulana `gpt2-tula`, 80 s, exit 0) → `store add` both artifacts (63.8 MB
+NF4 base + 3.3 MB adapter, content-addressed) → `store ls` → `store verify`
+green — with the ephemeral-signed artifacts honestly recorded
+`signed-unknown-key` (producers signing with the OPERATOR key is the
+follow-on: an additive `--sk` on anukulana's CLI, or sign-on-ingest).
+
 ### Porting notes (patra/bayan RTFM-class, recorded for the port's continuation)
 - patra binds are **0-based**; an unbound slot defaults to INT 0 → a
   `PATRA_ERR_TYPE` (9) against a STR column.
