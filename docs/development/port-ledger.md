@@ -103,8 +103,6 @@ port — they are reference for `rust-old/` and get pruned as milestones close
 2. **Interface surface**: operating CLI-first (the Rust REST boundary was not
    carried); the standing plan is **bote-MCP when SY re-wires** — formal
    ratification still the maintainer's, but nothing blocks on it.
-3. **Versioning**: the stabilization pass is COMPLETE (api.md/STABILITY/
-   SECURITY/audit/benchmarks, 2026-07-05) — **2.0.0 is ready to cut**
-   (maintainer bumps + tags). **`rust-old/` HELD (maintainer, 2026-07-05)**:
-   retained (with its docs, now in `rust-old/docs/`) for a release or two
-   past 2.0.0 before removal.
+3. ~~Versioning~~ — **2.0.0 CUT + TAGGED 2026-07-05** (the port-completion
+   major). **`rust-old/` HELD**: retained (with its docs in `rust-old/docs/`)
+   for a release or two — removal lands ~2.1/2.2 as its own confirmed step.

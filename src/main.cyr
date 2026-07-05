@@ -19,7 +19,7 @@ include "src/pref.cyr"
 
 # Embedded version literal — bumped as part of cut mechanics (VERSION file is
 # the source of truth; keep in sync at each cut).
-fn IFRAN_VERSION(): i64 { return "1.3.0"; }
+fn IFRAN_VERSION(): i64 { return "2.0.0"; }
 
 # slice accessor: token i of a verb-remainder argv (cstr*)
 fn _cli_tok(argv, i): i64 { return load64(argv + i * 8); }

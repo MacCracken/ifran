@@ -7,6 +7,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-07-05
+
+**THE CYRIUS PORT SHIPS.** ifran is reborn as the AGNOS **training control
+plane** — ~1.9k lines of Cyrius replacing the orchestration core of the 53.6k-
+line Rust product (preserved at `rust-old/` under its original AGPL, held for
+a release or two). Everything below (M0–M6 + stabilization + cmdit CLI) is
+this cut. **License: GPL-3.0-only** (ecosystem policy; AGPL = desktop apps).
+The v1.0-acceptance proof: attn11 trained (job + sweep), anukūlana's fidelity
+oracle gated + benchmarked, its artifacts landed in the signed store, and
+tarka passed its full gate suite — **entirely as recorded ifran jobs** over
+ifran-curated datasets, with a preference set exported for tarka's surface.
+
 **THE CYRIUS PORT OPENS (M0 + M1, 2026-07-04).** The Rust line (1.3.x, 53.6k
 lines) moved whole to `rust-old/` (reference oracle, eventual dismissal) via
 `cyrius port`; ifran's new charter is the **AGNOS training control plane** —

@@ -5,8 +5,8 @@
 
 ## Version
 
-**1.3.0 (the Rust line's version — unchanged until the first Cyrius cut; the
-completed port ships as 2.0.0 per the goonj/naad precedent).** **M0 DONE
+**2.0.0 — RELEASED 2026-07-05 (THE CYRIUS PORT SHIPS: the AGNOS training
+control plane).** Full cut detail in CHANGELOG `[2.0.0]`. Port history: **M0 DONE
 2026-07-04**: `cyrius port` ran — the 53.6k-line Rust tree (+ Cargo/Cross/
 cargo-config/osv strays) lives at `rust-old/` (reference oracle, eventual
 dismissal); skeleton builds + 2/2 scaffold tests; manifest corrected
@@ -43,8 +43,7 @@ ifran jobs in one workspace. **The stabilization pass is COMPLETE (2026-07-05)**
 benchmarks (orchestration overhead ~0.6 ms/job) all landed. Suite **77/77**.
 **CLI rebuilt on cmdit** (verb dispatch + generated help/version/errors;
 `[deps.cmdit]` 1.1.0; behavior parity regressed; embedded `IFRAN_VERSION`
-literal joins cut mechanics). **2.0.0 is READY TO CUT** (maintainer bumps
-VERSION 1.3.0→2.0.0 + the `IFRAN_VERSION` literal + tags). NOT porting: `backends/` (dead broker), server/lineage/marketplace/
+literal joins cut mechanics). **2.0.0 CUT 2026-07-05** (VERSION + `IFRAN_VERSION` literal bumped; tagged by the maintainer). Next arc: post-2.0 additive lane (api.md) + `rust-old/` removal at ~2.1/2.2. NOT porting: `backends/` (dead broker), server/lineage/marketplace/
 fleet/rag/hardware (owned homes) — see the ledger.
 
 ## Toolchain
