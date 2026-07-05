@@ -11,6 +11,7 @@ include "src/store.cyr"
 include "src/dataset.cyr"
 include "src/sweep.cyr"
 include "src/eval.cyr"
+include "src/pref.cyr"
 
 fn usage(): i64 {
     println("ifran - AGNOS training control plane");
@@ -30,6 +31,11 @@ fn usage(): i64 {
     println("  sweeps                         list sweeps");
     println("  eval <spec.cyml>               run a gate as a recorded eval (+ metric)");
     println("  evals                          list the benchmark store");
+    println("  pref new <name>                create a preference set");
+    println("  pref pair <set> <prompt> <chosen> <rejected>   add a DPO/IPO pair");
+    println("  pref good|bad <set> <prompt> <completion>      add a KTO thumb");
+    println("  pref ls                        list sets (pair/unary counts)");
+    println("  pref export <set> <out.jsonl>  export a set as JSONL");
     println("  version          print the version");
     return 0;
 }
@@ -100,7 +106,39 @@ fn main(): i64 {
         return eval_run(argv(2));
     }
     if (streq(cmd, "evals") == 1) { return eval_ls(); }
-    if (streq(cmd, "version") == 1) { println("ifran (cyrius port, M5)"); return 0; }
+    if (streq(cmd, "pref") == 1) {
+        if (argc() < 3) { println("ifran: pref needs new|pair|good|bad|ls|export"); return 1; }
+        var sub = argv(2);
+        if (streq(sub, "ls") == 1) { return pref_ls(); }
+        if (streq(sub, "new") == 1) {
+            if (argc() < 4) { println("ifran: pref new needs a <name>"); return 1; }
+            if (pref_new(argv(3)) < 0) { return 1; }
+            return 0;
+        }
+        if (streq(sub, "pair") == 1) {
+            if (argc() < 7) { println("ifran: pref pair needs <set> <prompt> <chosen> <rejected>"); return 1; }
+            if (pref_pair(atoi(argv(3)), argv(4), argv(5), argv(6)) < 0) { return 1; }
+            return 0;
+        }
+        if (streq(sub, "good") == 1) {
+            if (argc() < 6) { println("ifran: pref good needs <set> <prompt> <completion>"); return 1; }
+            if (pref_unary(atoi(argv(3)), argv(4), argv(5), 1) < 0) { return 1; }
+            return 0;
+        }
+        if (streq(sub, "bad") == 1) {
+            if (argc() < 6) { println("ifran: pref bad needs <set> <prompt> <completion>"); return 1; }
+            if (pref_unary(atoi(argv(3)), argv(4), argv(5), 0 - 1) < 0) { return 1; }
+            return 0;
+        }
+        if (streq(sub, "export") == 1) {
+            if (argc() < 5) { println("ifran: pref export needs <set> <out.jsonl>"); return 1; }
+            if (pref_export(atoi(argv(3)), argv(4)) < 0) { return 1; }
+            return 0;
+        }
+        println("ifran: pref needs new|pair|good|bad|ls|export");
+        return 1;
+    }
+    if (streq(cmd, "version") == 1) { println("ifran (cyrius port, M6)"); return 0; }
     usage();
     return 0;
 }

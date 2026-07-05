@@ -8,6 +8,7 @@ include "src/store.cyr"
 include "src/dataset.cyr"
 include "src/sweep.cyr"
 include "src/eval.cyr"
+include "src/pref.cyr"
 
 fn _t_write(path, s): i64 {
     file_write_all(path, s, strlen(s));
@@ -309,6 +310,67 @@ fn test_evals(): i64 {
     return 0;
 }
 
+fn test_prefs(): i64 {
+    var sid = pref_new("align-demo");
+    assert_gt(sid, 0, "preference set created");
+    # a pair with EMBEDDED QUOTES + newline-ish text (the escaping case)
+    var pr = "say \"hi\" politely";
+    assert_gt(pref_pair(sid, pr, "hello there", "yo"), 0, "pair added");
+    assert_gt(pref_pair(sid, "2+2?", "4", "5"), 0, "second pair added");
+    assert_gt(pref_unary(sid, "joke?", "a good one", 1), 0, "good thumb added");
+    assert_gt(pref_unary(sid, "joke?", "a slur", 0 - 1), 0, "bad thumb added");
+    assert_eq(pref_pair(9999, "x", "y", "z"), 0 - 1, "unknown set rejected");
+
+    var db = runstore_open();
+    assert_eq(_pf_count(db, sid, "pair"), 2, "pair count");
+    assert_eq(_pf_count(db, sid, "unary"), 2, "unary count");
+
+    # export -> parse EVERY line back with bayan's JSON DOM (escaping proof)
+    var out = "/tmp/ifran_t_prefs.jsonl";
+    assert_eq(pref_export(sid, out), 4, "export writes 4 rows");
+    var buf = alloc(65536);
+    var n = file_read_all(out, buf, 65536);
+    assert_gt(n, 0, "export file written");
+    var lines = 0;
+    var parsed = 0;
+    var quoted_ok = 0;
+    var start = 0;
+    var i = 0;
+    while (i < n) {
+        if (load8(buf + i) == 10) {
+            var root = bayan_json_v_parse_str(buf + start, i - start);
+            if (root != 0) {
+                if (bayan_json_v_is_obj(root) == 1) {
+                    parsed = parsed + 1;
+                    var pv = bayan_json_v_obj_get(root, "prompt");
+                    if (pv != 0) {
+                        var psx = bayan_json_v_str(pv);
+                        if (psx != 0) {
+                            # the quoted prompt round-trips exactly
+                            if (str_len(psx) == strlen(pr)) {
+                                var same = 1;
+                                var j = 0;
+                                while (j < str_len(psx)) {
+                                    if (load8(str_data(psx) + j) != load8(pr + j)) { same = 0; }
+                                    j = j + 1;
+                                }
+                                if (same == 1) { quoted_ok = 1; }
+                            }
+                        }
+                    }
+                }
+            }
+            lines = lines + 1;
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    assert_eq(lines, 4, "4 JSONL lines");
+    assert_eq(parsed, 4, "every line parses as a JSON object (bayan DOM)");
+    assert_eq(quoted_ok, 1, "embedded-quote prompt round-trips exactly");
+    return 0;
+}
+
 fn main(): i64 {
     alloc_init();
     test_group("jobspec");
@@ -325,6 +387,8 @@ fn main(): i64 {
     test_sweeps();
     test_group("evals");
     test_evals();
+    test_group("prefs");
+    test_prefs();
     return assert_summary();
 }
 

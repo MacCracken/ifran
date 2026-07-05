@@ -32,8 +32,13 @@ first-class runs, pre-M4 schema migration; suite **53/53**; **proof met** — a
 scaling with steps). **M5 (eval runner) ✅ DONE 2026-07-05**: exit-code gates + verbatim metric
 extraction into the `evals` benchmark store (referencing run records); suite
 **64/64**; **proof met** — anukulana's HF-fidelity oracle as eval 1 (PASS,
-maxrel=0.000001049 captured). **Next: M6 — preference store** (tarka's
-DPO/KTO data path) — then the v1.0 bar. NOT porting: `backends/` (dead broker), server/lineage/marketplace/
+maxrel=0.000001049 captured). **M6 (preference store) ✅ DONE 2026-07-05**: sets + DPO/IPO pairs + KTO
+thumbs + escaped JSONL export (bayan parse-back proven); suite **77/77**.
+**The v1.0 acceptance is DEMONSTRATED** — attn11 (train+sweep) + anukūlana
+(fidelity eval + stored artifacts) + tarka (ALL GATES PASS) ran entirely as
+ifran jobs in one workspace. **Next: the v1.0 stabilization pass** (api.md /
+STABILITY / audit / benchmarks) + the maintainer calls (license, interface,
+rust-old dismissal) → cut as 2.0.0 per the port precedent. NOT porting: `backends/` (dead broker), server/lineage/marketplace/
 fleet/rag/hardware (owned homes) — see the ledger.
 
 ## Toolchain

@@ -1,0 +1,203 @@
+# @public — M6: the preference/annotation store. The data path that feeds
+# tarka's shipped preference surface: DPO/IPO consume PAIRS (prompt, chosen,
+# rejected); KTO consumes UNPAIRED thumbs (prompt, completion, ±1 label).
+# ifran holds the sets and exports them; tarka growing a file-ingestion flag
+# to consume the export is a flagged follow-on (tarka edits are
+# user-authorized cuts, per its 1.x freeze).
+#
+#   ifran pref new <name>                       create a preference set
+#   ifran pref pair <set> <prompt> <chosen> <rejected>
+#   ifran pref good <set> <prompt> <completion>     (KTO desirable,  +1)
+#   ifran pref bad  <set> <prompt> <completion>     (KTO undesirable, -1)
+#   ifran pref ls                               sets with kind counts
+#   ifran pref export <set> <out.jsonl>         one JSON object per line
+#
+# Export = JSONL, escaped via the stdlib `str_builder_add_json_str` (proper
+# JSON string escaping — free text with quotes/newlines survives), parse-back
+# validated in the suite with bayan's JSON DOM:
+#   {"kind":"pair","prompt":"...","chosen":"...","rejected":"..."}
+#   {"kind":"unary","prompt":"...","completion":"...","label":1}
+
+fn _pf_open_tables(): i64 {
+    var db = runstore_open();
+    if (db == 0) { return 0; }
+    patra_exec(db, "CREATE TABLE psets (id INT AUTOINCREMENT, name STR, created INT)");
+    var c1 = "CREATE TABLE prefs (id INT AUTOINCREMENT, pset INT, kind STR, prompt STR, ";
+    var c2 = "chosen STR, rejected STR, label INT, created INT)";
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, c1);
+    str_builder_add_cstr(sb, c2);
+    patra_exec(db, str_cstr(str_builder_build(sb)));
+    return db;
+}
+
+fn pref_new(name): i64 {
+    var db = _pf_open_tables();
+    if (db == 0) { return 0 - 1; }
+    var stmt = patra_prepare(db, "INSERT INTO psets (name, created) VALUES (?, ?)");
+    if (stmt == 0) { return 0 - 1; }
+    patra_bind_text(stmt, 0, name, strlen(name));
+    patra_bind_int(stmt, 1, clock_epoch_secs());
+    var idp = alloc(8);
+    if (patra_insert_returning(db, stmt, idp) != 0) { patra_finalize(stmt); return 0 - 1; }
+    patra_finalize(stmt);
+    var id = load64(idp);
+    ifr_print_cstr("preference set "); fmt_int(id);
+    ifr_print_cstr(": "); ifr_print_cstr(name); println("");
+    return id;
+}
+
+fn _pf_set_exists(db, sid): i64 {
+    var stmt = patra_prepare(db, "SELECT id FROM psets WHERE id = ?");
+    if (stmt == 0) { return 0; }
+    patra_bind_int(stmt, 0, sid);
+    var rs = patra_query_prepared(db, stmt);
+    patra_finalize(stmt);
+    if (rs == 0) { return 0; }
+    var ok = 0;
+    if (patra_result_count(rs) > 0) { ok = 1; }
+    patra_result_free(rs);
+    return ok;
+}
+
+fn _pf_insert(db, sid, kind, prompt, chosen, rejected, label): i64 {
+    var q1 = "INSERT INTO prefs (pset, kind, prompt, chosen, rejected, label, created) ";
+    var q2 = "VALUES (?, ?, ?, ?, ?, ?, ?)";
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, q1);
+    str_builder_add_cstr(sb, q2);
+    var stmt = patra_prepare(db, str_cstr(str_builder_build(sb)));
+    if (stmt == 0) { return 0 - 1; }
+    patra_bind_int(stmt, 0, sid);
+    patra_bind_text(stmt, 1, kind, strlen(kind));
+    patra_bind_text(stmt, 2, prompt, strlen(prompt));
+    patra_bind_text(stmt, 3, chosen, strlen(chosen));
+    patra_bind_text(stmt, 4, rejected, strlen(rejected));
+    patra_bind_int(stmt, 5, label);
+    patra_bind_int(stmt, 6, clock_epoch_secs());
+    var idp = alloc(8);
+    if (patra_insert_returning(db, stmt, idp) != 0) { patra_finalize(stmt); return 0 - 1; }
+    patra_finalize(stmt);
+    return load64(idp);
+}
+
+# add a DPO/IPO pair. Returns the pref id, or -1.
+fn pref_pair(sid, prompt, chosen, rejected): i64 {
+    var db = _pf_open_tables();
+    if (db == 0) { return 0 - 1; }
+    if (_pf_set_exists(db, sid) == 0) { println("ifran: no such preference set"); return 0 - 1; }
+    return _pf_insert(db, sid, "pair", prompt, chosen, rejected, 0);
+}
+
+# add a KTO thumb (label +1 desirable / -1 undesirable). Returns id or -1.
+fn pref_unary(sid, prompt, completion, label): i64 {
+    var db = _pf_open_tables();
+    if (db == 0) { return 0 - 1; }
+    if (_pf_set_exists(db, sid) == 0) { println("ifran: no such preference set"); return 0 - 1; }
+    return _pf_insert(db, sid, "unary", prompt, completion, "", label);
+}
+
+fn pref_ls(): i64 {
+    var db = _pf_open_tables();
+    if (db == 0) { return 1; }
+    var rs = patra_query(db, "SELECT id, name FROM psets");
+    if (rs == 0) { println("ifran: psets query failed"); return 1; }
+    var n = patra_result_count(rs);
+    println("set | name | pairs | unary");
+    var i = 0;
+    while (i < n) {
+        var sid = patra_result_get_int(rs, i, 0);
+        fmt_int(sid); ifr_print_cstr(" | ");
+        _rs_print_str(rs, i, 1); ifr_print_cstr(" | ");
+        fmt_int(_pf_count(db, sid, "pair")); ifr_print_cstr(" | ");
+        fmt_int(_pf_count(db, sid, "unary"));
+        println("");
+        i = i + 1;
+    }
+    patra_result_free(rs);
+    return 0;
+}
+
+fn _pf_count(db, sid, kind): i64 {
+    var stmt = patra_prepare(db, "SELECT id FROM prefs WHERE pset = ?");
+    if (stmt == 0) { return 0; }
+    patra_bind_int(stmt, 0, sid);
+    var rs = patra_query_prepared(db, stmt);
+    patra_finalize(stmt);
+    if (rs == 0) { return 0; }
+    # count rows matching kind (client-side; patra WHERE takes one predicate here)
+    var n = patra_result_count(rs);
+    patra_result_free(rs);
+    var stmt2 = patra_prepare(db, "SELECT kind FROM prefs WHERE pset = ?");
+    patra_bind_int(stmt2, 0, sid);
+    var rs2 = patra_query_prepared(db, stmt2);
+    patra_finalize(stmt2);
+    if (rs2 == 0) { return 0; }
+    var c = 0;
+    var i = 0;
+    while (i < n) {
+        var kp = patra_result_get_str(rs2, i, 0);
+        var kl = patra_result_get_str_len(rs2, i, 0);
+        if (kl == strlen(kind)) {
+            var same = 1;
+            var j = 0;
+            while (j < kl) { if (load8(kp + j) != load8(kind + j)) { same = 0; } j = j + 1; }
+            if (same == 1) { c = c + 1; }
+        }
+        i = i + 1;
+    }
+    patra_result_free(rs2);
+    return c;
+}
+
+fn _pf_add_json_field(sb, key, ptr, len): i64 {
+    str_builder_add_cstr(sb, "\"");
+    str_builder_add_cstr(sb, key);
+    str_builder_add_cstr(sb, "\":");
+    str_builder_add_json_str(sb, str_new(ptr, len));
+    return 0;
+}
+
+# export a set as JSONL. Returns the row count, or -1.
+fn pref_export(sid, out_path): i64 {
+    var db = _pf_open_tables();
+    if (db == 0) { return 0 - 1; }
+    if (_pf_set_exists(db, sid) == 0) { println("ifran: no such preference set"); return 0 - 1; }
+    var stmt = patra_prepare(db, "SELECT kind, prompt, chosen, rejected, label FROM prefs WHERE pset = ?");
+    if (stmt == 0) { return 0 - 1; }
+    patra_bind_int(stmt, 0, sid);
+    var rs = patra_query_prepared(db, stmt);
+    patra_finalize(stmt);
+    if (rs == 0) { return 0 - 1; }
+    var n = patra_result_count(rs);
+    var sb = str_builder_new();
+    var i = 0;
+    while (i < n) {
+        var kp = patra_result_get_str(rs, i, 0);
+        var kl = patra_result_get_str_len(rs, i, 0);
+        var is_pair = 0;
+        if (kl == 4) { is_pair = 1; }                 # "pair" vs "unary"
+        str_builder_add_cstr(sb, "{\"kind\":");
+        if (is_pair == 1) { str_builder_add_cstr(sb, "\"pair\","); }
+        else { str_builder_add_cstr(sb, "\"unary\","); }
+        _pf_add_json_field(sb, "prompt", patra_result_get_str(rs, i, 1), patra_result_get_str_len(rs, i, 1));
+        str_builder_add_cstr(sb, ",");
+        if (is_pair == 1) {
+            _pf_add_json_field(sb, "chosen", patra_result_get_str(rs, i, 2), patra_result_get_str_len(rs, i, 2));
+            str_builder_add_cstr(sb, ",");
+            _pf_add_json_field(sb, "rejected", patra_result_get_str(rs, i, 3), patra_result_get_str_len(rs, i, 3));
+        } else {
+            _pf_add_json_field(sb, "completion", patra_result_get_str(rs, i, 2), patra_result_get_str_len(rs, i, 2));
+            str_builder_add_cstr(sb, ",\"label\":");
+            str_builder_add_int(sb, patra_result_get_int(rs, i, 4));
+        }
+        str_builder_add_cstr(sb, "}\n");
+        i = i + 1;
+    }
+    patra_result_free(rs);
+    var out = str_builder_build(sb);
+    file_write_all(out_path, str_data(out), str_len(out));
+    ifr_print_cstr("exported "); fmt_int(n);
+    ifr_print_cstr(" preference rows -> "); ifr_print_cstr(out_path); println("");
+    return n;
+}

@@ -135,6 +135,31 @@ the gate result AND its headline number captured into the benchmark store,
 referencing the underlying run record. **The siblings' own gates are now
 ifran-orchestrated, recorded benchmarks.**
 
+### Added — M6 (the preference/annotation store)
+- **`src/pref.cyr`** — the data path for tarka's shipped preference surface:
+  sets (`pref new`), **DPO/IPO pairs** (`pref pair <set> <prompt> <chosen>
+  <rejected>`), **KTO thumbs** (`pref good|bad <set> <prompt> <completion>`,
+  labels ±1), `pref ls` (per-kind counts), and **`pref export <set>
+  <out.jsonl>`** — one JSON object per line, escaped via the stdlib
+  `str_builder_add_json_str` (free text with embedded quotes survives; the
+  suite parses every exported line back through bayan's JSON DOM and proves a
+  quoted prompt round-trips exactly). tarka growing a file-ingestion flag to
+  consume the export is a flagged follow-on (tarka edits are user-authorized).
+- **`tests/ifran.tcyr`** 64→**77**.
+
+### The M6 proof — and the v1.0 acceptance, demonstrated
+A real preference set built + exported (2 pairs + 2 thumbs, quotes escaped).
+And with M6 in place, ONE workspace now shows the whole control plane running
+the family: **attn11 trained** (a standalone job + a 3-combo sweep, runs 1–4),
+**anukulana's HF-fidelity oracle gated + benchmarked** (run 5, eval 1,
+maxrel=0.000001049), **tarka's full gate suite passed** (run 6 — "ALL GATES
+PASS"), artifacts in the signed model store, corpora curated in the dataset
+store, preferences exported. **The v1.0 bar — an attn11/tarka/anukulana
+workflow running entirely as ifran jobs — is functionally met**; what remains
+for the v1.0 cut is the stabilization pass (API freeze/audit/benchmarks per
+first-party standards) + the standing maintainer calls (license, interface,
+rust-old dismissal).
+
 ### Porting notes (patra/bayan RTFM-class, recorded for the port's continuation)
 - patra binds are **0-based**; an unbound slot defaults to INT 0 → a
   `PATRA_ERR_TYPE` (9) against a STR column.

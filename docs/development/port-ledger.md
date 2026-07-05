@@ -19,7 +19,7 @@
 | `train/dataset`, `dataset` | `src/dataset.cyr` | M3 | **✅ done** (text corpora; akshara-packed stores if a consumer wants them) |
 | `train/experiment`, `experiment` | `src/sweep.cyr` (grid + seeded-random; BBO stays a separate lane) | M4 | **✅ done** |
 | `eval` | `src/eval.cyr` | M5 | **✅ done** |
-| `preference`, `rlhf` | `src/pref*.cyr` (feeds tarka's DPO/KL/IPO/KTO) | M6 | pending |
+| `preference`, `rlhf` | `src/pref.cyr` (sets/pairs/thumbs/JSONL export) | M6 | **✅ done** |
 | `budget`, `audit` (thin parts) | job quotas + a libro-backed run journal | M1/M2 | pending |
 | `types`, `config`, `cli` | `src/main.cyr` (CLI); specs are bayan CYML in `src/jobspec.cyr` | M0–M1 | **✅ done** |
 
@@ -83,9 +83,16 @@ port — they are reference for `rust-old/` and get pruned as milestones close
   verbatim metric extraction into the `evals` benchmark store (records
   reference run ids). Suite 64/64. **Proof met:** anukulana's HF-fidelity
   oracle ran as eval 1 — PASS, maxrel=0.000001049 captured.
-- **M6 — preference store**.
-- **v1.0** — an attn11/tarka/anukūlana workflow runs entirely as ifran jobs;
-  `rust-old/` dismissed.
+- **M6 — preference store. ✅ DONE 2026-07-05.** `src/pref.cyr`: sets, DPO/IPO
+  pairs, KTO thumbs, per-kind counts, escaped JSONL export (bayan-DOM
+  parse-back proven). Suite 77/77. tarka file-ingestion = flagged follow-on.
+- **v1.0 — ACCEPTANCE DEMONSTRATED 2026-07-05**: one workspace ran attn11
+  (train + sweep), anukūlana (fidelity gate as eval, artifacts in the signed
+  store), and tarka (full gate suite, "ALL GATES PASS") entirely as ifran
+  jobs, over ifran-curated datasets, with an exported preference set.
+  **Remaining for the cut**: the stabilization pass (api.md/STABILITY/audit/
+  benchmarks per first-party standards), the license + interface maintainer
+  calls, and the `rust-old/` dismissal decision.
 
 ## Open questions (maintainer calls)
 
