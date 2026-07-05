@@ -1,0 +1,114 @@
+# @public — M1: the run store. Every job execution persists a run record in a
+# patra DB (the sovereign B+tree store — never SQLite) so `ifran runs` can
+# answer "what ran, when, how did it exit, where is its log."
+#
+# Table:
+#   runs(id INT AUTOINCREMENT, name STR, bin STR, args STR, started INT,
+#        duration_ms INT, exit_code INT, status STR, log STR)
+# patra has NO implicit rowid — the explicit AUTOINCREMENT id is the run id
+# (patra_insert_returning); the row is updated in place when the child exits.
+# Unnamed INSERT columns take zero/empty defaults (duration/exit stay 0 while
+# `running` — the status column carries the truth).
+#
+# DB path: `ifran.db` in the working directory (env/flag overrides are a later
+# minor — single-operator box first).
+
+var _rs_path = 0;                            # 0 = default "ifran.db" (cwd)
+var _rs_db = 0;
+
+# override the DB path (tests; a --db flag later). Call before first use.
+fn runstore_set_path(p): i64 { _rs_path = p; return 0; }
+
+fn RUNSTORE_PATH(): i64 {
+    if (_rs_path != 0) { return _rs_path; }
+    return "ifran.db";
+}
+
+fn runstore_open(): i64 {
+    if (_rs_db != 0) { return _rs_db; }
+    patra_init();
+    _rs_db = patra_open(RUNSTORE_PATH());
+    if (_rs_db == 0) { println("ifran: cannot open ifran.db"); return 0; }
+    # idempotent create (patra_exec errors on an existing table; ignored)
+    var c1 = "CREATE TABLE runs (id INT AUTOINCREMENT, name STR, bin STR, args STR, ";
+    var c2 = "started INT, duration_ms INT, exit_code INT, status STR, log STR)";
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, c1);
+    str_builder_add_cstr(sb, c2);
+    patra_exec(_rs_db, str_cstr(str_builder_build(sb)));
+    return _rs_db;
+}
+
+# insert the run as `running`; returns the run id (rowid), or -1
+fn runstore_start(name, bin, args_joined, started): i64 {
+    var db = runstore_open();
+    if (db == 0) { return 0 - 1; }
+    var ins = "INSERT INTO runs (name, bin, args, started, status) ";
+    var vals = "VALUES (?, ?, ?, ?, ?)";
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, ins);
+    str_builder_add_cstr(sb, vals);
+    var stmt = patra_prepare(db, str_cstr(str_builder_build(sb)));
+    if (stmt == 0) { return 0 - 1; }
+    # patra binds are 0-BASED, in ? order
+    patra_bind_text(stmt, 0, name, strlen(name));
+    patra_bind_text(stmt, 1, bin, strlen(bin));
+    patra_bind_text(stmt, 2, args_joined, strlen(args_joined));
+    patra_bind_int(stmt, 3, started);
+    patra_bind_text(stmt, 4, "running", 7);
+    var idp = alloc(8);
+    if (patra_insert_returning(db, stmt, idp) != 0) { patra_finalize(stmt); return 0 - 1; }
+    patra_finalize(stmt);
+    return load64(idp);
+}
+
+# close the record: exit code + duration + status + log path
+fn runstore_finish(id, exit_code, duration_ms, status, log_path): i64 {
+    var db = runstore_open();
+    if (db == 0) { return 0 - 1; }
+    var u = "UPDATE runs SET exit_code = ?, duration_ms = ?, status = ?, log = ? WHERE id = ?";
+    var stmt = patra_prepare(db, u);
+    if (stmt == 0) { return 0 - 1; }
+    # 0-based binds
+    patra_bind_int(stmt, 0, exit_code);
+    patra_bind_int(stmt, 1, duration_ms);
+    patra_bind_text(stmt, 2, status, strlen(status));
+    patra_bind_text(stmt, 3, log_path, strlen(log_path));
+    patra_bind_int(stmt, 4, id);
+    var affp = alloc(8);
+    if (patra_exec_returning(db, stmt, affp) != 0) { patra_finalize(stmt); return 0 - 1; }
+    patra_finalize(stmt);
+    return 0;
+}
+
+# `ifran runs` — newest-last listing
+fn runstore_list(): i64 {
+    var db = runstore_open();
+    if (db == 0) { return 1; }
+    var rs = patra_query(db, "SELECT id, name, status, exit_code, duration_ms, started, log FROM runs");
+    if (rs == 0) { println("ifran: query failed"); return 1; }
+    var n = patra_result_count(rs);
+    println("id | name | status | exit | ms | started | log");
+    var i = 0;
+    while (i < n) {
+        fmt_int(patra_result_get_int(rs, i, 0)); ifr_print_cstr(" | ");
+        _rs_print_str(rs, i, 1); ifr_print_cstr(" | ");
+        _rs_print_str(rs, i, 2); ifr_print_cstr(" | ");
+        fmt_int(patra_result_get_int(rs, i, 3)); ifr_print_cstr(" | ");
+        fmt_int(patra_result_get_int(rs, i, 4)); ifr_print_cstr(" | ");
+        fmt_int(patra_result_get_int(rs, i, 5)); ifr_print_cstr(" | ");
+        _rs_print_str(rs, i, 6);
+        println("");
+        i = i + 1;
+    }
+    patra_result_free(rs);
+    return 0;
+}
+
+fn _rs_print_str(rs, row, col): i64 {
+    var p = patra_result_get_str(rs, row, col);
+    var l = patra_result_get_str_len(rs, row, col);
+    if (p == 0) { return 0; }
+    syscall(1, 1, p, l);
+    return 0;
+}

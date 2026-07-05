@@ -1,0 +1,8 @@
+# ifran M1 example: drive the anukulana LoRA head-adapter fine-tune as a job.
+# The sibling binary owns the math; ifran spawns it, captures the output, and
+# records the run in ifran.db.
+[job]
+name = "anukulana-lora-demo"
+bin = "/home/macro/Repos/anukulana/build/anukulana"
+args = "gpt2-lora /home/macro/models/gpt2/model.safetensors"
+logdir = "runs/logs"

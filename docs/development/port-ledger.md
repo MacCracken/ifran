@@ -53,8 +53,15 @@ port — they are reference for `rust-old/` and get pruned as milestones close
   tree + Cargo/Cross/cargo-config/osv strays → `rust-old/`); skeleton builds
   (`build/ifran` prints ready, 2/2 scaffold tests); `cyrius.cyml` corrected to
   `${file:VERSION}` + the repo's actual license; this ledger committed.
-- **M1 — job core.** Proof: `ifran run <job.cyml>` drives a real sibling binary
-  end-to-end and persists the run record.
+- **M1 — job core. ✅ DONE 2026-07-04.** `src/jobspec.cyr` (CYML specs via
+  bayan) + `src/run.cyr` (own fork+pipe+execve capture — stdlib `exec_capture`
+  discards exit status + stderr; exit code propagated) + `src/runstore.cyr`
+  (patra `runs` table, `id INT AUTOINCREMENT`, insert-as-running →
+  update-on-exit) + CLI (`run`/`runs`). Suite 18/18 (incl. the exit-127
+  failure path). **Proof met:** `ifran run examples/lora-demo.cyml` drove the
+  real `anukulana gpt2-lora` (33.6 s, exit 0, full log captured, run recorded).
+  Porting notes (patra 0-based binds / no implicit rowid; bayan `toml_get`
+  returns Str; `print` is 2-arg) → CHANGELOG.
 - **M2 — checkpoint/model store** (tula+sigil; key management lands).
 - **M3 — datasets** · **M4 — sweeps** · **M5 — eval runner** · **M6 —
   preference store**.

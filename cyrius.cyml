@@ -14,4 +14,12 @@ entry = "src/main.cyr"
 output = "ifran"
 
 [deps]
-stdlib = ["string", "fmt", "alloc", "vec", "str", "syscalls", "io", "args", "assert"]
+stdlib = ["string", "fmt", "alloc", "freelist", "vec", "hashmap", "str", "syscalls", "io", "fs", "args", "assert", "result", "process", "chrono", "bayan", "flags", "tagged", "fnptr", "slice", "ct", "sync", "thread", "thread_local", "random", "keccak"]
+
+# patra — the sovereign B+tree DB (run records: the `runs` table). Linux-first;
+# the agnos story rides patra's own agnos work, not ifran's.
+[deps.patra]
+git = "https://github.com/MacCracken/patra.git"
+path = "../patra"
+tag = "1.12.8"
+modules = ["dist/patra.cyr"]

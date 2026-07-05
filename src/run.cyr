@@ -1,0 +1,143 @@
+# @public — M1: the job executor. Runs ONE job spec: record-as-running →
+# spawn the sibling binary (fork + pipe + execve) with stdout+stderr captured →
+# write the log → close the record with exit code + duration.
+#
+# `_run_spawn_capture` is ifran's own (modeled on stdlib `exec_capture`, which
+# discards the exit status — the executor needs it, and merges stderr into the
+# log instead of /dev/null: training output lives on both streams).
+#
+# M1 scope notes (each a later minor, recorded not hidden):
+#   * capture is bounded (RUN_LOG_MAX; truncation marked in the log; the child
+#     keeps writing into a closed pipe after cap → SIGPIPE ends it, recorded)
+#   * no timeout enforcement yet (a reaper/timeout lands with the scheduler)
+
+fn RUN_LOG_MAX(): i64 { return 4 * 1024 * 1024; }   # 4 MB captured output
+
+# fork + pipe + execve; fills buf with the child's stdout+stderr (<= buflen),
+# stores the exit code (0..255, 127 = exec failed, 128+sig on signal) into
+# out_exit. Returns bytes captured, or -1 on orchestration failure.
+fn _run_spawn_capture(args, buf, buflen, out_exit): i64 {
+    store64(out_exit, 0 - 1);
+    var argc = vec_len(args);
+    if (argc < 1) { return 0 - 1; }
+    var cmd = vec_get(args, 0);
+    var argv = alloc((argc + 1) * 8);
+    var avi = 0;
+    while (avi < argc) {
+        store64(argv + avi * 8, vec_get(args, avi));
+        avi = avi + 1;
+    }
+    store64(argv + argc * 8, 0);
+    var envp = alloc(8);
+    store64(envp, 0);
+    var pipefd[16];
+    if (sys_pipe(&pipefd) < 0) { return 0 - 1; }
+    var rfd = load32(&pipefd);
+    var wfd = load32(&pipefd + 4);
+    var pid = sys_fork();
+    if (pid < 0) { sys_close(rfd); sys_close(wfd); return 0 - 1; }
+    if (pid == 0) {
+        sys_close(rfd);
+        sys_dup2(wfd, 1);
+        sys_dup2(wfd, 2);                   # stderr into the log too
+        sys_close(wfd);
+        sys_execve(cmd, argv, envp);
+        sys_exit(127);
+    }
+    sys_close(wfd);
+    var total = 0;
+    var rgo = 1;
+    while (rgo == 1) {
+        var n = sys_read(rfd, buf + total, buflen - total);
+        if (n <= 0) { rgo = 0; }
+        else { total = total + n; if (total >= buflen) { rgo = 0; } }
+    }
+    sys_close(rfd);
+    var stbuf[4];
+    if (sys_waitpid(pid, &stbuf, 0) < 0) { return total; }
+    var st = load32(&stbuf);
+    if (WIFEXITED(st) == 1) { store64(out_exit, WEXITSTATUS(st)); }
+    elif (WIFSIGNALED(st) == 1) { store64(out_exit, 128 + WTERMSIG(st)); }
+    return total;
+}
+
+fn _run_join_args(argv): i64 {
+    var sb = str_builder_new();
+    var n = vec_len(argv);
+    var i = 0;
+    while (i < n) {
+        if (i > 0) { str_builder_add_cstr(sb, " "); }
+        str_builder_add_cstr(sb, vec_get(argv, i));
+        i = i + 1;
+    }
+    return str_cstr(str_builder_build(sb));
+}
+
+fn _run_log_path(logdir, id): i64 {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, logdir);
+    str_builder_add_cstr(sb, "/run-");
+    var nb = alloc(32);
+    fmt_int_buf(id, nb);
+    str_builder_add_cstr(sb, nb);
+    str_builder_add_cstr(sb, ".log");
+    return str_cstr(str_builder_build(sb));
+}
+
+fn ifr_print_cstr(p): i64 { syscall(1, 1, p, strlen(p)); return 0; }
+
+fn ifr_mkdir_p(path): i64 {
+    # best-effort nested create ("runs/logs"); existing-dir errors ignored
+    var n = strlen(path);
+    var i = 1;
+    while (i < n) {
+        if (load8(path + i) == 47) {
+            var pfx = alloc(i + 1);
+            var k = 0;
+            while (k < i) { store8(pfx + k, load8(path + k)); k = k + 1; }
+            store8(pfx + i, 0);
+            sys_mkdir(pfx, 493);            # 0755
+        }
+        i = i + 1;
+    }
+    sys_mkdir(path, 493);
+    return 0;
+}
+
+# Execute the spec end-to-end. Returns the CHILD's exit code (so `ifran run`
+# propagates job failure), or -1 on orchestration failure.
+fn run_job(js): i64 {
+    var argv = jobspec_argv(js);
+    var args_joined = _run_join_args(argv);
+    var started = clock_epoch_secs();
+    var id = runstore_start(jobspec_name(js), jobspec_bin(js), args_joined, started);
+    if (id < 0) { println("ifran: run record insert failed"); return 0 - 1; }
+    ifr_mkdir_p(jobspec_logdir(js));
+    var log_path = _run_log_path(jobspec_logdir(js), id);
+    ifr_print_cstr("run "); fmt_int(id);
+    ifr_print_cstr(": "); ifr_print_cstr(args_joined); println("");
+
+    var buf = alloc(RUN_LOG_MAX());
+    var exitp = alloc(8);
+    var t0 = clock_now_ms();
+    var nread = _run_spawn_capture(argv, buf, RUN_LOG_MAX() - 64, exitp);
+    var dur = clock_now_ms() - t0;
+    var exit_code = load64(exitp);
+    var status = "done";
+    if (nread < 0) { status = "spawn-failed"; nread = 0; exit_code = 0 - 1; }
+    elif (exit_code != 0) { status = "failed"; }
+    if (nread >= RUN_LOG_MAX() - 64) {
+        var mark = "\n[ifran: output truncated at cap]\n";
+        var mi = 0;
+        while (mi < strlen(mark)) { store8(buf + nread + mi, load8(mark + mi)); mi = mi + 1; }
+        nread = nread + strlen(mark);
+    }
+    file_write_all(log_path, buf, nread);
+    runstore_finish(id, exit_code, dur, status, log_path);
+    ifr_print_cstr("run "); fmt_int(id);
+    ifr_print_cstr(" "); ifr_print_cstr(status);
+    ifr_print_cstr(" (exit "); fmt_int(exit_code);
+    ifr_print_cstr(") in "); fmt_int(dur); ifr_print_cstr(" ms, log ");
+    ifr_print_cstr(log_path); println("");
+    return exit_code;
+}

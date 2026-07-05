@@ -11,10 +11,14 @@ completed port ships as 2.0.0 per the goonj/naad precedent).** **M0 DONE
 cargo-config/osv strays) lives at `rust-old/` (reference oracle, eventual
 dismissal); skeleton builds + 2/2 scaffold tests; manifest corrected
 (`${file:VERSION}`, AGPL license matched to the LICENSE file — relicensing
-flagged as a maintainer call). Disposition map + milestone tracker:
-[`port-ledger.md`](port-ledger.md). **Next: M1 — the job core** (`ifran run
-<job.cyml>` drives a real sibling binary end-to-end and persists the run
-record). NOT porting: `backends/` (dead broker), server/lineage/marketplace/
+flagged as a maintainer call). Disposition map + milestone tracker: [`port-ledger.md`](port-ledger.md).
+**M1 (the job core) ✅ DONE same day**: jobspec (bayan CYML) + executor (own
+fork+pipe+execve with exit-code capture + stderr merge) + patra run store +
+CLI (`run`/`runs`); suite **18/18**; **proof met** — `ifran run
+examples/lora-demo.cyml` drove the real `anukulana gpt2-lora` end-to-end
+(33.6 s, exit 0, training log captured, run recorded). **Next: M2 — the
+checkpoint/model store** (tula+sigil; real key management lands there; the
+named first-extraction candidate). NOT porting: `backends/` (dead broker), server/lineage/marketplace/
 fleet/rag/hardware (owned homes) — see the ledger.
 
 ## Toolchain

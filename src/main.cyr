@@ -1,11 +1,39 @@
-# ifran — Cyrius port
-# Ported from 53612 lines of Rust
+# ifran (عرفان) — the AGNOS training control plane. M1: the job core.
+# Ported from Rust (rust-old/, reference oracle); the siblings own the math,
+# ifran owns the orchestration.
 
-# Stdlib auto-included via cyrius.cyml
+# Stdlib + patra auto-included via cyrius.cyml
+include "src/jobspec.cyr"
+include "src/runstore.cyr"
+include "src/run.cyr"
 
-fn main() {
+fn usage(): i64 {
+    println("ifran - AGNOS training control plane");
+    println("");
+    println("usage: ifran <command> [args]");
+    println("  run <job.cyml>   execute a job spec (spawns the sibling binary,");
+    println("                   captures its output, records the run)");
+    println("  runs             list recorded runs (ifran.db)");
+    println("  version          print the version");
+    return 0;
+}
+
+fn main(): i64 {
     alloc_init();
-    println("ifran ready");
+    args_init();
+    if (argc() < 2) { usage(); return 0; }
+    var cmd = argv(1);
+    if (streq(cmd, "run") == 1) {
+        if (argc() < 3) { println("ifran: run needs a <job.cyml>"); return 1; }
+        var js = jobspec_parse(argv(2));
+        if (js == 0) { return 1; }
+        var rc = run_job(js);
+        if (rc < 0) { return 1; }
+        return rc;
+    }
+    if (streq(cmd, "runs") == 1) { return runstore_list(); }
+    if (streq(cmd, "version") == 1) { println("ifran (cyrius port, M1)"); return 0; }
+    usage();
     return 0;
 }
 

@@ -1,0 +1,87 @@
+# @public — M1: the job spec. A job is a CYML (TOML-form) file describing ONE
+# sibling-binary invocation — ifran owns the orchestration, never the math:
+#
+#   [job]
+#   name = "lora-demo"                     # required, <= 63 chars
+#   bin  = "/path/to/anukulana"            # required, absolute path
+#   args = "gpt2-lora /path/model.safetensors"   # optional; space-split (M1
+#                                          # limitation: no quoted/spaced args)
+#   logdir = "runs/logs"                   # optional, default "runs/logs"
+#
+# Parsed via bayan's TOML surface (never hand-rolled). Malformed / missing
+# required fields -> 0 (fail loud at the CLI, nothing spawned).
+#
+# Spec record layout (flat, 8B slots):
+#   +0  name  (cstr)   +8  bin (cstr)   +16 argv (vec of cstr, argv[0]=bin)
+#   +24 logdir (cstr)
+
+fn jobspec_name(js): i64 { return load64(js); }
+fn jobspec_bin(js): i64 { return load64(js + 8); }
+fn jobspec_argv(js): i64 { return load64(js + 16); }
+fn jobspec_logdir(js): i64 { return load64(js + 24); }
+
+# split a cstring on single spaces into a vec of fresh cstrs (M1: no quoting)
+fn _js_split_args(s, out_vec): i64 {
+    var n = strlen(s);
+    var start = 0;
+    var i = 0;
+    while (i <= n) {
+        var at_end = 0;
+        if (i == n) { at_end = 1; }
+        elif (load8(s + i) == 32) { at_end = 1; }
+        if (at_end == 1) {
+            if (i > start) {
+                var w = alloc(i - start + 1);
+                var k = 0;
+                while (k < i - start) { store8(w + k, load8(s + start + k)); k = k + 1; }
+                store8(w + (i - start), 0);
+                vec_push(out_vec, w);
+            }
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+# toml_get returns a Str (ptr+len record), NOT a cstring — convert before any
+# strlen/load8 use (the takumi `_get_cstr` pattern).
+fn _js_get_cstr(pairs, key): i64 {
+    var s = toml_get(pairs, key);
+    if (s == 0) { return 0; }
+    return str_cstr(s);
+}
+
+# Parse a job file. Returns the spec record, or 0 (with a printed reason).
+fn jobspec_parse(path): i64 {
+    var sections = bayan_toml_parse_file(path);
+    if (sections == 0) {
+        println("ifran: cannot parse job file (missing or malformed CYML)");
+        return 0;
+    }
+    # get_sections returns a (possibly empty) vec of matches — never 0
+    var jsecs = bayan_toml_get_sections(sections, "job");
+    if (vec_len(jsecs) == 0) {
+        println("ifran: job file has no [job] section");
+        return 0;
+    }
+    var pairs = bayan_toml_section_pairs(vec_get(jsecs, 0));
+    var name = _js_get_cstr(pairs, "name");
+    if (name == 0) { println("ifran: [job] missing `name`"); return 0; }
+    if (strlen(name) > 63) { println("ifran: `name` too long (<= 63)"); return 0; }
+    var bin = _js_get_cstr(pairs, "bin");
+    if (bin == 0) { println("ifran: [job] missing `bin`"); return 0; }
+    if (load8(bin) != 47) { println("ifran: `bin` must be an absolute path"); return 0; }
+    var js = alloc(32);
+    store64(js, name);
+    store64(js + 8, bin);
+    var argv = vec_new();
+    vec_push(argv, bin);
+    var args = _js_get_cstr(pairs, "args");
+    if (args != 0) { _js_split_args(args, argv); }
+    store64(js + 16, argv);
+    var logdir = _js_get_cstr(pairs, "logdir");
+    if (logdir == 0) { logdir = "runs/logs"; }
+    store64(js + 24, logdir);
+    return js;
+}

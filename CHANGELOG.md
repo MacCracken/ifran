@@ -7,6 +7,51 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**THE CYRIUS PORT OPENS (M0 + M1, 2026-07-04).** The Rust line (1.3.x, 53.6k
+lines) moved whole to `rust-old/` (reference oracle, eventual dismissal) via
+`cyrius port`; ifran's new charter is the **AGNOS training control plane** —
+the orchestration around a training run, never the math (the sovereign ML
+siblings own that). Disposition map + milestones:
+`docs/development/port-ledger.md`.
+
+### Added — M0 (scaffold)
+- `cyrius port` restructure: Rust tree + build strays → `rust-old/`; Cyrius
+  skeleton (`cyrius.cyml` pin 6.4.3, `${file:VERSION}`, license matched to the
+  repo's actual **AGPL-3.0** — relicensing flagged as a maintainer call);
+  CI/release workflows; the port ledger.
+
+### Added — M1 (the job core)
+- **`src/jobspec.cyr`** — CYML job specs (`[job]` name/bin/args/logdir, parsed
+  via bayan's TOML surface; absolute-bin enforced; malformed → clean reject).
+- **`src/run.cyr`** — the executor: `_run_spawn_capture` (ifran's own
+  fork+pipe+execve — stdlib `exec_capture` discards the exit status and drops
+  stderr; the executor needs both), bounded 4 MB log capture with truncation
+  marker, per-run log files, child exit code propagated as `ifran run`'s exit.
+- **`src/runstore.cyr`** — run records in a **patra** DB (`runs` table,
+  explicit `id INT AUTOINCREMENT`): insert-as-running → update-on-exit;
+  `runstore_set_path` override for tests/flags.
+- **CLI**: `ifran run <job.cyml>` · `ifran runs` · `version`;
+  `examples/lora-demo.cyml`.
+- **`tests/ifran.tcyr`** (18) — spec parse (good + 3 reject paths), the full
+  executor against `/bin/echo` (log content verified), the failure path
+  (nonexistent binary → exit 127 recorded), store round-trip.
+
+### The M1 proof (the plan's acceptance)
+`ifran run examples/lora-demo.cyml` drove the REAL
+`anukulana gpt2-lora` end-to-end: spawned, 33.6 s, exit 0, full training log
+captured (the LoRA 8/8 PASS inside), run recorded and listed by `ifran runs`.
+**The first sovereign-ML training job orchestrated by the control plane.**
+
+### Porting notes (patra/bayan RTFM-class, recorded for the port's continuation)
+- patra binds are **0-based**; an unbound slot defaults to INT 0 → a
+  `PATRA_ERR_TYPE` (9) against a STR column.
+- patra has **no implicit rowid** — declare `id INT AUTOINCREMENT`;
+  `insert_returning` is only meaningful against it.
+- bayan `toml_get` returns a **Str** (ptr+len), not a cstring
+  (`str_cstr` before `strlen`); `bayan_toml_get_sections` returns a
+  possibly-empty **vec**, never 0.
+- stdlib `print` is 2-arg (`msg, len`) — use `println` or an explicit helper.
+
 ## [1.3.0] - 2026-04-03
 
 ### Changed

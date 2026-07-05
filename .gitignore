@@ -43,3 +43,7 @@ Thumbs.db
 *.bin
 *.onnx
 *.pt
+
+# ifran runtime artifacts (M1 run store + logs)
+ifran.db
+runs/

@@ -1,11 +1,80 @@
-# ifran test suite
-# Stdlib auto-included via cyrius.cyml
+# ifran test suite — M1: jobspec parse, run store round-trip, the executor
+# (happy path + spawn-failure), all against /tmp (no repo-cwd artifacts).
+include "src/jobspec.cyr"
+include "src/runstore.cyr"
+include "src/run.cyr"
 
-fn main() {
+fn _t_write(path, s): i64 {
+    file_write_all(path, s, strlen(s));
+    return 0;
+}
+
+fn test_jobspec(): i64 {
+    var p = "/tmp/ifran_test_job.cyml";
+    var good = "[job]\nname = \"t1\"\nbin = \"/bin/echo\"\nargs = \"hello ifran\"\nlogdir = \"/tmp/ifran_test_logs\"\n";
+    _t_write(p, good);
+    var js = jobspec_parse(p);
+    assert_nonnull(js, "good spec parses");
+    assert(streq(jobspec_name(js), "t1"), "name parsed");
+    assert(streq(jobspec_bin(js), "/bin/echo"), "bin parsed");
+    assert_eq(vec_len(jobspec_argv(js)), 3, "argv = bin + 2 split args");
+    assert(streq(vec_get(jobspec_argv(js), 2), "ifran"), "arg split");
+    assert(streq(jobspec_logdir(js), "/tmp/ifran_test_logs"), "logdir parsed");
+
+    var noname = "[job]\nbin = \"/bin/echo\"\n";
+    _t_write(p, noname);
+    assert_eq(jobspec_parse(p), 0, "missing name rejected");
+    var relbin = "[job]\nname = \"x\"\nbin = \"echo\"\n";
+    _t_write(p, relbin);
+    assert_eq(jobspec_parse(p), 0, "relative bin rejected");
+    var nosec = "name = \"x\"\n";
+    _t_write(p, nosec);
+    assert_eq(jobspec_parse(p), 0, "missing [job] section rejected");
+    return 0;
+}
+
+fn test_run_and_store(): i64 {
+    sys_unlink("/tmp/ifran_test.db");
+    runstore_set_path("/tmp/ifran_test.db");
+
+    # happy path: /bin/echo through the full executor
+    var p = "/tmp/ifran_test_job.cyml";
+    var good = "[job]\nname = \"echo\"\nbin = \"/bin/echo\"\nargs = \"m1 proof\"\nlogdir = \"/tmp/ifran_test_logs\"\n";
+    _t_write(p, good);
+    var js = jobspec_parse(p);
+    assert_nonnull(js, "echo spec parses");
+    var rc = run_job(js);
+    assert_eq(rc, 0, "echo job exits 0 through the executor");
+    # the captured log holds the child's stdout
+    var buf = alloc(256);
+    var n = file_read_all("/tmp/ifran_test_logs/run-1.log", buf, 256);
+    assert_gt(n, 0, "log file written");
+    assert_eq(load8(buf), 109, "log starts with the child's output ('m')");
+
+    # failure path: nonexistent binary -> exit 127 recorded, run_job returns it
+    var bad = "[job]\nname = \"ghost\"\nbin = \"/nonexistent/nope\"\nlogdir = \"/tmp/ifran_test_logs\"\n";
+    _t_write(p, bad);
+    var js2 = jobspec_parse(p);
+    var rc2 = run_job(js2);
+    assert_eq(rc2, 127, "exec failure surfaces as exit 127");
+
+    # both runs recorded
+    var db = runstore_open();
+    var rs = patra_query(db, "SELECT id, status, exit_code FROM runs");
+    assert_nonnull(rs, "runs query works");
+    assert_eq(patra_result_count(rs), 2, "two run records");
+    assert_eq(patra_result_get_int(rs, 0, 2), 0, "run 1 exit 0");
+    assert_eq(patra_result_get_int(rs, 1, 2), 127, "run 2 exit 127");
+    patra_result_free(rs);
+    return 0;
+}
+
+fn main(): i64 {
     alloc_init();
-    test_group("smoke");
-    assert(1, "true is true");
-    assert_eq(1 + 1, 2, "math works");
+    test_group("jobspec");
+    test_jobspec();
+    test_group("run+store");
+    test_run_and_store();
     return assert_summary();
 }
 
