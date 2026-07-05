@@ -108,6 +108,21 @@ fn ifr_mkdir_p(path): i64 {
 # propagates job failure), or -1 on orchestration failure.
 fn run_job(js): i64 {
     var argv = jobspec_argv(js);
+    # resolve the {dataset} placeholder (fail loud on a dangling id)
+    var did = jobspec_dataset(js);
+    if (did != 0) {
+        var dpath = dataset_path(did);
+        if (dpath == 0) {
+            ifr_print_cstr("ifran: job references dataset "); fmt_int(did);
+            println(" which does not exist");
+            return 0 - 1;
+        }
+        var ai = 0;
+        while (ai < vec_len(argv)) {
+            if (streq(vec_get(argv, ai), "{dataset}") == 1) { vec_set(argv, ai, dpath); }
+            ai = ai + 1;
+        }
+    }
     var args_joined = _run_join_args(argv);
     var started = clock_epoch_secs();
     var id = runstore_start(jobspec_name(js), jobspec_bin(js), args_joined, started);

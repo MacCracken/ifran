@@ -1,0 +1,240 @@
+# @public — M3: datasets. Text corpora as first-class, id-referenced objects:
+# ingest (content-addressed, honest stats), list, and CURATE — starting with a
+# REAL exact-line dedup (the Rust ifran's "dedup" was a fake caller-hash
+# membership counter, per the 2026-06-25 mining; do-not-port → this replaces
+# it with one that actually deduplicates and reports in/out counts).
+#
+#   ifran dataset add <file> [name]   ingest a text corpus
+#   ifran dataset ls                  list (id, name, kind, lines, bytes, hash)
+#   ifran dataset dedup <id>          derive a new dataset with exact-duplicate
+#                                     lines removed (parent recorded)
+#
+# Jobs reference datasets by id: `dataset = N` in the [job] spec + the literal
+# `{dataset}` placeholder in `args` resolves to the stored corpus path at run
+# time (see run.cyr).
+#
+# Kind: `text` (raw text — what the siblings consume via akshara's
+# corpus_load_file) and `text-dedup` (derived). Identity = sigil sha256 over
+# the bytes (same content → same dataset id). Line-dedup membership uses a
+# 64-bit prefix of each line's sha256 in a map_u64 set — a 64-bit collision
+# (≈2⁻⁶⁴ per pair) would drop a non-duplicate line; documented, acceptable for
+# a curation tool at corpus scale.
+#
+# Layout: <datadir>/<sha256-hex16>.txt + the patra `datasets` table. Default
+# datadir "ifran-data" (cwd, beside ifran.db); override via dataset_set_dir.
+
+var _ds_dir = 0;
+
+fn dataset_set_dir(p): i64 { _ds_dir = p; return 0; }
+
+fn dataset_dir(): i64 {
+    if (_ds_dir != 0) { return _ds_dir; }
+    return "ifran-data";
+}
+
+fn _ds_open_table(): i64 {
+    var db = runstore_open();
+    if (db == 0) { return 0; }
+    var c1 = "CREATE TABLE datasets (id INT AUTOINCREMENT, name STR, path STR, hash STR, ";
+    var c2 = "nbytes INT, nlines INT, kind STR, parent INT, ingested INT)";
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, c1);
+    str_builder_add_cstr(sb, c2);
+    patra_exec(db, str_cstr(str_builder_build(sb)));
+    return db;
+}
+
+fn _ds_count_lines(buf, n): i64 {
+    var lines = 0;
+    var i = 0;
+    while (i < n) {
+        if (load8(buf + i) == 10) { lines = lines + 1; }
+        i = i + 1;
+    }
+    if (n > 0) {
+        if (load8(buf + n - 1) != 10) { lines = lines + 1; }   # unterminated tail
+    }
+    return lines;
+}
+
+fn _ds_dst_path(hex): i64 {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, dataset_dir());
+    str_builder_add_cstr(sb, "/");
+    var short = alloc(17);
+    var i = 0;
+    while (i < 16) { store8(short + i, load8(hex + i)); i = i + 1; }
+    store8(short + 16, 0);
+    str_builder_add_cstr(sb, short);
+    str_builder_add_cstr(sb, ".txt");
+    return str_cstr(str_builder_build(sb));
+}
+
+fn _ds_find_hash(db, hex): i64 {
+    var stmt = patra_prepare(db, "SELECT id FROM datasets WHERE hash = ?");
+    if (stmt == 0) { return 0; }
+    patra_bind_text(stmt, 0, hex, strlen(hex));
+    var rs = patra_query_prepared(db, stmt);
+    patra_finalize(stmt);
+    if (rs == 0) { return 0; }
+    var id = 0;
+    if (patra_result_count(rs) > 0) { id = patra_result_get_int(rs, 0, 0); }
+    patra_result_free(rs);
+    return id;
+}
+
+fn _ds_insert(db, name, dst, hex, bytes, lines, kind, parent): i64 {
+    var ins = "INSERT INTO datasets (name, path, hash, nbytes, nlines, kind, parent, ingested) ";
+    var vals = "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, ins);
+    str_builder_add_cstr(sb, vals);
+    var stmt = patra_prepare(db, str_cstr(str_builder_build(sb)));
+    if (stmt == 0) { return 0 - 1; }
+    patra_bind_text(stmt, 0, name, strlen(name));
+    patra_bind_text(stmt, 1, dst, strlen(dst));
+    patra_bind_text(stmt, 2, hex, strlen(hex));
+    patra_bind_int(stmt, 3, bytes);
+    patra_bind_int(stmt, 4, lines);
+    patra_bind_text(stmt, 5, kind, strlen(kind));
+    patra_bind_int(stmt, 6, parent);
+    patra_bind_int(stmt, 7, clock_epoch_secs());
+    var idp = alloc(8);
+    if (patra_insert_returning(db, stmt, idp) != 0) { patra_finalize(stmt); return 0 - 1; }
+    patra_finalize(stmt);
+    return load64(idp);
+}
+
+# ingest bytes as a dataset (shared by add + dedup). Returns id or -1.
+fn _ds_ingest(db, buf, size, name, kind, parent): i64 {
+    var digest = alloc(32);
+    sha256(buf, size, digest);
+    var hex = _keys_hex(digest, 32);
+    var dup = _ds_find_hash(db, hex);
+    if (dup != 0) {
+        ifr_print_cstr("already ingested as dataset "); fmt_int(dup); println("");
+        return dup;
+    }
+    ifr_mkdir_p(dataset_dir());
+    var dst = _ds_dst_path(hex);
+    file_write_all(dst, buf, size);
+    var id = _ds_insert(db, name, dst, hex, size, _ds_count_lines(buf, size), kind, parent);
+    if (id < 0) { return 0 - 1; }
+    ifr_print_cstr("dataset "); fmt_int(id);
+    ifr_print_cstr(" ("); ifr_print_cstr(kind);
+    ifr_print_cstr(", "); fmt_int(_ds_count_lines(buf, size));
+    ifr_print_cstr(" lines, "); fmt_int(size);
+    ifr_print_cstr(" bytes) "); ifr_print_cstr(dst); println("");
+    return id;
+}
+
+fn dataset_add(path, name): i64 {
+    var db = _ds_open_table();
+    if (db == 0) { return 0 - 1; }
+    var sizep = alloc(8);
+    var buf = _store_map_file(path, sizep);
+    if (buf == 0) { println("ifran: cannot read corpus file"); return 0 - 1; }
+    var size = load64(sizep);
+    if (size == 0) { println("ifran: empty corpus rejected"); return 0 - 1; }
+    return _ds_ingest(db, buf, size, name, "text", 0);
+}
+
+# resolve a dataset id -> stored path (fresh cstr), or 0
+fn dataset_path(id): i64 {
+    var db = _ds_open_table();
+    if (db == 0) { return 0; }
+    var stmt = patra_prepare(db, "SELECT path FROM datasets WHERE id = ?");
+    if (stmt == 0) { return 0; }
+    patra_bind_int(stmt, 0, id);
+    var rs = patra_query_prepared(db, stmt);
+    patra_finalize(stmt);
+    if (rs == 0) { return 0; }
+    if (patra_result_count(rs) == 0) { patra_result_free(rs); return 0; }
+    var pp = patra_result_get_str(rs, 0, 0);
+    var pl = patra_result_get_str_len(rs, 0, 0);
+    var path = alloc(pl + 1);
+    memcpy(path, pp, pl);
+    store8(path + pl, 0);
+    patra_result_free(rs);
+    return path;
+}
+
+fn dataset_ls(): i64 {
+    var db = _ds_open_table();
+    if (db == 0) { return 1; }
+    var rs = patra_query(db, "SELECT id, name, kind, nlines, nbytes, parent, hash FROM datasets");
+    if (rs == 0) { println("ifran: datasets query failed"); return 1; }
+    var n = patra_result_count(rs);
+    println("id | name | kind | lines | bytes | parent | hash");
+    var i = 0;
+    while (i < n) {
+        fmt_int(patra_result_get_int(rs, i, 0)); ifr_print_cstr(" | ");
+        _rs_print_str(rs, i, 1); ifr_print_cstr(" | ");
+        _rs_print_str(rs, i, 2); ifr_print_cstr(" | ");
+        fmt_int(patra_result_get_int(rs, i, 3)); ifr_print_cstr(" | ");
+        fmt_int(patra_result_get_int(rs, i, 4)); ifr_print_cstr(" | ");
+        fmt_int(patra_result_get_int(rs, i, 5)); ifr_print_cstr(" | ");
+        _rs_print_str(rs, i, 6);
+        println("");
+        i = i + 1;
+    }
+    patra_result_free(rs);
+    return 0;
+}
+
+# REAL exact-line dedup: derive a new dataset keeping the FIRST occurrence of
+# every line (order preserved). Returns the new dataset id, or -1.
+fn dataset_dedup(id): i64 {
+    var db = _ds_open_table();
+    if (db == 0) { return 0 - 1; }
+    var src = dataset_path(id);
+    if (src == 0) { println("ifran: no such dataset id"); return 0 - 1; }
+    var sizep = alloc(8);
+    var buf = _store_map_file(src, sizep);
+    if (buf == 0) { println("ifran: dataset file unreadable"); return 0 - 1; }
+    var size = load64(sizep);
+    var out = mmap_anon(size + 1);
+    if (out == 0) { return 0 - 1; }
+    var seen = map_u64_new();
+    var kept = 0;
+    var dropped = 0;
+    var w = 0;
+    var start = 0;
+    var i = 0;
+    while (i <= size) {
+        var at_eol = 0;
+        if (i == size) { if (start < i) { at_eol = 1; } }
+        elif (load8(buf + i) == 10) { at_eol = 1; }
+        if (at_eol == 1) {
+            var llen = i - start;
+            var digest = alloc(32);
+            sha256(buf + start, llen, digest);
+            var key = load64(digest);                       # 64-bit prefix (see header)
+            # map_u64 sentinels: 0 = empty, -1 = tombstone — remap those two
+            # (probability 2^-63 each; same collision class as the prefix itself)
+            if (key == 0) { key = 2; }
+            if (key == 0 - 1) { key = 3; }
+            if (map_u64_has(seen, key) == 1) { dropped = dropped + 1; }
+            else {
+                map_u64_set(seen, key, 1);
+                memcpy(out + w, buf + start, llen);
+                w = w + llen;
+                store8(out + w, 10);
+                w = w + 1;
+                kept = kept + 1;
+            }
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    ifr_print_cstr("dedup: "); fmt_int(kept + dropped);
+    ifr_print_cstr(" lines -> "); fmt_int(kept);
+    ifr_print_cstr(" ("); fmt_int(dropped);
+    ifr_print_cstr(" exact duplicates dropped)"); println("");
+    var nsb = str_builder_new();
+    str_builder_add_cstr(nsb, "dedup-of-");
+    var nb = alloc(32);
+    fmt_int_buf(id, nb);
+    str_builder_add_cstr(nsb, nb);
+    return _ds_ingest(db, out, w, str_cstr(str_builder_build(nsb)), "text-dedup", id);
+}

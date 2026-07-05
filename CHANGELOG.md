@@ -66,6 +66,28 @@ green — with the ephemeral-signed artifacts honestly recorded
 `signed-unknown-key` (producers signing with the OPERATOR key is the
 follow-on: an additive `--sk` on anukulana's CLI, or sign-on-ingest).
 
+### Added — M3 (datasets)
+- **`src/dataset.cyr`** — text corpora as first-class, id-referenced objects:
+  `dataset add` (content-addressed via sigil sha256 — same bytes, same id;
+  honest stats: bytes + lines), `dataset ls`, and **`dataset dedup <id>`** — a
+  REAL exact-line dedup (first occurrence kept, order preserved, in/out counts
+  reported; derivation parent recorded). The Rust ifran's "dedup" was a fake
+  caller-hash membership counter (2026-06-25 mining, do-not-port) — this
+  replaces it with one that deduplicates.
+- **Jobs reference datasets by id**: `dataset = N` in the `[job]` spec; the
+  literal `{dataset}` in `args` resolves to the stored corpus path at run time
+  (dangling ids fail loud, nothing spawned).
+- **`tests/ifran.tcyr`** 29→**43**: ingest stats, content dedup, line-dedup
+  counts + parent, id resolution, `{dataset}` substitution through a real job,
+  dangling-reference rejection.
+
+### The M3 proof
+A real corpus (51 KB of AGNOS docs, 567 lines) ingested → `dataset dedup`
+derived a curated child (**567 → 356 lines, 211 exact duplicates dropped**) →
+`attn11 --preset --corpus {dataset} --steps 30` ran as an ifran job (31.7 s,
+exit 0) with the placeholder resolved to the store path — **a sibling
+TRAINING on an ifran-managed dataset, end-to-end.**
+
 ### Porting notes (patra/bayan RTFM-class, recorded for the port's continuation)
 - patra binds are **0-based**; an unbound slot defaults to INT 0 → a
   `PATRA_ERR_TYPE` (9) against a STR column.
@@ -75,6 +97,12 @@ follow-on: an additive `--sk` on anukulana's CLI, or sign-on-ingest).
   (`str_cstr` before `strlen`); `bayan_toml_get_sections` returns a
   possibly-empty **vec**, never 0.
 - stdlib `print` is 2-arg (`msg, len`) — use `println` or an explicit helper.
+- patra column names must dodge its TYPE keywords — a column named `bytes`
+  (the BYTES type) breaks the CREATE/INSERT parse silently (→ `nbytes`).
+- stdlib hashmap has TWO key APIs: `map_set`/`map_has` are STRING-keyed (they
+  dereference the key as a pointer — an arbitrary u64 key segfaults);
+  integer keys need `map_u64_set`/`map_u64_has`, whose sentinels reserve keys
+  0 (empty) and −1 (tombstone).
 
 ## [1.3.0] - 2026-04-03
 

@@ -5,6 +5,7 @@ include "src/runstore.cyr"
 include "src/run.cyr"
 include "src/keys.cyr"
 include "src/store.cyr"
+include "src/dataset.cyr"
 
 fn _t_write(path, s): i64 {
     file_write_all(path, s, strlen(s));
@@ -149,6 +150,63 @@ fn test_model_store(): i64 {
     return 0;
 }
 
+fn _t_ds_field(db, id, col): i64 {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "SELECT ");
+    str_builder_add_cstr(sb, col);
+    str_builder_add_cstr(sb, " FROM datasets WHERE id = ?");
+    var stmt = patra_prepare(db, str_cstr(str_builder_build(sb)));
+    patra_bind_int(stmt, 0, id);
+    var rs = patra_query_prepared(db, stmt);
+    patra_finalize(stmt);
+    var v = patra_result_get_int(rs, 0, 0);
+    patra_result_free(rs);
+    return v;
+}
+
+fn test_datasets(): i64 {
+    dataset_set_dir("/tmp/ifran_test_data");
+    var c = "alpha\nbeta\nalpha\ngamma\nbeta\ndelta\n";
+    file_write_all("/tmp/ifran_t_corpus.txt", c, strlen(c));
+    var id = dataset_add("/tmp/ifran_t_corpus.txt", "toy");
+    assert_gt(id, 0, "corpus ingests");
+    var db = runstore_open();
+    assert_eq(_t_ds_field(db, id, "nlines"), 6, "line stat correct");
+    assert_eq(dataset_add("/tmp/ifran_t_corpus.txt", "again"), id, "content dedup returns same id");
+    assert_nonnull(dataset_path(id), "id resolves to a stored path");
+    assert_eq(dataset_path(9999), 0, "dangling id resolves to 0");
+
+    # real line-dedup: 6 lines with 2 exact dups -> 4 kept, parent recorded
+    var did = dataset_dedup(id);
+    assert_gt(did, 0, "dedup derives a dataset");
+    assert_eq(_t_ds_field(db, did, "nlines"), 4, "exact duplicates dropped (6 -> 4)");
+    assert_eq(_t_ds_field(db, did, "parent"), id, "derivation parent recorded");
+
+    # {dataset} placeholder resolves through a real job (/bin/cat prints it)
+    var spec = "[job]\nname = \"ds\"\nbin = \"/bin/cat\"\nargs = \"{dataset}\"\nlogdir = \"/tmp/ifran_test_logs\"\ndataset = ";
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, spec);
+    str_builder_add_int(sb, did);
+    str_builder_add_cstr(sb, "\n");
+    var full = str_cstr(str_builder_build(sb));
+    file_write_all("/tmp/ifran_t_dsjob.cyml", full, strlen(full));
+    var js = jobspec_parse("/tmp/ifran_t_dsjob.cyml");
+    assert_nonnull(js, "dataset job parses");
+    assert_eq(jobspec_dataset(js), did, "dataset id parsed");
+    assert_eq(run_job(js), 0, "cat-the-dataset job runs");
+    var buf = alloc(256);
+    var n = file_read_all("/tmp/ifran_test_logs/run-3.log", buf, 256);
+    assert_gt(n, 0, "dataset-job log written");
+    assert_eq(load8(buf), 97, "log begins with the corpus content ('a')");
+
+    # dangling dataset reference fails loud, nothing spawned
+    var bad = "[job]\nname = \"dsx\"\nbin = \"/bin/cat\"\nargs = \"{dataset}\"\ndataset = 9999\n";
+    file_write_all("/tmp/ifran_t_dsjob.cyml", bad, strlen(bad));
+    var js2 = jobspec_parse("/tmp/ifran_t_dsjob.cyml");
+    assert_eq(run_job(js2), 0 - 1, "dangling dataset id fails loud");
+    return 0;
+}
+
 fn main(): i64 {
     alloc_init();
     test_group("jobspec");
@@ -159,6 +217,8 @@ fn main(): i64 {
     test_keys();
     test_group("model-store");
     test_model_store();
+    test_group("datasets");
+    test_datasets();
     return assert_summary();
 }
 

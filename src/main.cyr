@@ -8,6 +8,7 @@ include "src/runstore.cyr"
 include "src/run.cyr"
 include "src/keys.cyr"
 include "src/store.cyr"
+include "src/dataset.cyr"
 
 fn usage(): i64 {
     println("ifran - AGNOS training control plane");
@@ -20,6 +21,9 @@ fn usage(): i64 {
     println("  store add <file.tula> [name]   validate+verify+ingest an artifact");
     println("  store ls                       list the model store");
     println("  store verify <id>              re-check hash/structure/signature");
+    println("  dataset add <file> [name]      ingest a text corpus");
+    println("  dataset ls                     list datasets");
+    println("  dataset dedup <id>             derive an exact-line-deduped dataset");
     println("  version          print the version");
     return 0;
 }
@@ -62,7 +66,25 @@ fn main(): i64 {
         println("ifran: store needs add|ls|verify");
         return 1;
     }
-    if (streq(cmd, "version") == 1) { println("ifran (cyrius port, M2)"); return 0; }
+    if (streq(cmd, "dataset") == 1) {
+        if (argc() < 3) { println("ifran: dataset needs add|ls|dedup"); return 1; }
+        if (streq(argv(2), "ls") == 1) { return dataset_ls(); }
+        if (streq(argv(2), "add") == 1) {
+            if (argc() < 4) { println("ifran: dataset add needs a <file>"); return 1; }
+            var dn = argv(4);
+            if (argc() < 5) { dn = argv(3); }
+            if (dataset_add(argv(3), dn) < 0) { return 1; }
+            return 0;
+        }
+        if (streq(argv(2), "dedup") == 1) {
+            if (argc() < 4) { println("ifran: dataset dedup needs an <id>"); return 1; }
+            if (dataset_dedup(atoi(argv(3))) < 0) { return 1; }
+            return 0;
+        }
+        println("ifran: dataset needs add|ls|dedup");
+        return 1;
+    }
+    if (streq(cmd, "version") == 1) { println("ifran (cyrius port, M3)"); return 0; }
     usage();
     return 0;
 }

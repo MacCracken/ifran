@@ -16,7 +16,7 @@
 |---|---|---|---|
 | `train/job`, `train/executor`, `train/approval` | `src/jobspec.cyr` + `src/run.cyr` + `src/runstore.cyr` | M1 | **✅ done** (approval/quotas later) |
 | `train/checkpoint`, `registry`, `storage`, `versioning` | `src/keys.cyr` + `src/store.cyr` — tula+sigil store (**crisp internal boundary** — the named first-extraction candidate) | M2 | **✅ done** |
-| `train/dataset`, `dataset` | `src/dataset*.cyr` | M3 | pending |
+| `train/dataset`, `dataset` | `src/dataset.cyr` | M3 | **✅ done** (text corpora; akshara-packed stores if a consumer wants them) |
 | `train/experiment`, `experiment` | `src/sweep*.cyr` (grid/random; BBO is a later separate lane) | M4 | pending |
 | `eval` | `src/eval*.cyr` | M5 | pending |
 | `preference`, `rlhf` | `src/pref*.cyr` (feeds tarka's DPO/KL/IPO/KTO) | M6 | pending |
@@ -69,8 +69,12 @@ port — they are reference for `rust-old/` and get pruned as milestones close
   (`gpt2-tula`, 80 s) → both artifacts ingested → verified. Follow-on:
   producers signing with the operator key (additive anukulana `--sk`, or
   sign-on-ingest).
-- **M3 — datasets** · **M4 — sweeps** · **M5 — eval runner** · **M6 —
-  preference store**.
+- **M3 — datasets. ✅ DONE 2026-07-05.** `src/dataset.cyr`: content-addressed
+  ingest + honest stats + REAL exact-line dedup (replacing the Rust fake) +
+  id-referencing from job specs (`dataset = N` / `{dataset}`). Suite 43/43.
+  **Proof met:** a 51 KB docs corpus deduped 567→356 lines and attn11 TRAINED
+  on it as an ifran job (31.7 s, exit 0).
+- **M4 — sweeps** · **M5 — eval runner** · **M6 — preference store**.
 - **v1.0** — an attn11/tarka/anukūlana workflow runs entirely as ifran jobs;
   `rust-old/` dismissed.
 

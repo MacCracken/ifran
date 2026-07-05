@@ -21,7 +21,12 @@ examples/lora-demo.cyml` drove the real `anukulana gpt2-lora` end-to-end
 store (`store add/ls/verify` — tula structural validation, Ed25519 verify with
 honest per-artifact status, sigil-sha256 content addressing + dedup,
 tamper-detecting verify); suite **29/29**; **proof met** — keys → `gpt2-tula`
-job (80 s) → both artifacts ingested + verified. **Next: M3 — datasets.** NOT porting: `backends/` (dead broker), server/lineage/marketplace/
+job (80 s) → both artifacts ingested + verified. **M3 (datasets) ✅ DONE 2026-07-05**: content-addressed text corpora with
+honest stats + a REAL exact-line dedup (the Rust fake replaced) +
+id-referenced from job specs (`dataset = N` / `{dataset}` substitution);
+suite **43/43**; **proof met** — a 51 KB docs corpus deduped 567→356 lines
+and attn11 TRAINED on it as an ifran job. **Next: M4 — sweeps** (grid/random
+over job specs; results into the store). NOT porting: `backends/` (dead broker), server/lineage/marketplace/
 fleet/rag/hardware (owned homes) — see the ledger.
 
 ## Toolchain

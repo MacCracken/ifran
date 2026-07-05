@@ -7,18 +7,22 @@
 #   args = "gpt2-lora /path/model.safetensors"   # optional; space-split (M1
 #                                          # limitation: no quoted/spaced args)
 #   logdir = "runs/logs"                   # optional, default "runs/logs"
+#   dataset = 3                            # optional: an `ifran dataset` id; the
+#                                          # literal {dataset} in args resolves to
+#                                          # its stored path at run time
 #
 # Parsed via bayan's TOML surface (never hand-rolled). Malformed / missing
 # required fields -> 0 (fail loud at the CLI, nothing spawned).
 #
 # Spec record layout (flat, 8B slots):
 #   +0  name  (cstr)   +8  bin (cstr)   +16 argv (vec of cstr, argv[0]=bin)
-#   +24 logdir (cstr)
+#   +24 logdir (cstr)  +32 dataset id (i64, 0 = none)
 
 fn jobspec_name(js): i64 { return load64(js); }
 fn jobspec_bin(js): i64 { return load64(js + 8); }
 fn jobspec_argv(js): i64 { return load64(js + 16); }
 fn jobspec_logdir(js): i64 { return load64(js + 24); }
+fn jobspec_dataset(js): i64 { return load64(js + 32); }
 
 # split a cstring on single spaces into a vec of fresh cstrs (M1: no quoting)
 fn _js_split_args(s, out_vec): i64 {
@@ -72,7 +76,7 @@ fn jobspec_parse(path): i64 {
     var bin = _js_get_cstr(pairs, "bin");
     if (bin == 0) { println("ifran: [job] missing `bin`"); return 0; }
     if (load8(bin) != 47) { println("ifran: `bin` must be an absolute path"); return 0; }
-    var js = alloc(32);
+    var js = alloc(40);
     store64(js, name);
     store64(js + 8, bin);
     var argv = vec_new();
@@ -83,5 +87,8 @@ fn jobspec_parse(path): i64 {
     var logdir = _js_get_cstr(pairs, "logdir");
     if (logdir == 0) { logdir = "runs/logs"; }
     store64(js + 24, logdir);
+    var dsv = toml_get(pairs, "dataset");
+    if (dsv != 0) { store64(js + 32, str_to_int(dsv)); }
+    else { store64(js + 32, 0); }
     return js;
 }
