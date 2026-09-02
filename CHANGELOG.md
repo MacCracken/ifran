@@ -7,6 +7,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Removed
+- **`rust-old/` (53.6k lines)** — the held Rust line, removed post-2.2.0 per
+  the pre-removal audit (`docs/audit/2026-07-05-rust-old-preremoval.md`:
+  zero business-logic loss; one ledger gap fixed; 4 missed features landed in
+  2.2.0, 4 roadmapped with blockers). The SY bridge contract it documented
+  (`/api/v1/ifran/*` — the Lane-4 parity target) is preserved at
+  `docs/development/reference/{sy-integration,bridge-protocol,api-reference}.md`.
+  The tree survives in git history; its AGPL license applied to it alone.
+
 ## [2.2.0] — 2026-07-05
 
 **Pre-removal audit additives — the four "small + real" features the Rust tree

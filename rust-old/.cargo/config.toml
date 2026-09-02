@@ -1,9 +1,0 @@
-[build]
-# Uncomment for faster linking on Linux
-# rustflags = ["-C", "link-arg=-fuse-ld=mold"]
-
-[target.x86_64-unknown-linux-gnu]
-# rustflags = ["-C", "link-arg=-fuse-ld=mold"]
-
-[alias]
-xtask = "run --package xtask --"

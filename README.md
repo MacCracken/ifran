@@ -39,9 +39,12 @@ suite passed — **all as recorded ifran jobs**.
 What ifran deliberately does **not** own: serving (hoosh), lineage (itihas),
 marketplace (mela), fleet (seema), GPU (mabda/ai-hwaccel), foreign inference
 engines (mehman) — and no training math, ever. The Rust line (53.6k lines,
-AGPL) is preserved at `rust-old/` with its docs for reference, held for a
-release or two before removal; the Cyrius port is **GPL-3.0-only** (ecosystem
-policy: AGPL is reserved for desktop apps).
+AGPL) was held at `rust-old/` for two releases and removed at 2.2.0 after a
+zero-loss pre-removal audit ([`docs/audit/`](docs/audit/2026-07-05-rust-old-preremoval.md));
+it survives in git history, and the SY bridge contract it documented lives on
+at [`docs/development/reference/`](docs/development/reference/). The Cyrius
+port is **GPL-3.0-only** (ecosystem policy: AGPL is reserved for desktop
+apps).
 
 ## Build & test
 
@@ -65,4 +68,4 @@ cyrius test tests/ifran.tcyr             # 77 checks
 
 ## License
 
-GPL-3.0-only (`rust-old/` retains its original AGPL-3.0).
+GPL-3.0-only (the removed Rust line retains its original AGPL-3.0 in git history).

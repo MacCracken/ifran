@@ -47,7 +47,7 @@ Ranked; each is a *decision*, not an automatic port:
 | 4 | **Dataset validation** (`dataset validate <id>` — JSONL/CSV format checks, first-N error report) | `dataset/validator.rs` | Small + real. Catches format errors before a training job burns time. |
 | 5 | **Job priority queue** (Low/Normal/High/Critical, FIFO within tier) | `job/scheduler.rs:16-57` | Real but premature: fork-per-invocation ifran has no queue to prioritize. Revisit when a scheduler/daemon lands (L6/L7 adjacent). |
 | 6 | **4-state pair labels** (Tie / BothBad beyond chosen/rejected) + pair confidence (`score_delta`) | `types/rlhf.rs:23-31`, `preference/store.rs:20` | Small + real. Extends `pref pair`; KTO ±1 covers the unary side. Matters if human annotation gets serious. |
-| 7 | **Annotation sessions** (lifecycle, next-unannotated cursor, stats) | `rlhf/store.rs:87-365` | Real; an *interactive* collection workflow over the pref store. Wants a graphical annotation surface — the coming GUI/Desktop lane (NOT puka, which is a desktop terminal). |
+| 7 | **Annotation sessions** (lifecycle, next-unannotated cursor, stats) | `rlhf/store.rs:87-365` | Real; an *interactive* collection workflow over the pref store. The graphical surface is **tanur** (the broken-out desktop model-studio, desktop-stage) — ifran stays CLI; tanur consumes it. |
 | 8 | **Structured benchmark harness** (MMLU/HellaSwag/HumanEval formatters + exact/contains scorers) | `eval/benchmarks.rs:34-183` | Real scorers, but the harness consumes *inference results* — gated on a serving story (hoosh), not free-standing. The exit-code-gate + metric-extraction design is deliberate; revisit with Lane 4/serving. |
 
 ## Deferred-with-owner (correctly dispositioned; re-verified real)
@@ -89,8 +89,8 @@ items 1/2/4/6 (leaderboard, sweep budgets, dataset validate, 4-state pairs +
 conf) **SHIPPED as 2.2.0** (suite 100→120, all proven live); items 3/5/7/8 **ROADMAPPED with blockers** in
 [`../development/roadmap.md`](../development/roadmap.md) § Pre-removal audit
 triage (auto-loop → sweep-eval spec decision; priority → scheduler/daemon;
-annotation sessions → the coming GUI/Desktop lane, BACKLOGGED — puka is a
-desktop terminal, not an annotation UI; benchmark harness → serving path).
+annotation sessions → tanur, the broken-out desktop model-studio app,
+desktop-stage BACKLOGGED — ifran stays CLI; benchmark harness → serving path).
 Remaining precondition: copy out the SY-contract docs. Nothing else in the
 tree carries unique value: the remaining ~45k lines are dead scope, owned
 elsewhere, or deliberately simplified away.

@@ -54,10 +54,11 @@ surfaced 8 real features with no Cyrius home. Triage (user 2026-07-05):
   scheduler/daemon existing*: fork-per-invocation ifran has no queue to
   prioritize. Revisit with Lane 6 (approval/quotas) / Lane 7 (distributed).
 - **Annotation sessions** (lifecycle, next-unannotated cursor, stats) —
-  *blocked on the GUI/Desktop lane*: an interactive collection workflow wants
-  a graphical annotation surface. NOTE: **puka is a desktop terminal, not an
-  annotation UI** — this waits for the coming GUI/Desktop items and is
-  **BACKLOGGED** until they exist. The 4-state store side (above) is ready
+  *blocked on **tanur*** (the broken-out desktop model-studio app —
+  agnosticos `planning/tanur.md`; desktop-stage, on the windowing substrate
+  puka pioneered). **ifran itself never grows a GUI** — it stays the CLI
+  control plane; tanur consumes it as the backend when the desktop stage
+  arrives. BACKLOGGED until then. The 4-state store side (above) is ready
   for it.
 - **Structured benchmark harness** (MMLU/HellaSwag/HumanEval formatters +
   scorers) — *blocked on a serving/inference path*: the harness consumes

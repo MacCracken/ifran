@@ -13,13 +13,16 @@ manager/scheduler, tula+sigil checkpoint store, dataset curation, sweep runner,
 eval runner, preference/annotation store — **thin over the sovereign ML
 siblings** (attn11/tarka/tentib/prajna/anukūlana own ALL the math; ifran drives
 their binaries as jobs). **The Cyrius port SHIPPED as 2.0.0 (2026-07-05)**;
-the Rust line (53.6k lines) is preserved at `rust-old/` (reference-only,
-original AGPL, held until ~2.1/2.2).
+the Rust line (53.6k lines) was held at `rust-old/` through 2.2.0 and
+**REMOVED 2026-07-05** after the pre-removal audit
+(`docs/audit/2026-07-05-rust-old-preremoval.md` — zero business-logic loss;
+it survives in git history). The SY bridge contract it documented is
+preserved at `docs/development/reference/`.
 
 - **Type**: Binary (CLI on cmdit) + control-plane services; completed Rust→Cyrius port
 - **License**: GPL-3.0-only (relicensed at the port cut per the ecosystem
-  policy — GPL-3.0-only everywhere, AGPL reserved for desktop apps; the Rust
-  line in `rust-old/` keeps its original AGPL)
+  policy — GPL-3.0-only everywhere, AGPL reserved for desktop apps; the
+  removed Rust line kept its original AGPL and remains so in git history)
 - **Language**: Cyrius (toolchain pinned in `cyrius.cyml [package].cyrius`)
 - **Version**: `VERSION` at the project root is the source of truth — do not inline the number here
 - **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-standards.md) · [First-Party Documentation](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-documentation.md)

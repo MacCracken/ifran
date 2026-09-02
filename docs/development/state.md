@@ -45,8 +45,8 @@ CLI on **cmdit** (generated help/version/errors). Exit codes: `run` = child's,
 - **Cyrius pin**: `6.4.3` (cyrius.cyml).
 - Deps: patra 1.12.8 · sigil 3.10.0 · tula 1.0.0 · cmdit 1.1.0 (pins +
   watch: [`dependency-watch.md`](dependency-watch.md)).
-- License: **GPL-3.0-only** (policy: AGPL = desktop apps; `rust-old/` keeps
-  its original AGPL).
+- License: **GPL-3.0-only** (policy: AGPL = desktop apps; the removed Rust
+  line keeps its original AGPL in git history).
 
 ## Tests / quality
 
@@ -70,15 +70,16 @@ trigger.
 
 Nothing in flight — the audit-triage additives shipped as 2.2.0 (see Version
 above); the other 4 audit items are roadmapped with blockers (roadmap § audit
-triage; annotation sessions = GUI/Desktop lane, BACKLOGGED — puka is a
-desktop terminal, not an annotation UI). Remaining lanes with their triggers
-live in [`roadmap.md`](roadmap.md). The `rust-old/`
-removal window is open and the **pre-removal audit is DONE**
+triage; annotation sessions = **tanur**, the broken-out desktop model-studio
+— ifran stays CLI-only, tanur consumes it; desktop-stage, BACKLOGGED). Remaining lanes with their triggers
+live in [`roadmap.md`](roadmap.md). **`rust-old/` REMOVED 2026-07-05**
+(post-2.2.0): the pre-removal audit is DONE
 ([`../audit/2026-07-05-rust-old-preremoval.md`](../audit/2026-07-05-rust-old-preremoval.md)):
 zero business-logic loss; one ledger gap fixed (`lifecycle` → hoosh/murti-seam
-reference); remaining removal precondition = preserve the 3 SY-contract docs
-(`sy-integration`/`bridge-protocol`/`api-reference` — the Lane-4 parity
-target); the 8-item triage is DONE (4 landed, 4 roadmapped). **Lane 2 CLOSED 2026-07-05**
+reference); the 3 SY-contract docs (`sy-integration`/`bridge-protocol`/`api-reference` —
+the Lane-4 parity target) are preserved at
+[`reference/`](reference/); the 8-item triage is DONE (4 landed in 2.2.0,
+4 roadmapped); the tree survives in git history. **Lane 2 CLOSED 2026-07-05**
 (anukūlana 1.1.1 `--sk` — operator-key
 producer signing; `store add` records `verified` end-to-end, proven on the
 real checkpoint). **Lane 3 CLOSED same day** (tarka **1.1.2** `--pref` JSONL

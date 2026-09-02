@@ -45,13 +45,12 @@
 The removal-window audit re-derived this map against the tree:
 [`../audit/2026-07-05-rust-old-preremoval.md`](../audit/2026-07-05-rust-old-preremoval.md).
 Zero business-logic loss in the shipped scope; one map gap fixed (`lifecycle`,
-above). **Before deleting `rust-old/`**: (a) preserve
-`rust-old/docs/{sy-integration,bridge-protocol,api-reference}.md` — they are
-the ONLY record of the `/api/v1/ifran/*` contract SY still proxies (the
-Lane-4 parity target); (b) triage the audit's 8-item missed-features list
-(leaderboard · sweep budgets · experiment auto-loop · dataset validate ·
-priority queue · 4-state pair labels · annotation sessions · benchmark
-harness) — small 2.x additives vs stage-gated waits.
+above). **REMOVAL EXECUTED 2026-07-05 (post-2.2.0)**: the SY-contract docs
+(`sy-integration`/`bridge-protocol`/`api-reference` — the `/api/v1/ifran/*`
+contract SY still proxies, the Lane-4 parity target) are preserved at
+[`reference/`](reference/); the audit's 8-item triage closed (4 landed in
+2.2.0 — leaderboard, sweep budgets, `dataset validate`, 4-state pairs+conf;
+4 roadmapped with blockers). The Rust tree survives in git history only.
 
 ### Rust-era docs (in `docs/`)
 
