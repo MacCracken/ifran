@@ -1,0 +1,397 @@
+# async_macos.cyr — macOS (Darwin) async runtime: serial / blocking fallback.
+#
+# ⛔ WHY THIS FILE EXISTS (v6.5.27). Before it, macOS fell through to `lib/async.cyr`'s
+# EPOLL body — on a kernel that has no epoll. The result was not a clean failure: the epoll
+# body referenced `sys_epoll_wait`, which has no Darwin wrapper, so any macOS program using
+# async carried an undefined reference; and `lib/syscalls_macos.cyr` DECLARES
+# SYS_EPOLL_WAIT=232 / SYS_EPOLL_CTL=233 / SYS_EPOLL_CREATE1=291 — LINUX numbers that the
+# macho translators do NOT route — so code reaching them would issue raw Darwin syscalls
+# 232/233/291. Dead-but-armed constants, the same class as the Linux SIGCHLD=17 that is
+# Darwin's SIGSTOP (v6.5.15).
+#
+# ⚠ THIS IS A FALLBACK, NOT A REACTOR, AND THE DISTINCTION IS THE POINT. Darwin's readiness
+# API is kqueue/kevent, which cyrius has no wrappers for at all (`grep -rn 'kqueue\|kevent'
+# lib/` → nothing). A real macOS reactor is a kqueue backend and is NOT what this is. This
+# gives macOS the same honest serial/blocking semantics agnos has had since v6.2.3: tasks run
+# to completion in order, a park is a no-op because the subsequent blocking read IS the wait.
+# Single-waiter-per-fd is therefore not a limitation here — there is no registry to be
+# limited. Consumers written against the epoll backend LINK and RUN; they do not multiplex.
+#
+# Structure and contract mirror lib/async_agnos.cyr exactly (same serial model, same public
+# surface) so the three backends stay comparable. Kept as its own file rather than reusing
+# the agnos one because the reasons differ (agnos: server path unused on a client target;
+# macOS: wrong readiness API) and a future kqueue reactor replaces THIS file only.
+
+include "lib/fnptr.cyr"
+
+# Task states (mirror lib/async.cyr).
+var TASK_READY = 0;
+var TASK_WAITING = 1;
+var TASK_DONE = 2;
+
+# Task struct: { fp, arg, state, next, wait_fd, result } = 48 bytes (mirror async.cyr).
+# wait_fd is unused on agnos (no epoll parking; tasks run to completion inline);
+# result (@40, v6.4.34 F2) carries the task fn's return so task_join hands it back.
+# v6.5.27 — 48 -> 64 to match lib/async.cyr's task layout exactly: wait_fd@32, result@40,
+# owned_fd@48, wait_ev@56. The kqueue reactor below needs wait_ev for the same reason the
+# epoll one does — to know which DIRECTION a parked task is waiting on, so a read-waiter is
+# not woken by a write-readiness event. Tasks are heap-allocated, so this is not a layout
+# change in the heap-map sense.
+var TASK_SIZE = 64;
+
+# Darwin kevent struct (64-bit): { ident@0 u64, filter@8 i16, flags@10 u16, fflags@12 u32,
+# data@16 i64, udata@24 ptr } = 32 bytes. EVFILT_READ = -1, EVFILT_WRITE = -2 (int16, so
+# stored as 0xFFFF / 0xFFFE). EV_ADD = 1, EV_DELETE = 2.
+var KEV_SIZE = 32;
+
+# Runtime struct: { epfd, tasks, task_count, active, allocator, current } = 48
+# bytes (mirror async.cyr F1). epfd is unused on agnos (no epoll for arbitrary
+# fds) and stored as -1; current is unused (serial run-to-completion loop).
+# ⚠ `sleep_ms` NOT `sys_sleep_ms`. The agnos original this file was derived from calls
+# `sys_sleep_ms`, an AGNOS-ONLY syscall (SYS_SLEEP_MS) that does not exist on Darwin —
+# copying the backend wholesale inherited a dependency that cannot resolve here.
+# `lib/chrono.cyr`'s `sleep_ms` is the portable one and already handles Darwin correctly
+# (`poll(NULL, 0, ms)`, 7→230; XNU has no plain `nanosleep` BSD syscall — chrono.cyr:141-152,
+# CHANGELOG [6.0.65]). Included so this module is self-sufficient, per the stdlib rule that a
+# lib file referencing something must include its definer.
+include "lib/chrono.cyr"
+
+var RT_SIZE = 48;
+
+# Create a new async runtime backed by allocator `a`. No epoll instance is
+# created (Darwin has no epoll at all; the cooperative loop below needs none —
+# tasks run to completion inline). epfd slot holds -1.
+fn async_new_in(a): i64 {
+    var rt = alloc_via(a, RT_SIZE);
+    if (rt == 0) { return 0; }
+    store64(rt, sys_kqueue());   # v6.5.27: a REAL kqueue fd (was -1 / no reactor)
+    store64(rt + 8, 0);
+    store64(rt + 16, 0);
+    store64(rt + 24, 0);
+    store64(rt + 32, a);
+    store64(rt + 40, 0);         # current: unused on agnos (mirror layout)
+    return rt;
+}
+
+# Back-compat wrapper over the global bump allocator.
+fn async_new(): i64 {
+    return async_new_in(default_alloc());
+}
+
+# Spawn a task on the runtime (identical to the Linux path — pure memory ops).
+fn async_spawn(rt, fp, arg): i64 {
+    var t = alloc_via(load64(rt + 32), TASK_SIZE);
+    if (t == 0) { return 0; }
+    store64(t, fp);
+    store64(t + 8, arg);
+    store64(t + 16, TASK_READY);
+    store64(t + 32, 0 - 1);          # wait_fd: not fd-waiting
+    store64(t + 48, 0 - 1);          # owned_fd
+    store64(t + 56, 0);              # wait_ev: not parked on any filter
+    store64(t + 24, load64(rt + 8));
+    store64(t + 32, 0 - 1);          # wait_fd: unused on agnos (mirror layout)
+    store64(t + 40, 0);              # result: captured on done (F2)
+    store64(rt + 8, t);
+    store64(rt + 16, load64(rt + 16) + 1);
+    store64(rt + 24, load64(rt + 24) + 1);
+    return t;
+}
+
+# One reactor step (mirror of async.cyr _async_step). Runs every TASK_READY task, capturing
+# its return into the result slot (@40); a task that parks via async_wait_fd stays
+# TASK_WAITING. If nothing ran and tasks are parked, block in kevent() once and wake whoever
+# fired. Returns the count of tasks still live (0 = idle).
+#
+# ⛔ THIS DOC BLOCK USED TO DESCRIBE A SERIAL LOOP, AND IT WAS COPIED FROM THE AGNOS BACKEND
+# ALONG WITH THE BODY. v6.5.27 replaced the body with a real kqueue reactor but the comment
+# still said "AGNOS has no epoll/parking, so there is no wait phase" — describing behaviour
+# the code no longer had. Caught by cyrlint flagging the stale wording, which is the only
+# reason it did not ship as a lie about a file nobody re-reads. See CHANGELOG [6.5.27].
+fn _async_step(rt): i64 {
+    var kq = load64(rt);
+    var active = 0;
+    var ran = 0;
+    var t = load64(rt + 8);
+    while (t != 0) {
+        if (load64(t + 16) == TASK_READY) {
+            store64(rt + 40, t);            # current task, for async_wait_fd
+            var r = fncall1(load64(t), load64(t + 8));
+            ran = 1;
+            if (load64(t + 16) == TASK_READY) {
+                store64(t + 40, r);
+                store64(t + 16, TASK_DONE);
+            }
+        }
+        if (load64(t + 16) != TASK_DONE) { active = active + 1; }
+        t = load64(t + 24);
+    }
+    if (active > 0) {
+        if (ran == 0) {
+            # Every live task is parked. Block in kevent() and wake whoever fired.
+            # kqueue reports ONE event per (fd, filter) pair, so the two directions of one
+            # fd arrive as two distinct events — the multi-waiter problem epoll needed a
+            # union mask and a MOD dance for is structurally absent here.
+            var evb[256];                   # 8 events x 32 B
+            var nr = sys_kevent(kq, 0, 0, &evb, 8, 0);
+            var ei = 0;
+            while (ei < nr) {
+                var eo = ei * KEV_SIZE;
+                var wfd = load64(&evb + eo);
+                var filt = load16(&evb + eo + 8);
+                # int16 filter: 0xFFFF = EVFILT_READ (-1), 0xFFFE = EVFILT_WRITE (-2).
+                var want = 1;
+                if (filt == 65534) { want = 4; }
+                var t2 = load64(rt + 8);
+                while (t2 != 0) {
+                    if (load64(t2 + 16) == TASK_WAITING) {
+                        if (load64(t2 + 32) == wfd) {
+                            if ((load64(t2 + 56) & want) != 0) {
+                                store64(t2 + 32, 0 - 1);
+                                store64(t2 + 56, 0);
+                                store64(t2 + 16, TASK_READY);
+                            }
+                        }
+                    }
+                    t2 = load64(t2 + 24);
+                }
+                ei = ei + 1;
+            }
+        }
+    }
+    return active;
+}
+
+# Drive the serial loop until either watched handle is DONE, or — both 0 — until idle.
+fn _async_pump(rt, until_a, until_b): i64 {
+    while (1 == 1) {
+        if (until_a != 0) { if (load64(until_a + 16) == TASK_DONE) { return 0; } }
+        if (until_b != 0) { if (load64(until_b + 16) == TASK_DONE) { return 0; } }
+        if (_async_step(rt) == 0) { return 0; }
+    }
+}
+
+# Run all spawned tasks to completion. No epfd to close (epfd == -1, never opened).
+fn async_run(rt): i64 {
+    _async_pump(rt, 0, 0);
+    return 0;
+}
+
+# Await a spawned task's result (JoinHandle, F2). On the serial model the pump runs
+# the task inline; returns its captured return value. Mirror of async.cyr task_join.
+fn task_join(rt, handle): i64 {
+    if (handle == 0) { return 0; }
+    if (load64(handle + 16) != TASK_DONE) { _async_pump(rt, handle, 0); }
+    return load64(handle + 40);
+}
+
+# Await every handle in handles[0..n), collecting results (mirror async.cyr, serial).
+# v6.4.37 (P3).
+fn async_join_all(rt, handles, n, results): i64 {
+    var i = 0;
+    while (i < n) {
+        store64(results + i * 8, task_join(rt, load64(handles + i * 8)));
+        i = i + 1;
+    }
+    return n;
+}
+
+# Await the first handle to complete; returns its index, or -1 if idle with none done.
+# v6.4.37 (P3, serial).
+fn async_select(rt, handles, n): i64 {
+    while (1 == 1) {
+        var i = 0;
+        while (i < n) {
+            var hnd = load64(handles + i * 8);          # mirror async.cyr: null-guard
+            if (hnd != 0) { if (load64(hnd + 16) == TASK_DONE) { return i; } }
+            i = i + 1;
+        }
+        if (_async_step(rt) == 0) {
+            # mirror async.cyr: the idling step may itself have completed a handle
+            i = 0;
+            while (i < n) {
+                var hd = load64(handles + i * 8);
+                if (hd != 0) { if (load64(hd + 16) == TASK_DONE) { return i; } }
+                i = i + 1;
+            }
+            return 0 - 1;
+        }
+    }
+}
+
+# async_with_timeout (agnos): no reactor/timerfd — the handle runs to completion
+# inline on the serial model, so the deadline is moot. Join it and report completed.
+# Mirror of async.cyr's P1 surface. v6.4.35.
+fn async_with_timeout(rt, handle, ms): i64 {
+    if (handle == 0) { return 0; }      # mirror async.cyr: null handle → 0, not 1, so a
+    task_join(rt, handle);              # target-agnostic consumer doesn't deref a 0 handle
+    return 1;
+}
+
+# async_interval (agnos): a repeating reactor timer is a server-path primitive with no
+# equivalent on the serial single-core client model (no timerfd/epoll). Returns 0
+# (unscheduled); present so consumers stay target-agnostic. v6.4.35.
+fn async_interval(rt, fp, arg, ms, tok): i64 {
+    return 0;
+}
+
+# async subprocess (agnos): AGNOS has no clone-fork, so a reactor-driven subprocess
+# is unsupported on the serial client target. Returns 0 / -1 (unscheduled); present so
+# consumers stay target-agnostic. Mirror of async.cyr's P2 surface. v6.4.36.
+fn async_spawn_process(rt, path, argv, envp): i64 {
+    return 0;
+}
+# spawn + wait + timeout (agnos): no clone-fork, so unsupported. Returns -1. v6.4.36.
+fn async_run_process(rt, path, argv, envp, ms): i64 {
+    return 0 - 1;
+}
+
+# Park until `fd` is WRITABLE (EVFILT_WRITE). Mirror of the epoll backend.
+fn async_wait_writable(rt, fd): i64 {
+    return _async_kev_register(rt, fd, 4);
+}
+
+# Async TCP connect (agnos): no reactor / BSD non-blocking connect on the serial client
+# model — unsupported, returns 0 (no handle). Present so consumers stay target-agnostic.
+# v6.4.38.
+fn async_connect(rt, addr, port): i64 {
+    return 0;
+}
+
+# Async accept (agnos): no reactor / no server-accept on the serial client model —
+# unsupported, returns 0 (no handle). Present so consumers stay target-agnostic. v6.4.44 R3.
+fn async_accept(rt, listen_fd): i64 {
+    return 0;
+}
+
+# recv task (agnos): a plain blocking read inline — no epoll. v6.4.39.
+fn _async_recv_task(ctx): i64 {
+    return sys_read(load64(ctx + 8), load64(ctx + 16), load64(ctx + 24));
+}
+# Async single-shot recv (agnos): spawn a task that blocking-reads into buf; task_join
+# yields the byte count. Mirror of async.cyr's reactor recv, degraded to serial. v6.4.39.
+fn async_recv(rt, fd, buf, len): i64 {
+    var ctx = alloc_via(load64(rt + 32), 40);       # rt's allocator (mirror async.cyr)
+    store64(ctx, 0);
+    store64(ctx + 8, fd);
+    store64(ctx + 16, buf);
+    store64(ctx + 24, len);
+    store64(ctx + 32, rt);
+    return async_spawn(rt, &_async_recv_task, ctx);
+}
+# send task (agnos): a plain blocking write inline — no epoll. v6.4.39.
+fn _async_send_task(ctx): i64 {
+    return sys_write(load64(ctx + 8), load64(ctx + 16), load64(ctx + 24));
+}
+# Async single-shot send (agnos): spawn a task that blocking-writes from buf; task_join
+# yields the byte count. Mirror of async.cyr's reactor send, degraded to serial. v6.4.39.
+fn async_send(rt, fd, buf, len): i64 {
+    var ctx = alloc_via(load64(rt + 32), 40);       # rt's allocator (mirror async.cyr)
+    store64(ctx, 0);
+    store64(ctx + 8, fd);
+    store64(ctx + 16, buf);
+    store64(ctx + 24, len);
+    store64(ctx + 32, rt);
+    return async_spawn(rt, &_async_send_task, ctx);
+}
+
+# Async DNS resolve (agnos): no reactor UDP round-trip on the serial client model —
+# unsupported, returns 0 (no handle). Present so consumers stay target-agnostic. v6.4.40.
+fn async_resolve(rt, ns_addr, ns_port, host): i64 {
+    return 0;
+}
+
+# Sleep for `ms` milliseconds. AGNOS has a real sleep primitive (#41,
+# sys_sleep_ms — halts until the 100 Hz tick), so this is a faithful sleep,
+# not a stub. Guard ms<=0 (sys_sleep_ms caps at 1 h on the kernel side).
+fn async_sleep_ms(ms): i64 {
+    if (ms <= 0) { return 0; }
+    sleep_ms(ms);
+    return 0;
+}
+
+# Non-blocking read on Linux; on agnos fds are blocking and there is no fcntl,
+# so this is a plain blocking read (the cooperative loop tolerates blocking on
+# the single-core model).
+fn async_read(fd, buf, len): i64 {
+    return sys_read(fd, buf, len);
+}
+
+# Wait for `fd` to become readable. AGNOS has no epoll for arbitrary fds and
+# its reads block until data, so the subsequent read already blocks — this is a
+# no-op that returns immediately.
+fn async_await_readable(fd): i64 {
+    return 0;
+}
+
+# v6.5.27 — REAL kqueue registration (these were no-op parks; macOS had no reactor at all).
+# Registers (fd, filter) on the runtime's kqueue keyed to the current task and parks it.
+# `events` uses the SAME bits as the epoll backend (1 = readable, 4 = writable) so consumer
+# code is identical across targets; they are translated to EVFILT_READ / EVFILT_WRITE here.
+#
+# ⭐ kqueue needs NO union mask and NO modify-on-conflict. epoll keys its registration by fd
+# alone, so two waiters on one fd collide and the second `EPOLL_CTL_ADD` returns -EEXIST —
+# the bug v6.5.26 fixed. kqueue keys by (ident, filter), so read and write are independent
+# registrations and repeated EV_ADD of the same pair is an idempotent update, not an error.
+fn _async_kev_register(rt, fd, events): i64 {
+    var cur = load64(rt + 40);
+    if (cur == 0) { return 0 - 1; }
+    var kq = load64(rt);
+    store64(cur + 32, fd);
+    store64(cur + 56, events);
+    store64(cur + 16, TASK_WAITING);
+    var ch[64];                          # up to 2 changes x 32 B
+    var n = 0;
+    if ((events & 1) != 0) {
+        store64(&ch + n * KEV_SIZE, fd);
+        store16(&ch + n * KEV_SIZE + 8, 65535);   # EVFILT_READ (-1)
+        store16(&ch + n * KEV_SIZE + 10, 1);      # EV_ADD
+        store32(&ch + n * KEV_SIZE + 12, 0);
+        store64(&ch + n * KEV_SIZE + 16, 0);
+        store64(&ch + n * KEV_SIZE + 24, 0);
+        n = n + 1;
+    }
+    if ((events & 4) != 0) {
+        store64(&ch + n * KEV_SIZE, fd);
+        store16(&ch + n * KEV_SIZE + 8, 65534);   # EVFILT_WRITE (-2)
+        store16(&ch + n * KEV_SIZE + 10, 1);      # EV_ADD
+        store32(&ch + n * KEV_SIZE + 12, 0);
+        store64(&ch + n * KEV_SIZE + 16, 0);
+        store64(&ch + n * KEV_SIZE + 24, 0);
+        n = n + 1;
+    }
+    # changelist-only call: nevents 0, so it registers and returns without blocking.
+    var rc = sys_kevent(kq, &ch, n, 0, 0, 0);
+    if (rc < 0) {
+        store64(cur + 16, TASK_READY);   # un-park rather than sleep on an unwatched fd
+        store64(cur + 32, 0 - 1);
+        store64(cur + 56, 0);
+        return 0 - 1;
+    }
+    return 0;
+}
+
+# Park until `fd` is READABLE. Mirror of the epoll backend's async_wait_fd.
+fn async_wait_fd(rt, fd): i64 {
+    return _async_kev_register(rt, fd, 1);
+}
+
+# Park until `fd` is readable OR writable. On kqueue this is two independent filter
+# registrations on one ident — no union mask, no -EEXIST, unlike epoll.
+fn async_wait_rw(rt, fd): i64 {
+    return _async_kev_register(rt, fd, 5);
+}
+
+# v6.5.26 — one direction of a byte relay (agnos). The blocking read IS the wait on this
+# target, so this is the epoll body minus the park. Returns bytes WRITTEN, 0 on clean EOF.
+fn async_relay_once(rt, rfd, wfd, buf, len): i64 {
+    var n = sys_read(rfd, buf, len);
+    if (n <= 0) { return n; }
+    return sys_write(wfd, buf, n);
+}
+
+# Run `fp(arg)` with a timeout. AGNOS has no fork, so there is no second
+# process to bound; run the body INLINE (serial — mirrors thread_agnos.cyr's
+# inline-body model) and return its result. `ms` is advisory / ignored here.
+fn async_timeout(fp, arg, ms): i64 {
+    return fncall1(fp, arg);
+}

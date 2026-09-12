@@ -1,0 +1,290 @@
+# async_agnos.cyr — AGNOS (ring-3) async runtime: serial / blocking fallback.
+# Usage: included by lib/async.cyr under #ifdef CYRIUS_TARGET_AGNOS.
+# Requires: alloc.cyr (alloc/alloc_via/default_alloc), fnptr.cyr (fncall1),
+#           syscalls.cyr (sys_read/sys_close/sys_sleep_ms).
+#
+# AGNOS's frozen syscall surface has no epoll_create1 / fcntl / clone-fork /
+# wait4 — the epoll/timerfd/fork machinery the Linux async loop is built on
+# does not exist (SYS_EPOLL_CREATE = #19 has no `1` variant; there is no
+# SYS_FCNTL / sys_fork / SYS_WAIT4). And async is a SERVER-path runtime: the
+# only consumers (daimon serve_async, sandhi sandhi_server_run_async) are
+# inbound-TCP servers, which is AGNOS Phase B — not reachable on the agnos
+# CLIENT path (sit). So this peer makes async.cyr COMPILE on agnos and behave
+# correctly-if-degraded, mirroring the v6.2.3 thread.cyr → thread_agnos.cyr
+# serial fallback (the cooperative-iron single-core model). Resolves issue
+# 2026-06-15-cyrius-thread-agnos-clone-dispatch.md §2.
+#
+# The public surface MUST match lib/async.cyr's so consumers stay target-
+# agnostic: async_new / async_new_in / async_spawn / async_run / async_sleep_ms
+# / async_read / async_await_readable / async_timeout. The cancel-token API
+# (cancel_token_*) is SHARED — defined unguarded in async.cyr (atomic-only,
+# portable), so it is NOT redefined here.
+#
+# >>> include "lib/fnptr.cyr"
+include "lib/fnptr.cyr"
+
+# Task states (mirror lib/async.cyr).
+var TASK_READY = 0;
+var TASK_WAITING = 1;
+var TASK_DONE = 2;
+
+# Task struct: { fp, arg, state, next, wait_fd, result } = 48 bytes (mirror async.cyr).
+# wait_fd is unused on agnos (no epoll parking; tasks run to completion inline);
+# result (@40, v6.4.34 F2) carries the task fn's return so task_join hands it back.
+var TASK_SIZE = 48;
+
+# Runtime struct: { epfd, tasks, task_count, active, allocator, current } = 48
+# bytes (mirror async.cyr F1). epfd is unused on agnos (no epoll for arbitrary
+# fds) and stored as -1; current is unused (serial run-to-completion loop).
+var RT_SIZE = 48;
+
+# Create a new async runtime backed by allocator `a`. No epoll instance is
+# created (agnos has no epoll_create1; the cooperative loop below needs none —
+# tasks run to completion inline). epfd slot holds -1.
+fn async_new_in(a): i64 {
+    var rt = alloc_via(a, RT_SIZE);
+    if (rt == 0) { return 0; }
+    store64(rt, 0 - 1);          # epfd: unused on agnos
+    store64(rt + 8, 0);
+    store64(rt + 16, 0);
+    store64(rt + 24, 0);
+    store64(rt + 32, a);
+    store64(rt + 40, 0);         # current: unused on agnos (mirror layout)
+    return rt;
+}
+
+# Back-compat wrapper over the global bump allocator.
+fn async_new(): i64 {
+    return async_new_in(default_alloc());
+}
+
+# Spawn a task on the runtime (identical to the Linux path — pure memory ops).
+fn async_spawn(rt, fp, arg): i64 {
+    var t = alloc_via(load64(rt + 32), TASK_SIZE);
+    if (t == 0) { return 0; }
+    store64(t, fp);
+    store64(t + 8, arg);
+    store64(t + 16, TASK_READY);
+    store64(t + 24, load64(rt + 8));
+    store64(t + 32, 0 - 1);          # wait_fd: unused on agnos (mirror layout)
+    store64(t + 40, 0);              # result: captured on done (F2)
+    store64(rt + 8, t);
+    store64(rt + 16, load64(rt + 16) + 1);
+    store64(rt + 24, load64(rt + 24) + 1);
+    return t;
+}
+
+# One serial step (mirror async.cyr _async_step, v6.4.37). Runs every TASK_READY task
+# to completion, capturing its return into the result slot (@40); returns the count of
+# tasks not yet DONE. AGNOS has no epoll/parking, so there is no wait phase — the
+# `ran == 0` guard returns 0 (a task never parks here).
+fn _async_step(rt): i64 {
+    var active = 0;
+    var ran = 0;
+    var t = load64(rt + 8);
+    while (t != 0) {
+        if (load64(t + 16) == TASK_READY) {
+            var r = fncall1(load64(t), load64(t + 8));
+            ran = 1;
+            store64(t + 40, r);         # capture result (F2)
+            store64(t + 16, TASK_DONE);
+        }
+        if (load64(t + 16) != TASK_DONE) {
+            active = active + 1;
+        }
+        t = load64(t + 24);
+    }
+    if (ran == 0) { return 0; }
+    return active;
+}
+
+# Drive the serial loop until either watched handle is DONE, or — both 0 — until idle.
+fn _async_pump(rt, until_a, until_b): i64 {
+    while (1 == 1) {
+        if (until_a != 0) { if (load64(until_a + 16) == TASK_DONE) { return 0; } }
+        if (until_b != 0) { if (load64(until_b + 16) == TASK_DONE) { return 0; } }
+        if (_async_step(rt) == 0) { return 0; }
+    }
+}
+
+# Run all spawned tasks to completion. No epfd to close (epfd == -1, never opened).
+fn async_run(rt): i64 {
+    _async_pump(rt, 0, 0);
+    return 0;
+}
+
+# Await a spawned task's result (JoinHandle, F2). On the serial model the pump runs
+# the task inline; returns its captured return value. Mirror of async.cyr task_join.
+fn task_join(rt, handle): i64 {
+    if (handle == 0) { return 0; }
+    if (load64(handle + 16) != TASK_DONE) { _async_pump(rt, handle, 0); }
+    return load64(handle + 40);
+}
+
+# Await every handle in handles[0..n), collecting results (mirror async.cyr, serial).
+# v6.4.37 (P3).
+fn async_join_all(rt, handles, n, results): i64 {
+    var i = 0;
+    while (i < n) {
+        store64(results + i * 8, task_join(rt, load64(handles + i * 8)));
+        i = i + 1;
+    }
+    return n;
+}
+
+# Await the first handle to complete; returns its index, or -1 if idle with none done.
+# v6.4.37 (P3, serial).
+fn async_select(rt, handles, n): i64 {
+    while (1 == 1) {
+        var i = 0;
+        while (i < n) {
+            var hnd = load64(handles + i * 8);          # mirror async.cyr: null-guard
+            if (hnd != 0) { if (load64(hnd + 16) == TASK_DONE) { return i; } }
+            i = i + 1;
+        }
+        if (_async_step(rt) == 0) {
+            # mirror async.cyr: the idling step may itself have completed a handle
+            i = 0;
+            while (i < n) {
+                var hd = load64(handles + i * 8);
+                if (hd != 0) { if (load64(hd + 16) == TASK_DONE) { return i; } }
+                i = i + 1;
+            }
+            return 0 - 1;
+        }
+    }
+}
+
+# async_with_timeout (agnos): no reactor/timerfd — the handle runs to completion
+# inline on the serial model, so the deadline is moot. Join it and report completed.
+# Mirror of async.cyr's P1 surface. v6.4.35.
+fn async_with_timeout(rt, handle, ms): i64 {
+    if (handle == 0) { return 0; }      # mirror async.cyr: null handle → 0, not 1, so a
+    task_join(rt, handle);              # target-agnostic consumer doesn't deref a 0 handle
+    return 1;
+}
+
+# async_interval (agnos): a repeating reactor timer is a server-path primitive with no
+# equivalent on the serial single-core client model (no timerfd/epoll). Returns 0
+# (unscheduled); present so consumers stay target-agnostic. v6.4.35.
+fn async_interval(rt, fp, arg, ms, tok): i64 {
+    return 0;
+}
+
+# async subprocess (agnos): AGNOS has no clone-fork, so a reactor-driven subprocess
+# is unsupported on the serial client target. Returns 0 / -1 (unscheduled); present so
+# consumers stay target-agnostic. Mirror of async.cyr's P2 surface. v6.4.36.
+fn async_spawn_process(rt, path, argv, envp): i64 {
+    return 0;
+}
+# spawn + wait + timeout (agnos): no clone-fork, so unsupported. Returns -1. v6.4.36.
+fn async_run_process(rt, path, argv, envp, ms): i64 {
+    return 0 - 1;
+}
+
+# Cooperative write-readiness wait (agnos): no epoll — no-op, like async_wait_fd. v6.4.38.
+fn async_wait_writable(rt, fd): i64 {
+    return 0;
+}
+
+# Async TCP connect (agnos): no reactor / BSD non-blocking connect on the serial client
+# model — unsupported, returns 0 (no handle). Present so consumers stay target-agnostic.
+# v6.4.38.
+fn async_connect(rt, addr, port): i64 {
+    return 0;
+}
+
+# Async accept (agnos): no reactor / no server-accept on the serial client model —
+# unsupported, returns 0 (no handle). Present so consumers stay target-agnostic. v6.4.44 R3.
+fn async_accept(rt, listen_fd): i64 {
+    return 0;
+}
+
+# recv task (agnos): a plain blocking read inline — no epoll. v6.4.39.
+fn _async_recv_task(ctx): i64 {
+    return sys_read(load64(ctx + 8), load64(ctx + 16), load64(ctx + 24));
+}
+# Async single-shot recv (agnos): spawn a task that blocking-reads into buf; task_join
+# yields the byte count. Mirror of async.cyr's reactor recv, degraded to serial. v6.4.39.
+fn async_recv(rt, fd, buf, len): i64 {
+    var ctx = alloc_via(load64(rt + 32), 40);       # rt's allocator (mirror async.cyr)
+    store64(ctx, 0);
+    store64(ctx + 8, fd);
+    store64(ctx + 16, buf);
+    store64(ctx + 24, len);
+    store64(ctx + 32, rt);
+    return async_spawn(rt, &_async_recv_task, ctx);
+}
+# send task (agnos): a plain blocking write inline — no epoll. v6.4.39.
+fn _async_send_task(ctx): i64 {
+    return sys_write(load64(ctx + 8), load64(ctx + 16), load64(ctx + 24));
+}
+# Async single-shot send (agnos): spawn a task that blocking-writes from buf; task_join
+# yields the byte count. Mirror of async.cyr's reactor send, degraded to serial. v6.4.39.
+fn async_send(rt, fd, buf, len): i64 {
+    var ctx = alloc_via(load64(rt + 32), 40);       # rt's allocator (mirror async.cyr)
+    store64(ctx, 0);
+    store64(ctx + 8, fd);
+    store64(ctx + 16, buf);
+    store64(ctx + 24, len);
+    store64(ctx + 32, rt);
+    return async_spawn(rt, &_async_send_task, ctx);
+}
+
+# Async DNS resolve (agnos): no reactor UDP round-trip on the serial client model —
+# unsupported, returns 0 (no handle). Present so consumers stay target-agnostic. v6.4.40.
+fn async_resolve(rt, ns_addr, ns_port, host): i64 {
+    return 0;
+}
+
+# Sleep for `ms` milliseconds. AGNOS has a real sleep primitive (#41,
+# sys_sleep_ms — halts until the 100 Hz tick), so this is a faithful sleep,
+# not a stub. Guard ms<=0 (sys_sleep_ms caps at 1 h on the kernel side).
+fn async_sleep_ms(ms): i64 {
+    if (ms <= 0) { return 0; }
+    sys_sleep_ms(ms);
+    return 0;
+}
+
+# Non-blocking read on Linux; on agnos fds are blocking and there is no fcntl,
+# so this is a plain blocking read (the cooperative loop tolerates blocking on
+# the single-core model).
+fn async_read(fd, buf, len): i64 {
+    return sys_read(fd, buf, len);
+}
+
+# Wait for `fd` to become readable. AGNOS has no epoll for arbitrary fds and
+# its reads block until data, so the subsequent read already blocks — this is a
+# no-op that returns immediately.
+fn async_await_readable(fd): i64 {
+    return 0;
+}
+
+# Cooperative fd-wait (mirror async.cyr F1). AGNOS has no epoll and its reads
+# block until data, so parking is a no-op — the task's subsequent blocking read
+# already waits. Present so consumers stay target-agnostic.
+fn async_wait_fd(rt, fd): i64 {
+    return 0;
+}
+
+# v6.5.26 — read-OR-write wait (agnos): no epoll, and reads block, so parking is a no-op
+# exactly like async_wait_fd / async_wait_writable above. Present so a consumer written
+# against the epoll backend still links and runs on agnos.
+fn async_wait_rw(rt, fd): i64 {
+    return 0;
+}
+
+# v6.5.26 — one direction of a byte relay (agnos). The blocking read IS the wait on this
+# target, so this is the epoll body minus the park. Returns bytes WRITTEN, 0 on clean EOF.
+fn async_relay_once(rt, rfd, wfd, buf, len): i64 {
+    var n = sys_read(rfd, buf, len);
+    if (n <= 0) { return n; }
+    return sys_write(wfd, buf, n);
+}
+
+# Run `fp(arg)` with a timeout. AGNOS has no fork, so there is no second
+# process to bound; run the body INLINE (serial — mirrors thread_agnos.cyr's
+# inline-body model) and return its result. `ms` is advisory / ignored here.
+fn async_timeout(fp, arg, ms): i64 {
+    return fncall1(fp, arg);
+}

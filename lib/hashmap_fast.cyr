@@ -20,18 +20,23 @@
 # then next group.
 
 include "lib/fnptr.cyr"
+include "lib/hashseed.cyr"   # v6.5.39: shared seed — do NOT re-copy the hash here
 
 # FNV-1a hash for null-terminated string (same as hashmap.cyr)
+# v6.5.39: seeded + finalized, like its twin. ⚠ This was a VERBATIM second copy of the
+# unseeded hash and the flooding filing did not mention it at all — measured, it floods too
+# (N=4096: 22.4 ms colliding vs 1.16 ms distinct). Both copies now draw from lib/hashseed.cyr
+# rather than each carrying their own constant, so they cannot drift apart again.
 fn _fhm_hash(s): i64 {
     if (s == 0) { return 0; }
-    var h = 0xCBF29CE484222325;
+    var h = 0xCBF29CE484222325 ^ _hm_seed_get();
     var hi = 0;
     while (load8(s + hi) != 0) {
         h = h ^ load8(s + hi);
         h = h * 0x100000001B3;
         hi = hi + 1;
     }
-    return h;
+    return _hm_mix(h);
 }
 
 var _FHM_EMPTY = 0;
