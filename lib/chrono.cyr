@@ -1,20 +1,36 @@
 # chrono.cyr — time and duration utilities
 # Usage: include "lib/chrono.cyr"
 # Requires: syscalls.cyr (for clock_gettime)
+# v6.5.39: atomic.cyr, for the aarch64 release fence on the lazy-init publish below.
+# ⚠ MEASURED ZERO COST: alloc.cyr already pulls atomic.cyr and includes are once-only, so
+# adding this changed NOTHING — A/B on tests/tcyr/stdlib/chrono.tcyr is byte-identical on
+# x86-linux, PE and the bare-metal kernel fixture. The proposal listed the include cost as
+# part of the decision; it is not.
+include "lib/atomic.cyr"
 
 var CLOCK_REALTIME = 0;
 var CLOCK_MONOTONIC = 1;
 
 # Get current time in nanoseconds (monotonic clock).
-# v6.2.6: agnos binds the monotonic clock to uptime_ms (#40, since kernel
-# 1.43.x) — ms since boot, scaled to ns. The low 6 digits are zero at the
-# 100 Hz / 10 ms tick resolution (same sub-tick-zero shape as the wall-clock
-# clock_epoch_ns note). (Was a fixed-zero stub through v6.2.5, predicated on
-# the obsolete "no monotonic syscall in the frozen 0-33 surface" assumption —
-# 228=clock_gettime is out of range, but #40 always was the agnos path.)
+#
+# ⛔ v6.6.1 — AGNOS NOW READS #95 (uptime_us, rdtsc), NOT #40 (uptime_ms, timer_ticks).
+# A foreground `run` program on AGNOS executes with IF CLEARED — only /bin/agnsh gets IF=1 —
+# so the 100 Hz timer ISR never fires, `timer_ticks` never advances, and #40 is FROZEN for
+# that program's entire run. Anything timing itself with it measured exactly zero, forever,
+# with no error. #95 is read via rdtsc and needs no interrupts, so it is the only correct
+# monotonic source on that path.
+#
+# ⚠ The trap was already documented TWO FILES AWAY, above the wrapper this function did not
+# call (`lib/syscalls_x86_64_agnos.cyr`, sys_uptime_us): "*#95 is the only correct clock
+# there*". AGNOS's own ABI note records that it cost two iron burns on the 3D arc's rung-10
+# gate before it was understood. The general-purpose clock still walked into it for four
+# minors. Filed 2026-09-07 from sakshi's 2.5.0 P(-1) audit.
+#
+# v6.2.6 bound it to #40 and that was correct WHEN WRITTEN — #95 did not exist yet.
+# Resolution improves as a side effect: µs rather than the 10 ms tick.
 fn clock_now_ns(): i64 {
     #ifdef CYRIUS_TARGET_AGNOS
-    return sys_uptime_ms() * 1000000;
+    return sys_uptime_us() * 1000;
     #endif
     #ifndef CYRIUS_TARGET_AGNOS
     var ts[16];
@@ -183,19 +199,65 @@ fn sleep_ms(ms): i64 {
 var _chrono_mdays = 0;
 fn _chrono_init_mdays(): i64 {
     if (_chrono_mdays != 0) { return 0; }
-    _chrono_mdays = alloc(96);
-    store64(_chrono_mdays, 31);       # Jan
-    store64(_chrono_mdays + 8, 28);   # Feb
-    store64(_chrono_mdays + 16, 31);  # Mar
-    store64(_chrono_mdays + 24, 30);  # Apr
-    store64(_chrono_mdays + 32, 31);  # May
-    store64(_chrono_mdays + 40, 30);  # Jun
-    store64(_chrono_mdays + 48, 31);  # Jul
-    store64(_chrono_mdays + 56, 31);  # Aug
-    store64(_chrono_mdays + 64, 30);  # Sep
-    store64(_chrono_mdays + 72, 31);  # Oct
-    store64(_chrono_mdays + 80, 30);  # Nov
-    store64(_chrono_mdays + 88, 31);  # Dec
+    # ⛔ v6.5.37 — FILL A LOCAL, PUBLISH LAST. The global used to be assigned the
+    # alloc() result on the FIRST statement, so between that assignment and the twelfth
+    # store64 the table was reachable by another thread and READ AS ZEROS. A concurrent
+    # `epoch_to_date` then divided by a zero month length and returned **month 13** —
+    # silent, wrong, and only under threads. Found by a samay v1.0.4 concurrency audit
+    # (docs/development/proposals/2026-08-30-lazy-init-publish-before-fill.md).
+    #
+    # ⚠ This is a CLASS, not an incident: the same audit found the identical shape in
+    # patra's own `src/pcache.cyr` (fixed upstream at patra 1.13.11, folded here at
+    # v6.5.37). ⚠ The proposal originally also named `lib/patra.cyr:453` — that was
+    # misfiled: patra.cyr is a GENERATED bundle and a fix there evaporates on the next
+    # `cyrius distlib`. Fix the source repo, never the fold.
+    #
+    # A tree-wide sweep for `if (_g != 0) { return }` followed by `_g = alloc(...)` with
+    # stores after the publish found this as the ONLY remaining site in lib/, cbt/ and
+    # src/ at 6.5.37.
+    #
+    # Single-threaded callers see no behaviour change: the table is fully built before
+    # anything can observe a non-zero pointer, which is what the guard already promised.
+    var t = alloc(96);
+    store64(t, 31);       # Jan
+    store64(t + 8, 28);   # Feb
+    store64(t + 16, 31);  # Mar
+    store64(t + 24, 30);  # Apr
+    store64(t + 32, 31);  # May
+    store64(t + 40, 30);  # Jun
+    store64(t + 48, 31);  # Jul
+    store64(t + 56, 31);  # Aug
+    store64(t + 64, 30);  # Sep
+    store64(t + 72, 31);  # Oct
+    store64(t + 80, 30);  # Nov
+    store64(t + 88, 31);  # Dec
+    # v6.5.39 — RELEASE FENCE before the publishing store. Filling a local and publishing
+    # last (v6.5.37) fixes the PROGRAM-ORDER race and is mutation-proven on x86: 0 of 400
+    # threaded runs go wrong on the live tree, against 29 of 400 with the pre-.37
+    # publish-first shape restored. It does NOT fix the MEMORY-ORDER race. cyrius emits no
+    # ordering whatsoever for ordinary global access on aarch64 — disassembling a threaded
+    # aarch64 binary built from this file shows the guard read as a plain `ldr`, this
+    # publish as a plain `str`, and the whole binary containing zero `stlr`, zero `ldar`
+    # and exactly one `dmb` (inside atomic_fence's own body). So on a weak model another
+    # thread can observe `_chrono_mdays` non-null before the twelve `store64`s that filled
+    # it — the same month-13 bug, one level down.
+    #
+    # ⚠ AARCH64 ONLY, and the precedent matters. The proposal said to copy
+    # `lib/alloc.cyr:89-98`, which fences on BOTH arches. That is the OLD shape: x86-TSO
+    # already orders store-store, so the fence there is pure tax — measured ~22 ns, 83 % of
+    # the lock cost — and the project deliberately removed it in `lib/freelist.cyr:128-134`
+    # (CHANGELOG [6.5.x]: "a correction, not an omission... the aarch64 release fence is
+    # REQUIRED and is kept"). This copies freelist, not alloc.
+    #
+    # ⚠ The reader is safe with a writer-side fence ONLY because it has an address
+    # dependency on the published pointer (it loads `_chrono_mdays`, then loads through
+    # it), which aarch64 honours. A flag publish with no such dependency needs an acquire
+    # on the reader too — which is why `lib/regex.cyr` is deliberately NOT fenced here.
+    #ifdef CYRIUS_ARCH_AARCH64
+    atomic_fence();
+    #endif
+    _chrono_mdays = t;    # publish only once the table is complete
+
     return 0;
 }
 
@@ -321,4 +383,311 @@ fn iso8601_parse(s): i64 {
     }
     days = days + dy - 1;
     return days * 86400 + hr * 3600 + mn * 60 + sc;
+}
+
+# ================================================================
+# DateTime / Duration / strftime format() — the 2026-07-18 proposal
+# (docs/development/proposals/2026-07-18-chrono-datetime-duration-format.md).
+# All additive, UTC only, all i64 math. A DateTime is a bare epoch-NANOSECOND
+# i64 handle (consistent with clock_epoch_ns; i64 ns overflows ~year 2262).
+# ================================================================
+
+# --- DateTime: a wall-clock instant (epoch nanoseconds) ---
+# Current wall-clock instant (Utc::now()).
+fn dt_now(): i64 { return clock_epoch_ns(); }
+# Build a DateTime from epoch seconds.
+fn dt_from_epoch_secs(s): i64 { return s * 1000000000; }
+# Build a DateTime from epoch nanoseconds.
+fn dt_from_epoch_ns(ns): i64 { return ns; }
+# Epoch seconds of a DateTime.
+fn dt_epoch_secs(dt): i64 { return dt / 1000000000; }
+# Epoch nanoseconds of a DateTime.
+fn dt_epoch_ns(dt): i64 { return dt; }
+
+# Year (UTC). Field accessors decode via epoch_to_date, keeping its layout private.
+fn dt_year(dt): i64   { return load64(epoch_to_date(dt / 1000000000)); }
+# Month 1-12 (UTC).
+fn dt_month(dt): i64  { return load64(epoch_to_date(dt / 1000000000) + 8); }
+# Day of month 1-31 (UTC).
+fn dt_day(dt): i64    { return load64(epoch_to_date(dt / 1000000000) + 16); }
+# Hour 0-23 (UTC).
+fn dt_hour(dt): i64   { return load64(epoch_to_date(dt / 1000000000) + 24); }
+# Minute 0-59 (UTC).
+fn dt_minute(dt): i64 { return load64(epoch_to_date(dt / 1000000000) + 32); }
+# Second 0-59 (UTC).
+fn dt_second(dt): i64 { return load64(epoch_to_date(dt / 1000000000) + 40); }
+
+# --- Duration: Rust-chrono-style unit constructors (reuse the {secs,nsecs} dur_new) ---
+# Duration of n seconds (Duration::seconds).
+fn dur_seconds(n): i64 { return dur_new(n, 0); }
+# Duration of n minutes (Duration::minutes).
+fn dur_minutes(n): i64 { return dur_new(n * 60, 0); }
+# Duration of n hours (Duration::hours).
+fn dur_hours(n): i64   { return dur_new(n * 3600, 0); }
+# Duration of n days (Duration::days).
+fn dur_days(n): i64    { return dur_new(n * 86400, 0); }
+# Duration of n weeks.
+fn dur_weeks(n): i64   { return dur_new(n * 604800, 0); }
+# Duration of n milliseconds.
+fn dur_millis(n): i64  { return dur_new(n / 1000, (n % 1000) * 1000000); }
+# Duration of n nanoseconds.
+fn dur_nanos(n): i64   { return dur_new(n / 1000000000, n % 1000000000); }
+
+# Whole seconds in a Duration (Rust num_seconds()).
+fn dur_num_seconds(d): i64 { return dur_secs(d); }
+# Whole minutes in a Duration.
+fn dur_num_minutes(d): i64 { return dur_secs(d) / 60; }
+# Whole hours in a Duration.
+fn dur_num_hours(d): i64   { return dur_secs(d) / 3600; }
+# Whole days in a Duration.
+fn dur_num_days(d): i64    { return dur_secs(d) / 86400; }
+# Total milliseconds in a Duration.
+fn dur_num_millis(d): i64  { return dur_to_ms(d); }
+# Total nanoseconds in a Duration.
+fn dur_num_nanos(d): i64   { return dur_to_ns(d); }
+
+# Sum of two Durations.
+fn dur_add(a, b): i64 { return dur_nanos(dur_to_ns(a) + dur_to_ns(b)); }
+# Difference of two Durations (a - b).
+fn dur_sub(a, b): i64 { return dur_nanos(dur_to_ns(a) - dur_to_ns(b)); }
+
+# --- DateTime +/- Duration ---
+# DateTime shifted forward by a Duration.
+fn dt_add(dt, dur): i64 { return dt + dur_to_ns(dur); }
+# DateTime shifted backward by a Duration.
+fn dt_sub(dt, dur): i64 { return dt - dur_to_ns(dur); }
+# Duration between two DateTimes (a - b).
+fn dt_diff(a, b): i64   { return dur_nanos(a - b); }
+
+# --- strftime-style format() ---
+
+# Day-of-year (1-366) for a civil date.
+fn _chrono_day_of_year(year, month, day): i64 {
+    _chrono_init_mdays();
+    var doy = day;
+    var m = 1;
+    while (m < month) {
+        doy = doy + load64(_chrono_mdays + (m - 1) * 8);
+        if (m == 2) { if (is_leap_year(year) == 1) { doy = doy + 1; } }
+        m = m + 1;
+    }
+    return doy;
+}
+
+# Emit one strftime specifier `s` at out+op; returns chars written. Numeric subset
+# (%% %Y %y %m %d %e %H %M %S %j); names (%A %a %B %b %p) are a documented Tier-2
+# extension. An unknown specifier is emitted verbatim as "%<c>".
+fn _chrono_emit_spec(out, op, s, year, month, day, hour, minute, second): i64 {
+    if (s == 89)   { _chrono_w4(out, op, year); return 4; }            # %Y
+    elif (s == 121) { _chrono_w2(out, op, year % 100); return 2; }     # %y
+    elif (s == 109) { _chrono_w2(out, op, month); return 2; }          # %m
+    elif (s == 100) { _chrono_w2(out, op, day); return 2; }            # %d
+    elif (s == 101) {                                                  # %e (space-padded day)
+        var tens = 32;                                                 # ' '
+        if (day >= 10) { tens = 48 + day / 10; }
+        store8(out + op, tens);
+        store8(out + op + 1, 48 + day % 10);
+        return 2;
+    }
+    elif (s == 72)  { _chrono_w2(out, op, hour); return 2; }           # %H
+    elif (s == 77)  { _chrono_w2(out, op, minute); return 2; }         # %M
+    elif (s == 83)  { _chrono_w2(out, op, second); return 2; }         # %S
+    elif (s == 106) {                                                  # %j (day-of-year 001-366)
+        var doy = _chrono_day_of_year(year, month, day);
+        store8(out + op, 48 + doy / 100);
+        store8(out + op + 1, 48 + (doy / 10) % 10);
+        store8(out + op + 2, 48 + doy % 10);
+        return 3;
+    }
+    elif (s == 37)  { store8(out + op, 37); return 1; }               # %%
+    store8(out + op, 37);                                              # unknown -> "%<c>"
+    store8(out + op + 1, s);
+    return 2;
+}
+
+# Format a DateTime with a strftime string -> alloc'd null-terminated Str.
+# Generalizes iso8601(); iso8601() is kept as the fast fixed-form path.
+fn dt_format(dt, fmt): i64 {
+    var d = epoch_to_date(dt / 1000000000);
+    var year = load64(d);
+    var month = load64(d + 8);
+    var day = load64(d + 16);
+    var hour = load64(d + 24);
+    var minute = load64(d + 32);
+    var second = load64(d + 40);
+    var flen = strlen(fmt);
+    var out = alloc(flen * 4 + 16);              # each spec expands to <= 4 chars
+    var op = 0;
+    var i = 0;
+    while (i < flen) {
+        var c = load8(fmt + i);
+        if (c == 37) {                            # '%'
+            if (i + 1 < flen) {
+                op = op + _chrono_emit_spec(out, op, load8(fmt + i + 1), year, month, day, hour, minute, second);
+                i = i + 2;
+            } else {
+                store8(out + op, 37);             # trailing '%'
+                op = op + 1;
+                i = i + 1;
+            }
+        } else {
+            store8(out + op, c);
+            op = op + 1;
+            i = i + 1;
+        }
+    }
+    store8(out + op, 0);
+    return out;
+}
+
+# Read `n` decimal digits from s+pos as an integer, or -1 if any char is not a digit.
+fn _chrono_rd(s, pos, n): i64 {
+    var v = 0;
+    var k = 0;
+    while (k < n) {
+        var ch = load8(s + pos + k);
+        if (ch < 48) { return 0 - 1; }
+        if (ch > 57) { return 0 - 1; }
+        v = v * 10 + (ch - 48);
+        k = k + 1;
+    }
+    return v;
+}
+
+# Civil {y,mo,dy,hr,mn,sc} -> epoch SECONDS (UTC). Mirrors iso8601_parse's
+# conversion, kept separate so iso8601_parse stays byte-identical.
+fn _chrono_ymd_to_epoch_secs(yr, mo, dy, hr, mn, sc): i64 {
+    _chrono_init_mdays();
+    var days = 0;
+    var y = 1970;
+    while (y < yr) {
+        days = days + 365;
+        if (is_leap_year(y) == 1) { days = days + 1; }
+        y = y + 1;
+    }
+    var m = 1;
+    while (m < mo) {
+        days = days + load64(_chrono_mdays + (m - 1) * 8);
+        if (m == 2) { if (is_leap_year(yr) == 1) { days = days + 1; } }
+        m = m + 1;
+    }
+    days = days + dy - 1;
+    return days * 86400 + hr * 3600 + mn * 60 + sc;
+}
+
+# Parse a string per a strftime format -> epoch NANOSECONDS, or -1 on mismatch.
+# Numeric specifiers read a fixed-width field (%Y=4; %y/%m/%d/%e/%H/%M/%S=2; %j=3);
+# non-`%` format chars must match the input literally. Mirrors iso8601_parse's contract.
+fn dt_strptime(s, fmt): i64 {
+    var slen = strlen(s);
+    var flen = strlen(fmt);
+    var year = 1970;
+    var month = 1;
+    var day = 1;
+    var hour = 0;
+    var minute = 0;
+    var second = 0;
+    var doy = 0;
+    var fi = 0;
+    var si = 0;
+    while (fi < flen) {
+        var c = load8(fmt + fi);
+        if (c == 37) {                            # '%'
+            if (fi + 1 >= flen) { return 0 - 1; }
+            var spec = load8(fmt + fi + 1);
+            fi = fi + 2;
+            if (spec == 37) {                     # %% -> literal '%'
+                if (si >= slen) { return 0 - 1; }
+                if (load8(s + si) != 37) { return 0 - 1; }
+                si = si + 1;
+            } elif (spec == 89) {                 # %Y
+                if (si + 4 > slen) { return 0 - 1; }
+                year = _chrono_rd(s, si, 4);
+                if (year < 0) { return 0 - 1; }
+                si = si + 4;
+            } elif (spec == 121) {                # %y (2-digit -> 2000+)
+                if (si + 2 > slen) { return 0 - 1; }
+                var gy = _chrono_rd(s, si, 2);
+                if (gy < 0) { return 0 - 1; }
+                year = 2000 + gy;
+                si = si + 2;
+            } elif (spec == 109) {                # %m
+                if (si + 2 > slen) { return 0 - 1; }
+                month = _chrono_rd(s, si, 2);
+                if (month < 0) { return 0 - 1; }
+                si = si + 2;
+            } elif (spec == 100) {                # %d
+                if (si + 2 > slen) { return 0 - 1; }
+                day = _chrono_rd(s, si, 2);
+                if (day < 0) { return 0 - 1; }
+                si = si + 2;
+            } elif (spec == 101) {                # %e (space- or zero-padded day)
+                if (si + 2 > slen) { return 0 - 1; }
+                var c1 = load8(s + si + 1);
+                if (c1 < 48) { return 0 - 1; }
+                if (c1 > 57) { return 0 - 1; }
+                var tens = 0;
+                if (load8(s + si) != 32) {
+                    if (load8(s + si) < 48) { return 0 - 1; }
+                    if (load8(s + si) > 57) { return 0 - 1; }
+                    tens = (load8(s + si) - 48) * 10;
+                }
+                day = tens + (c1 - 48);
+                si = si + 2;
+            } elif (spec == 72) {                 # %H
+                if (si + 2 > slen) { return 0 - 1; }
+                hour = _chrono_rd(s, si, 2);
+                if (hour < 0) { return 0 - 1; }
+                si = si + 2;
+            } elif (spec == 77) {                 # %M
+                if (si + 2 > slen) { return 0 - 1; }
+                minute = _chrono_rd(s, si, 2);
+                if (minute < 0) { return 0 - 1; }
+                si = si + 2;
+            } elif (spec == 83) {                 # %S
+                if (si + 2 > slen) { return 0 - 1; }
+                second = _chrono_rd(s, si, 2);
+                if (second < 0) { return 0 - 1; }
+                si = si + 2;
+            } elif (spec == 106) {                # %j (day-of-year; resolved below)
+                if (si + 3 > slen) { return 0 - 1; }
+                doy = _chrono_rd(s, si, 3);
+                if (doy < 0) { return 0 - 1; }
+                si = si + 3;
+            } else {                              # unknown spec: require literal "%<c>"
+                if (si + 2 > slen) { return 0 - 1; }
+                if (load8(s + si) != 37) { return 0 - 1; }
+                if (load8(s + si + 1) != spec) { return 0 - 1; }
+                si = si + 2;
+            }
+        } else {
+            if (si >= slen) { return 0 - 1; }
+            if (load8(s + si) != c) { return 0 - 1; }
+            si = si + 1;
+            fi = fi + 1;
+        }
+    }
+    # Resolve %j (day-of-year) to month/day if it was the source of the date.
+    if (doy > 0) {
+        _chrono_init_mdays();
+        var rem = doy;
+        var mm = 0;
+        while (mm < 12) {
+            var md = load64(_chrono_mdays + mm * 8);
+            if (mm == 1) { if (is_leap_year(year) == 1) { md = 29; } }
+            if (rem <= md) { break; }
+            rem = rem - md;
+            mm = mm + 1;
+        }
+        month = mm + 1;
+        day = rem;
+    }
+    # Range validation (same guards as iso8601_parse).
+    if (month < 1) { return 0 - 1; }
+    if (month > 12) { return 0 - 1; }
+    if (day < 1) { return 0 - 1; }
+    if (hour > 23) { return 0 - 1; }
+    if (minute > 59) { return 0 - 1; }
+    if (second > 59) { return 0 - 1; }
+    return _chrono_ymd_to_epoch_secs(year, month, day, hour, minute, second) * 1000000000;
 }

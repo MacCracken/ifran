@@ -1,3 +1,11 @@
+#host_only
+# ^ v6.5.24 bare-metal forbidden-module check (bare-metal deliverable #4). This
+#   module is host-OS-only, so a `--target=<arch>-bare-metal-elf` build (which sets
+#   CYRIUS_KERNEL=1) that includes it now FAILS with a clear error instead of
+#   compiling silently and faulting at runtime inside the kernel. `#` opens a comment
+#   in cyrius, so this line is inert for every host target. See PP_IS_HOST_ONLY in
+#   src/frontend/lex_pp.cyr; remove the marker if this module is ever made
+#   freestanding.
 # process.cyr — process management
 # Usage: include "lib/process.cyr"
 # Requires: lib/syscalls.cyr, lib/string.cyr, lib/alloc.cyr, lib/tagged.cyr

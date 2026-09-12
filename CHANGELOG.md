@@ -7,6 +7,15 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-09-11
+
+### Changed
+
+- **Toolchain `6.4.3` → `6.6.2`.** Migrated to the `Result` value form:
+  1 first-party file(s) changed. Every surface re-verified — build, tests, and any
+  bench/fuzz/distlib target the repo ships.
+
+
 ### Removed
 - **`rust-old/` (53.6k lines)** — the held Rust line, removed post-2.2.0 per
   the pre-removal audit (`docs/audit/2026-07-05-rust-old-preremoval.md`:

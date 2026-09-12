@@ -467,7 +467,7 @@ fn test_prefs(): i64 {
     var i = 0;
     while (i < n) {
         if (load8(buf + i) == 10) {
-            var root = bayan_json_v_parse_str(buf + start, i - start);
+            var root = bayan_json_v_parse_buf(buf + start, i - start);
             if (root != 0) {
                 if (bayan_json_v_is_obj(root) == 1) {
                     parsed = parsed + 1;

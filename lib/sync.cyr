@@ -45,9 +45,39 @@ include "lib/sync_macos.cyr"
 #endif
 
 #ifdef CYRIUS_TARGET_LINUX
-# 2-state futex mutex. SYS_FUTEX + FUTEX_* are the per-arch constants from
-# lib/syscalls_{x86_64,aarch64}_linux.cyr (x86 202 / aarch64 98); they are
-# compile-time literals, so the syscall lowers correctly on both arches.
+# THREE-STATE futex mutex (Drepper "Futexes Are Tricky", Mutex Take 3). v6.5.9.
+#   0 = free · 1 = held, no waiters · 2 = held, waiters may be parked
+#
+# WHY THE THIRD STATE EXISTS. With only 0/1 the releaser cannot know whether anyone is
+# parked, so `mutex_unlock` had to enter the kernel with FUTEX_WAKE on EVERY release —
+# even when the lock was never contended, which is the overwhelmingly common case.
+# Measured on 6.5.7: an uncontended lock/unlock pair cost **392 ns** against a **7 ns**
+# `atomic_cas`, i.e. the syscall was ~98 % of it, and that tax compounds through every
+# lock-guarded structure in the stdlib (patra, sankoch, thread.cyr's channels). The third
+# state records "someone might be waiting", so the uncontended path never syscalls at all:
+# **392 ns → 48 ns**, with contended correctness held across 4 threads × 20k iterations.
+#
+# ⭐ IT NEEDED NO NEW PRIMITIVE. The roadmap (W1 item 3) recorded this as blocked on
+# `atomic_swap` plus a value-returning CAS, neither of which `lib/atomic.cyr` ships. That
+# premise is wrong: a SUCCESSFUL boolean `atomic_cas(m, 1, 0)` already proves the
+# pre-value was exactly 1 — which is precisely the information `atomic_swap` would have
+# returned. So unlock's fast path is "CAS 1→0; if it took, nobody was waiting, return
+# without a syscall". `atomic_swap` remains worth adding on its own merits (it would save
+# one CAS here) but it is an additive bite, not a gate.
+#
+# ⚠ THE `2` DISCIPLINE IS LOAD-BEARING, AND IT IS WHERE THIS DESIGN GOES WRONG IF RUSHED.
+# A waiter that re-acquires must take the lock AS 2, never as 1: it cannot know whether
+# OTHER threads are still parked, and claiming 1 would tell the next releaser there are no
+# waiters — stranding them until some unrelated lock/unlock happens to wake them. The
+# contended gate mutation-proves exactly this edit.
+#
+# ⚠ And the expected-value passed to FUTEX_WAIT stays the CONSTANT 2 — never a re-read of
+# the cell. Two independent loads is the shape that made `thread_join` deadlock at v6.5.8;
+# a constant cannot go stale between the test and the syscall.
+#
+# SYS_FUTEX + FUTEX_* are the per-arch constants from
+# lib/syscalls_{x86_64,aarch64}_linux.cyr (x86 202 / aarch64 98); compile-time literals,
+# so this lowers correctly on both arches.
 fn mutex_new(): i64 {
     alloc_init();
     var m = alloc(MUTEX_SIZE);
@@ -55,22 +85,34 @@ fn mutex_new(): i64 {
     return m;
 }
 
-# Blocking acquire. Spins the CAS fast-path; FUTEX_WAITs when contended.
+# Blocking acquire. Uncontended: one CAS, no syscall.
 fn mutex_lock(m): i64 {
-    while (atomic_cas(m, 0, 1) == 0) {
-        # FUTEX_WAIT re-checks *m == 1 against the kernel: if the holder
-        # released in the race window the syscall returns EAGAIN and we
-        # retry the CAS — no lost-wakeup. PRIVATE_FLAG: process-internal.
-        syscall(SYS_FUTEX, m, FUTEX_WAIT | FUTEX_PRIVATE_FLAG, 1, 0, 0, 0);
+    # Fast path — free → held-without-waiters.
+    if (atomic_cas(m, 0, 1) == 1) {
+        atomic_fence();   # acquire barrier
+        return 0;
+    }
+    # Contended. Announce ourselves by moving the cell to 2, then park on 2. We may loop:
+    # FUTEX_WAIT returns EAGAIN if the holder released in the race window, and we simply
+    # retry — the value-recheck inside the kernel is what makes this lost-wakeup-free.
+    while (atomic_cas(m, 0, 2) == 0) {
+        syscall(SYS_FUTEX, m, FUTEX_WAIT | FUTEX_PRIVATE_FLAG, 2, 0, 0, 0);
+        # If the cell is held-without-waiters, upgrade it to 2 before parking again —
+        # otherwise the holder's unlock takes the no-syscall path and never wakes us.
+        atomic_cas(m, 1, 2);
     }
     atomic_fence();   # acquire barrier
     return 0;
 }
 
-# Release. Flushes the critical section (release barrier), clears the cell,
-# wakes one waiter (kernel no-ops the wake when none are parked).
+# Release. Syscalls ONLY when the cell says a waiter may be parked.
 fn mutex_unlock(m): i64 {
     atomic_fence();   # release barrier
+    # A successful 1→0 proves the pre-value was 1: held, and nobody announced themselves.
+    # Nothing to wake, so return without entering the kernel — this is the 392→48 ns.
+    if (atomic_cas(m, 1, 0) == 1) { return 0; }
+    # Otherwise the cell is 2 (a waiter announced itself). Clear it and wake exactly one;
+    # whoever wins re-acquires AS 2, so any remaining waiters stay reachable.
     atomic_store(m, 0);
     syscall(SYS_FUTEX, m, FUTEX_WAKE | FUTEX_PRIVATE_FLAG, 1, 0, 0, 0);
     return 0;

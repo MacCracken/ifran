@@ -1,3 +1,11 @@
+#host_only
+# ^ v6.5.24 bare-metal forbidden-module check (bare-metal deliverable #4). This
+#   module is host-OS-only, so a `--target=<arch>-bare-metal-elf` build (which sets
+#   CYRIUS_KERNEL=1) that includes it now FAILS with a clear error instead of
+#   compiling silently and faulting at runtime inside the kernel. `#` opens a comment
+#   in cyrius, so this line is inert for every host target. See PP_IS_HOST_ONLY in
+#   src/frontend/lex_pp.cyr; remove the marker if this module is ever made
+#   freestanding.
 # fs.cyr — filesystem operations
 # Usage: include "lib/fs.cyr"
 # Requires: string.cyr, alloc.cyr, str.cyr, vec.cyr, agnosys/syscalls.cyr
@@ -20,7 +28,7 @@ include "lib/fs_win.cyr"
 #endif
 
 # Join two path components with /
-fn path_join(dir, name): i64 {
+fn path_join(dir: Str, name: Str): i64 {
     var sb = str_builder_new();
     str_builder_add(sb, dir);
     if (str_len(dir) > 0) {
@@ -32,7 +40,7 @@ fn path_join(dir, name): i64 {
 }
 
 # Get basename (last component after /)
-fn path_basename(path): i64 {
+fn path_basename(path: Str): i64 {
     var slen = str_len(path);
     var sd = str_data(path);
     var last_slash = 0 - 1;
@@ -46,7 +54,7 @@ fn path_basename(path): i64 {
 }
 
 # Get dirname (everything before last /)
-fn path_dirname(path): i64 {
+fn path_dirname(path: Str): i64 {
     var slen = str_len(path);
     var sd = str_data(path);
     var last_slash = 0 - 1;
@@ -60,10 +68,19 @@ fn path_dirname(path): i64 {
 }
 
 # Check if path has a specific extension. Both args are Str
-# (matches str_ends_with's signature). Callers passing a cstring
-# literal must wrap via str_from(".tcyr"). v5.9.6 added the wrap
-# at programs/checks/selfhost.cyr's _testsuite_gate caller.
-fn path_has_ext(path, ext): i64 {
+# (matches str_ends_with's signature).
+#
+# v6.4.72: params annotated `: Str` so a bare cstring-literal arg
+# (`path_has_ext(name, ".tcyr")`) is auto-coerced to str_from at
+# the call boundary — previously the literal flowed in as a raw
+# cstr pointer and str_ends_with read load64(ptr+8) as the suffix
+# length (garbage), silently failing every check. The literal→Str
+# coercion in PARSE_FNCALL fires ONLY for a param typed `: Str`
+# (smask bit) AND a literal-token arg; an untyped param leaves the
+# pointer un-wrapped. See the find_files note below. Callers may
+# still wrap explicitly (`str_from(".tcyr")`) — an already-Str
+# IDENT arg is passed through unchanged.
+fn path_has_ext(path: Str, ext: Str): i64 {
     return str_ends_with(path, ext);
 }
 
@@ -97,12 +114,16 @@ fn path_has_ext(path, ext): i64 {
 # Inlined (strlen + sys_open) rather than reaching up to io.cyr's file_open so
 # this base lib keeps its existing dependency surface (string.cyr supplies
 # strlen). See 2026-06-18-stdlib-native-agnos-abi-fs.md.
-fn dir_list(path): i64 {
+fn dir_list(path: Str): i64 {
     var entries = vec_new();
     var dp = str_data(path);
     var fd = sys_open(dp, strlen(dp), AO_DIRECTORY);   # agnos: (name, namelen, AO_DIRECTORY)
     if (fd < 0) { return entries; }
-    var buf = alloc(4096);
+    # v6.5.11: STACK scratch, not alloc(). The getdents buffer is dead the moment
+    # this fn returns, but under the bump allocator alloc() never gives it back —
+    # so every call leaked 4 KB. See the note on the non-agnos arm below.
+    var sbuf[4096];
+    var buf = &sbuf;
     var rgo = 1;
     while (rgo == 1) {
         var n = sys_getdents(fd, buf, 4096);
@@ -137,16 +158,31 @@ fn dir_list(path): i64 {
 }
 #endif
 #ifndef CYRIUS_TARGET_AGNOS
-fn dir_list(path): i64 {
+fn dir_list(path: Str): i64 {
     var entries = vec_new();
     var fd = sys_open(str_data(path), O_RDONLY, 0);
     if (fd < 0) { return entries; }
-    var buf = alloc(4096);
+    # ⛔ v6.5.11: STACK scratch, not alloc(). Both buffers are dead the moment this fn
+    # returns, but the default allocator is a BUMP allocator — it has no free — so each
+    # call permanently burned 4104 B. Measured before the fix: dir_list 176 B/entry,
+    # is_dir 4104 B PER CALL, and because dir_walk calls is_dir once per entry,
+    # dir_walk cost 4443 B/entry — ~25x the dir_list it wraps.
+    #
+    # A stack local is the right answer rather than a file-scope scratch buffer: it is
+    # inherently per-call and therefore per-THREAD, so it costs no thread-safety (today
+    # every caller owns its own buffer and a shared scratch would have taken that away),
+    # and it needs no thread-local slot — those are a scarce, collision-prone resource
+    # here (tests/gates/concurrency/thread_local_slot_collision.sh exists for that reason).
+    # Safe under dir_walk's recursion: dir_list/is_dir are leaves, so their frames pop
+    # before the recursive call and the 4 KB is never held down the stack.
+    var sbuf[4096];
+    var buf = &sbuf;
     # v6.0.60: Darwin getdirentries64 takes a 4th basep out-param (the new dir
     # position); Linux getdents64 ignores a 4th arg, so passing it is portable.
     # The Mach-O backends translate 217 → getdirentries64 (344). See
     # 2026-06-02-macos-getdirentries-dir-listing-port.md.
-    var basep = alloc(8);
+    var sbasep[8];
+    var basep = &sbasep;
     store64(basep, 0);
     var rgo = 1;
     while (rgo == 1) {
@@ -186,8 +222,115 @@ fn dir_list(path): i64 {
 #endif
 #endif
 
+# List a directory into CALLER-OWNED buffers — allocates NOTHING.
+#
+# `dir_list` returns a vec of Str, so it costs one heap Str per entry and the default
+# allocator is a bump allocator with no free. v6.5.11 removed the FIXED ~4.1 KB per call
+# (the getdents scratch moved to the stack), but the per-entry cost is inherent to that
+# return shape and is the half a long-running server actually feels — a directory listing
+# inside a request loop grows the heap forever. This is the caller-owned form the agora
+# filing asked for (2026-07-26-agora-fs-dir-list-per-call-alloc §"Proposed fix").
+#
+#   path        directory to list
+#   scratch     caller buffer for the raw getdents batch (>= 1024; 4096 recommended)
+#   scratch_len size of `scratch`
+#   names       caller buffer receiving NUL-terminated entry names, packed
+#   names_cap   size of `names`
+#   offs        caller i64 buffer receiving each name's offset into `names`
+#   max_entries capacity of `offs`, in entries
+#
+# Returns the entry count (>= 0), or negative on error:
+#   -1 open failed   -2 scratch too small   -3 names buffer full   -4 offs full
+#
+# ⛔ Truncation is an ERROR, never a short read: a silent partial listing is how a caller
+# ends up believing a directory is smaller than it is. `.` and `..` are skipped, matching
+# `dir_list`.
+fn dir_list_into(path: Str, scratch, scratch_len, names, names_cap, offs, max_entries): i64 {
+    if (scratch_len < 1024) { return 0 - 2; }
+    var count = 0;
+    var npos = 0;
+    #ifdef CYRIUS_TARGET_AGNOS
+    var dp = str_data(path);
+    var fd = sys_open(dp, strlen(dp), AO_DIRECTORY);
+    if (fd < 0) { return 0 - 1; }
+    var rgo = 1;
+    while (rgo == 1) {
+        var n = sys_getdents(fd, scratch, scratch_len);
+        if (n <= 0) { rgo = 0; }
+        else {
+            var pos = 0;
+            while (pos < n) {
+                var reclen = load16(scratch + pos);
+                var namelen = load8(scratch + pos + 3);
+                var name = scratch + pos + 8;
+                var skip = 0;
+                if (namelen == 1) { if (load8(name) == 46) { skip = 1; } }
+                if (namelen == 2) {
+                    if (load8(name) == 46) { if (load8(name + 1) == 46) { skip = 1; } }
+                }
+                if (skip == 0) {
+                    if (count >= max_entries) { sys_close(fd); return 0 - 4; }
+                    if (npos + namelen + 1 > names_cap) { sys_close(fd); return 0 - 3; }
+                    store64(offs + count * 8, npos);
+                    memcpy(names + npos, name, namelen);
+                    store8(names + npos + namelen, 0);
+                    npos = npos + namelen + 1;
+                    count = count + 1;
+                }
+                pos = pos + reclen;
+            }
+        }
+    }
+    sys_close(fd);
+    return count;
+    #endif
+    #ifndef CYRIUS_TARGET_AGNOS
+    var fd2 = sys_open(str_data(path), O_RDONLY, 0);
+    if (fd2 < 0) { return 0 - 1; }
+    var basep[8];
+    store64(&basep, 0);
+    var rgo2 = 1;
+    while (rgo2 == 1) {
+        var n2 = syscall(FSYS_GETDENTS64, fd2, scratch, scratch_len, &basep);
+        if (n2 <= 0) { rgo2 = 0; }
+        else {
+            var pos2 = 0;
+            while (pos2 < n2) {
+                var reclen2 = load16(scratch + pos2 + 16);
+                #ifdef CYRIUS_TARGET_MACOS
+                var name2 = scratch + pos2 + 21;
+                #endif
+                #ifndef CYRIUS_TARGET_MACOS
+                var name2 = scratch + pos2 + 19;
+                #endif
+                var skip2 = 0;
+                if (load8(name2) == 46) {
+                    if (load8(name2 + 1) == 0) { skip2 = 1; }
+                    if (load8(name2 + 1) == 46) {
+                        if (load8(name2 + 2) == 0) { skip2 = 1; }
+                    }
+                }
+                if (skip2 == 0) {
+                    var nl2 = strlen(name2);
+                    if (count >= max_entries) { sys_close(fd2); return 0 - 4; }
+                    if (npos + nl2 + 1 > names_cap) { sys_close(fd2); return 0 - 3; }
+                    store64(offs + count * 8, npos);
+                    memcpy(names + npos, name2, nl2);
+                    store8(names + npos + nl2, 0);
+                    npos = npos + nl2 + 1;
+                    count = count + 1;
+                }
+                pos2 = pos2 + reclen2;
+            }
+        }
+    }
+    sys_close(fd2);
+    return count;
+    #endif
+}
+
 # List directory entries with full paths
-fn dir_list_full(path): i64 {
+fn dir_list_full(path: Str): i64 {
     var names = dir_list(path);
     var full = vec_new();
     var di = 0;
@@ -205,11 +348,14 @@ fn dir_list_full(path): i64 {
 # dir test: the kernel's ext2_open_dir() path only succeeds for a directory
 # inode (a regular file / nonexistent path → fd<0), so a successful open already
 # proves it is a directory. See dir_list above for the AO_DIRECTORY rationale.
-fn is_dir(path): i64 {
+fn is_dir(path: Str): i64 {
     var dp = str_data(path);
     var fd = sys_open(dp, strlen(dp), AO_DIRECTORY);   # agnos: (name, namelen, AO_DIRECTORY)
     if (fd < 0) { return 0; }
-    var buf = alloc(4096);
+    # v6.5.11: STACK scratch — see the note in dir_list. is_dir was the DOMINANT
+    # allocation cost in this file, not dir_list: dir_walk calls it once per entry.
+    var sbuf[4096];
+    var buf = &sbuf;
     var n = sys_getdents(fd, buf, 4096);
     sys_close(fd);
     if (n >= 0) { return 1; }
@@ -217,15 +363,22 @@ fn is_dir(path): i64 {
 }
 #endif
 #ifndef CYRIUS_TARGET_AGNOS
-fn is_dir(path): i64 {
+fn is_dir(path: Str): i64 {
     var fd = sys_open(str_data(path), O_RDONLY, 0);
     if (fd < 0) { return 0; }
     # v6.0.60: use a full 4096 buffer, not 32. Linux getdents64 returns the
     # first entry in a 32-byte buffer, but Darwin getdirentries64 fails on a
     # buffer that small (verified on ecb: 32 → error, dir misreported as
     # non-dir); 4096 matches dir_list and works on both.
-    var buf = alloc(4096);
-    var basep = alloc(8);
+    #
+    # ⛔ v6.5.11: STACK scratch, not alloc(). THIS fn was the dominant cost in fs.cyr
+    # and the filing did not name it — dir_walk (:253) calls is_dir once PER ENTRY, so
+    # a 41-entry walk burned 4104 B x 41. Fixing dir_list alone would have moved
+    # dir_walk 4443 -> ~4267 B/entry and looked complete.
+    var sbuf[4096];
+    var buf = &sbuf;
+    var sbasep[8];
+    var basep = &sbasep;
     store64(basep, 0);
     var n = syscall(FSYS_GETDENTS64, fd, buf, 4096, basep);
     sys_close(fd);
@@ -236,13 +389,83 @@ fn is_dir(path): i64 {
 #endif
 
 # Walk a directory tree, push all file paths to a vec
-fn dir_walk(path, results): i64 {
+# ⛔ v6.5.12: DEPTH-BOUNDED. This recursion had no depth cap, no visited set, and
+# `is_dir` (:251) opens with plain `O_RDONLY` — no `O_NOFOLLOW` — so a symlink to an
+# ancestor resolves and reports 1. A loop therefore re-descended until the accumulated
+# path exhausted PATH_MAX; termination was a property of path-string arithmetic, not of
+# any decision. Measured: a tree holding ONE .tcyr plus `ln -s .. tests/sub/loop` ran
+# **41 passed, 0 failed** — the count that reads as proof of coverage IS the bug
+# inflating it, which is the silent-green shape this release keeps finding.
+#
+# A depth cap rather than a visited-inode set: it needs no allocation, and it bounds
+# every cause (symlink loop, bind mount, Windows directory junction — `fs_win.cyr:146`
+# treats a reparse point as a directory), not just the one we reproduced. O_NOFOLLOW was
+# rejected because it would refuse LEGITIMATE symlinked directories, which real projects
+# use. 64 is far past any real tree (`tests/tcyr/crossos/x.tcyr` is depth 3).
+#
+# The public signature is UNCHANGED — the depth rides on a private helper, so the
+# api-surface snapshot and every caller stay as they were.
+var DIR_WALK_MAX_DEPTH = 64;
+
+# Return 1 if `path` is a SYMLINK, else 0.
+#
+# ⛔ v6.5.12: tree walks must LIST a symlink but not DESCEND it. `is_dir` opens with
+# plain `O_RDONLY`, which resolves the link and reports 1, so a link to an ancestor made
+# `dir_walk` re-enter the same subtree forever. The depth cap alone was not a fix: it
+# bounded the runaway but the pass count stayed inflated (a tree holding ONE .tcyr still
+# reported 32), and an inflated count reading as coverage is the failure being fixed.
+#
+# This matches `find`'s default and the `find`-based CI loops, so the walkers and the
+# tooling around them finally agree.
+#
+# readlink is the portable test — it returns the target length (>= 0) for a symlink and
+# -EINVAL for anything else. Present on x86-linux (#89), macOS (#89), aarch64-linux (via
+# readlinkat #78) and agnos. Windows has no readlink wrapper and `fs_win.cyr` supplies
+# its own dir_list/is_dir, so the PE arm returns 0 (junction handling is a separate
+# concern tracked with the Windows fs surface).
+# ⚠ agnos's peer is the LENGTH-CARRYING form — `sys_readlink(path, pathlen, buf, buflen)`,
+# 4 args, mirroring its `sys_open(name, namelen, flags)` ABI — while Linux/macOS take 3.
+# Caught by `folds_agnos_parity.sh`, which compiles every folded stdlib for agnos as well
+# as Linux; a 3-arg call here broke `lib/fs.cyr` for EVERY fold (sigil, patra, sankoch,
+# sakshi, …) because fs.cyr is a PREAMBLE dep. That gate exists because yukti shipped six
+# agnos ABI errors for months — this is the same class, caught the same way.
+fn is_symlink(path: Str): i64 {
+    #ifdef CYRIUS_TARGET_WIN
+    return 0;
+    #endif
+    #ifndef CYRIUS_TARGET_WIN
+    var lbuf[8];
+    #ifdef CYRIUS_TARGET_AGNOS
+    var pd = str_data(path);
+    if (sys_readlink(pd, strlen(pd), &lbuf, 8) >= 0) { return 1; }
+    return 0;
+    #endif
+    #ifndef CYRIUS_TARGET_AGNOS
+    if (sys_readlink(str_data(path), &lbuf, 8) >= 0) { return 1; }
+    return 0;
+    #endif
+    #endif
+}
+
+fn _dir_walk_d(path: Str, results, depth): i64 {
+    # Stop, but do NOT pretend the tree ended: a silent truncation here would be the
+    # same lie as the inflated count, one level down.
+    if (depth > DIR_WALK_MAX_DEPTH) {
+        syscall(SYS_WRITE, 2, "warning: dir_walk depth cap (64) hit at: ", 41);
+        syscall(SYS_WRITE, 2, str_data(path), str_len(path));
+        syscall(SYS_WRITE, 2, "\n  a symlink loop or a pathologically deep tree — subtree NOT walked.\n", 72);
+        return vec_len(results);
+    }
     var entries = dir_list(path);
     var wi = 0;
     while (wi < vec_len(entries)) {
         var full = path_join(path, vec_get(entries, wi));
-        if (is_dir(full) == 1) {
-            dir_walk(full, results);
+        # v6.5.12: a symlinked DIRECTORY is recorded but never DESCENDED (loop guard);
+        # a symlinked FILE is recorded exactly as before. See is_symlink.
+        if (is_dir(full) == 1 && is_symlink(full) == 1) {
+            vec_push(results, full);
+        } elif (is_dir(full) == 1) {
+            _dir_walk_d(full, results, depth + 1);
         } else {
             vec_push(results, full);
         }
@@ -251,8 +474,32 @@ fn dir_walk(path, results): i64 {
     return vec_len(results);
 }
 
-# Find files matching an extension in a directory tree
-fn find_files(path, ext): i64 {
+# Walk a directory tree, pushing every file path found into `results`.
+# Recursion is depth-bounded at DIR_WALK_MAX_DEPTH (see `_dir_walk_d`); a
+# deeper subtree is skipped with a warning rather than walked forever.
+# Returns the total number of entries in `results`.
+fn dir_walk(path: Str, results): i64 {
+    return _dir_walk_d(path, results, 0);
+}
+
+# Find files matching an extension in a directory tree.
+#
+# v6.4.72 — params annotated `: Str`. The pre-fix untyped `ext`
+# param was the root cause of a silent-0-matches bug: a caller
+# passing a bare cstring literal (`find_files(str_from("src"),
+# ".cyr")`) handed `ext` in as a raw cstr pointer rather than a
+# Str, because the compiler's literal→Str auto-coercion only
+# fires for a param typed `: Str`. That raw pointer then reached
+# str_ends_with (via path_has_ext) as the `suffix`, where
+# str_len(suffix)=load64(ptr+8) read garbage and every entry
+# failed the filter — while dir_walk on the same path and a
+# direct str_ends_with(walked, ".cyr") both worked (the direct
+# call coerces the literal because str_ends_with IS typed `: Str`).
+# NOT an allocator/heap-regime issue: find_files(path,
+# str_from(".cyr")) always returned the full set. Typing the
+# params makes the bare-literal form coerce at the boundary;
+# str_from-wrapped callers are unaffected (byte-identical).
+fn find_files(path: Str, ext: Str): i64 {
     var all = vec_new();
     dir_walk(path, all);
     var matched = vec_new();
@@ -279,7 +526,15 @@ fn find_files(path, ext): i64 {
 # node_modules, dist, build, .next, coverage. Signature picked
 # to mirror `dir_walk(path, results)` so callers can use the
 # same shape.
-fn dir_walk_with_prunes(path, results, prunes): i64 {
+# v6.5.12: depth-bounded, same reasoning as `_dir_walk_d` above — pruning by NAME does
+# not stop a loop, because the symlink that closes it need not be named in `prunes`.
+fn _dir_walk_prunes_d(path: Str, results, prunes, depth): i64 {
+    if (depth > DIR_WALK_MAX_DEPTH) {
+        syscall(SYS_WRITE, 2, "warning: dir_walk_with_prunes depth cap (64) hit at: ", 53);
+        syscall(SYS_WRITE, 2, str_data(path), str_len(path));
+        syscall(SYS_WRITE, 2, "\n  a symlink loop or a pathologically deep tree — subtree NOT walked.\n", 72);
+        return vec_len(results);
+    }
     var entries = dir_list(path);
     var wi = 0;
     while (wi < vec_len(entries)) {
@@ -294,8 +549,11 @@ fn dir_walk_with_prunes(path, results, prunes): i64 {
         }
         if (pruned == 0) {
             var full = path_join(path, name);
-            if (is_dir(full) == 1) {
-                dir_walk_with_prunes(full, results, prunes);
+            # v6.5.12: symlinked DIRECTORIES recorded, not descended — see is_symlink.
+            if (is_dir(full) == 1 && is_symlink(full) == 1) {
+                vec_push(results, full);
+            } elif (is_dir(full) == 1) {
+                _dir_walk_prunes_d(full, results, prunes, depth + 1);
             } else {
                 vec_push(results, full);
             }
@@ -305,10 +563,24 @@ fn dir_walk_with_prunes(path, results, prunes): i64 {
     return vec_len(results);
 }
 
+# Walk a directory tree like `dir_walk`, skipping any subtree whose entry
+# name matches a member of `prunes` (a vec of Str; exact match, no glob).
+# Depth-bounded identically — pruning by name cannot stop a symlink loop,
+# because the link that closes it need not be named in `prunes`.
+fn dir_walk_with_prunes(path: Str, results, prunes): i64 {
+    return _dir_walk_prunes_d(path, results, prunes, 0);
+}
+
 # Find files matching an extension under `path`, pruning any
 # subtree whose entry name matches a member of `prunes`. Same
 # shape as `find_files(path, ext)`; adds the pruning hook.
-fn find_files_with_prunes(path, ext, prunes): i64 {
+#
+# v6.4.72 — `path`/`ext` annotated `: Str` (same fix as
+# find_files above; `prunes` stays a vec of Str). The TS-corpus
+# release gates that pin this fn already pass str_from(...) for
+# both, so they were never silently vacuous — but the annotation
+# closes the bare-literal footgun for any future caller.
+fn find_files_with_prunes(path: Str, ext: Str, prunes): i64 {
     var all = vec_new();
     dir_walk_with_prunes(path, all, prunes);
     var matched = vec_new();

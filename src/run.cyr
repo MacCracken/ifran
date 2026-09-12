@@ -192,7 +192,7 @@ fn run_job(js): i64 {
     if (_run_spawn(argv, pidp, rfdp) == 0) {
         runstore_set_pid(id, load64(pidp));           # reaper evidence, pre-block
         nread = _run_capture_wait(load64(pidp), load64(rfdp), buf, RUN_LOG_MAX() - 64,
-        jobspec_timeout(js) * 1000, exitp, tmop);
+          jobspec_timeout(js) * 1000, exitp, tmop);
         exit_code = load64(exitp);
     }
     var dur = clock_now_ms() - t0;

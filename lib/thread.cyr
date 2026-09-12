@@ -44,8 +44,23 @@ include "lib/thread_win.cyr"
 include "lib/thread_agnos.cyr"
 #endif
 
+# v6.5.11: Darwin has no clone/futex either, and was never routed away from the Linux
+# body below — so thread_create reached SYS_CLONE, which does not exist on Darwin.
+# Until v6.5.11 that was masked: mmap.cyr's unguarded Linux MAP_ANONYMOUS made
+# mmap_stack FAIL on Darwin, so thread_create bailed at `sbase < 0` and looked like a
+# harmless no-op. Fixing MAP_ANONYMOUS removed the accidental net and the call reached
+# the clone → SIGSYS on real ach (exit 140), bisected against only mmap.cyr swapped.
+# Routed here to the same serial fallback Windows (v6.0.53) and agnos (v6.2.3) use, so
+# the thread body ACTUALLY RUNS — which is the symptom
+# 2026-07-03-macos-threading-workers-dont-run reports. A real concurrent Darwin backend
+# (bsdthread_create / __ulock_wait) is still the roadmapped Slot 11 item.
+#ifdef CYRIUS_TARGET_MACOS
+include "lib/thread_macos.cyr"
+#endif
+
 #ifndef CYRIUS_TARGET_WIN
 #ifndef CYRIUS_TARGET_AGNOS
+#ifndef CYRIUS_TARGET_MACOS
 
 # mmap.cyr supplies the PROT_READ/PROT_WRITE enum for the thread-stack mmap
 # below (explicit since v6.0.52; previously free-rode on alloc.cyr's Linux
@@ -58,6 +73,14 @@ include "lib/mmap.cyr"
 # don't have to know about atomic.cyr (include-once dedupes the
 # double-include if callers already pulled it in).
 include "lib/atomic.cyr"
+
+# v6.5.44 — THREADS_CONCURRENT: does thread_create actually produce a SECOND thread?
+# 1 = the body runs concurrently with the caller; 0 = it runs INLINE at create (serial peer).
+# ⛔ This exists because the concurrency corpus could not tell the two apart. Every test in it
+# passed on macOS while bodies ran inline — a serial backend satisfies "the worker ran", "join
+# returned 0" and "the count is exact". A test that DISCRIMINATES must be guarded by capability
+# (never by target name, never by errno — the v6.5.36 lesson), and this is that capability.
+var THREADS_CONCURRENT = 1;   # REAL clone(2) threads
 
 # Stack size per thread. v6.3.13: bumped 64KB → 2MB so that `var arr[N]` LOCALS —
 # now per-thread STACK-allocated (thread-safe; previously a shared global/BSS buffer,
@@ -208,6 +231,96 @@ fn _thread_spawn(flags, child_stack, t, tls): i64 {
     return ret;
 }
 
+# v6.5.8: the DETACHED spawn — same clone, but the child unmaps its own stack and
+# exits instead of waiting to be joined.
+#
+# WHY A SEPARATE FUNCTION RATHER THAN A FLAG. The trampoline is raw hex whose branch
+# displacement encodes the exact byte length of the child path (`jnz +31` here vs
+# `jnz +14` in `_thread_spawn`). A runtime-selected variant would mean a second branch
+# inside the asm and two more hand-computed offsets to keep in sync — strictly more
+# fragile than two self-contained blocks.
+#
+# WHY NOT A POST-HOC `thread_detach(t)`. The trampoline is fixed at clone time, so a
+# detach arriving after the body returns has nothing left to act on and a detach arriving
+# before it needs an atomic exiting/detached handshake to avoid a double-unmap. Deciding
+# at CREATE time removes the race instead of synchronising it.
+#
+# THE UNMAP-AND-EXIT TAIL. `munmap` frees the very stack the child is running on, so
+# nothing may touch memory between it and `exit` — the callee-saved registers hold both
+# arguments and the two syscalls are adjacent. This is the same `__unmapself` shape musl
+# and glibc use. r12/r13 are SysV callee-saved and x19/x20 are AAPCS64 callee-saved, so
+# both survive the `call`/`blr` into the thread body.
+#
+# child_stack layout, written by thread_create_detached (low → high):
+#   [stack_lo][maplen][fp][arg]   — 4 words = 32 B, which also keeps the aarch64
+#                                   16-byte SP alignment invariant (two clean LDPs)
+#                                   and leaves rsp 16-aligned at the x86 `call`.
+# stack_lo/maplen are the GUARD-ADJUSTED values (munmap_stack's own arithmetic, done by
+# the parent) so the trampoline can issue a bare munmap. CHANGELOG [6.5.8]
+fn _thread_spawn_detached(flags, child_stack, t, tls): i64 {
+    var ret = 0;
+    #ifdef CYRIUS_ARCH_X86
+    asm {
+        param_load(rdi, 0);            # flags
+        param_load(rsi, 1);            # child_stack
+        param_load(rdx, 2);            # t (parent_tid)
+        param_load(r10, 2);            # t (child_tid)
+        param_load(r8, 3);             # tls
+        0xB8; 0x38; 0x00; 0x00; 0x00;  # mov eax, 56        ; SYS_CLONE
+        0x0F; 0x05;                    # syscall
+
+        0x48; 0x85; 0xC0;              # test rax, rax
+        0x75; 0x1F;                    # jnz +31            ; -> parent_path (child path = 31 B)
+
+        # --- child path (GNU as --64 verified, 31 bytes) ---
+        0x41; 0x5C;                    # pop r12            ; stack_lo (callee-saved)
+        0x41; 0x5D;                    # pop r13            ; maplen   (callee-saved)
+        0x58;                          # pop rax            ; fp
+        0x5F;                          # pop rdi            ; arg
+        0xFF; 0xD0;                    # call rax           ; fn(arg); rsp restored, r12/r13 intact
+        0x4C; 0x89; 0xE7;              # mov rdi, r12       ; addr
+        0x4C; 0x89; 0xEE;              # mov rsi, r13       ; length
+        0xB8; 0x0B; 0x00; 0x00; 0x00;  # mov eax, 11        ; SYS_MUNMAP — frees THIS stack
+        0x0F; 0x05;                    # syscall            ; no stack access permitted past here
+        0xB8; 0x3C; 0x00; 0x00; 0x00;  # mov eax, 60        ; SYS_EXIT
+        0x48; 0x31; 0xFF;              # xor rdi, rdi       ; status = 0
+        0x0F; 0x05;                    # syscall            ; never returns
+
+        # --- parent path ---
+        0x48; 0x89; 0x45; 0xD8;        # mov [rbp-40], rax  ; ret = rax
+    }
+    #endif
+    #ifdef CYRIUS_ARCH_AARCH64
+    asm {
+        param_load(x0, 0);             # flags
+        param_load(x1, 1);             # child_stack
+        param_load(x2, 2);             # t (parent_tidptr)
+        param_load(x3, 3);             # tls
+        param_load(x4, 2);             # t (child_tidptr)
+        0x88; 0x1B; 0x80; 0xD2;        # mov x8, #220           ; SYS_CLONE
+        0x01; 0x00; 0x00; 0xD4;        # svc #0
+
+        0x60; 0x01; 0x00; 0xB5;        # cbnz x0, +44           ; -> parent_path (10 child instrs)
+
+        # --- child path (aarch64-linux-gnu-as verified, 10 instrs) ---
+        0xF3; 0x53; 0xC1; 0xA8;        # ldp x19, x20, [sp], #16 ; stack_lo→x19, maplen→x20
+        0xE9; 0x03; 0xC1; 0xA8;        # ldp x9, x0, [sp], #16   ; fp→x9, arg→x0
+        0x20; 0x01; 0x3F; 0xD6;        # blr x9                  ; fn(arg); x19/x20 preserved
+        0xE0; 0x03; 0x13; 0xAA;        # mov x0, x19             ; addr
+        0xE1; 0x03; 0x14; 0xAA;        # mov x1, x20             ; length
+        0xE8; 0x1A; 0x80; 0xD2;        # mov x8, #215            ; SYS_MUNMAP (aarch64)
+        0x01; 0x00; 0x00; 0xD4;        # svc #0                  ; frees THIS stack
+        0x00; 0x00; 0x80; 0xD2;        # mov x0, #0              ; status = 0
+        0xA8; 0x0B; 0x80; 0xD2;        # mov x8, #93             ; SYS_EXIT
+        0x01; 0x00; 0x00; 0xD4;        # svc #0                  ; never returns
+
+        # --- parent path ---
+        0xA0; 0x83; 0x1D; 0xF8;        # stur x0, [x29, #-40]   ; ret = x0
+    }
+    #endif
+    return ret;
+}
+
 # Create a new thread running fn(arg).
 # Returns pointer to thread struct, or 0 on failure.
 # The function pointer must be obtained via &fn_name.
@@ -269,6 +382,88 @@ fn thread_create(fp, arg): i64 {
     return t;
 }
 
+# v6.5.8: fire-and-forget spawn. Runs fn(arg) on a new thread that reclaims ALL of its
+# own memory and exits. Returns 1 on success, 0 on failure.
+#
+# THE LEAK THIS FIXES. `munmap_stack` had exactly three call sites — two `thread_create`
+# failure paths and `thread_join` — so a thread nobody joined never had its stack
+# unmapped. Measured: 100 unjoined threads grew VA by exactly 2,101,248 B each
+# (THREAD_STACK_SIZE + THREAD_GUARD_SIZE to the byte). Unbounded, and the consumer could
+# not work around it — the thread is running ON the stack it would need to unmap, and the
+# trampoline's next instruction after the body returns was SYS_EXIT. The practical ceiling
+# is `vm.max_map_count` (65530 by default), so a thread-per-request server degraded to
+# `thread_create` returning 0 after ~65K spawns.
+#
+# ⭐ IT RETURNS A BOOLEAN, NOT A HANDLE — DELIBERATELY. A handle would invite
+# `thread_join`, whose `munmap_stack` would then double-unmap a range the child already
+# released. Handing back nothing to join makes that unrepresentable rather than merely
+# discouraged.
+#
+# ⭐ AND IT LEAKS NOTHING, NOT JUST NOT-THE-STACK. Two further things a detached thread
+# would otherwise strand, both avoided by construction rather than by adding a free path:
+#   - the 24 B handle: dropped entirely. CLONE_PARENT_SETTID/CLONE_CHILD_CLEARTID exist so
+#     a joiner can wait on the tid word; nobody waits here, so both flags come off and the
+#     tid pointers are 0. No handle is allocated at all.
+#   - the 4 KB TLS block: carved from the TOP of the thread's own stack mapping instead of
+#     the bump allocator (which has no free()), so the child's single munmap releases stack
+#     and TLS together. The stack grows DOWN from just below it, so the two never meet.
+# Fixing only the 2 MiB and leaving 4 KB behind would be the same half-fix shape that cost
+# 6.5.7 seven found-by-ports defects.
+fn thread_create_detached(fp, arg): i64 {
+    alloc_init();
+    _threads_active = 1;   # v6.3.17 PF-02: arm the shared-heap lock BEFORE the clone
+    var ssize = THREAD_STACK_SIZE;
+    var sbase = mmap_stack(ssize);
+    if (sbase < 0) { return 0; }
+    # TLS at the top of the mapping; the stack grows down from just under it.
+    var tls = sbase + ssize - THREAD_TLS_SIZE;
+    var zi = 0;
+    while (zi < THREAD_TLS_SIZE) {
+        store8(tls + zi, 0);
+        zi = zi + 1;
+    }
+    # 4 words for the trampoline (see _thread_spawn_detached). stack_lo/maplen are
+    # munmap_stack's guard-adjusted values, computed here so the child issues a bare
+    # munmap with no arithmetic on a stack it is about to release.
+    var child_stack = tls;
+    child_stack = child_stack - 8;
+    store64(child_stack, arg);
+    child_stack = child_stack - 8;
+    store64(child_stack, fp);
+    child_stack = child_stack - 8;
+    store64(child_stack, ssize + THREAD_GUARD_SIZE);
+    child_stack = child_stack - 8;
+    store64(child_stack, sbase - THREAD_GUARD_SIZE);
+    var flags = CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND;
+    flags = flags | CLONE_THREAD | CLONE_SYSVSEM;
+    flags = flags | CLONE_SETTLS;
+    var r = _thread_spawn_detached(flags, child_stack, 0, tls);
+    if (r < 0) {
+        munmap_stack(sbase, ssize);
+        return 0;
+    }
+    return 1;
+}
+
+# v6.5.8: has this thread finished? 1 = done, 0 = still running. Non-blocking.
+#
+# Reads the same CLONE_CHILD_CLEARTID slot `thread_join`'s loop already tests, so it adds
+# no new state. It exists because `thread_join` blocks unconditionally, which made a
+# reaper — "collect whichever workers have finished, keep serving the rest" — impossible
+# to write without a detached thread and a side channel. Pass a handle from
+# `thread_create`; a detached thread has no handle by design.
+# ⛔ VALID ONLY BEFORE `thread_join`. Join CONSUMES the handle — on Windows it
+# CloseHandle()s it, so a post-join query inspects a closed handle and reports "not
+# done" (caught on real cass hardware, by a test that asserted the wrong contract).
+# The intended use is the reaper shape: poll while running, then join once this
+# returns 1. After joining, the thread is done by definition and there is nothing
+# left to ask.
+fn thread_is_done(t): i64 {
+    if (t == 0) { return 0 - 1; }
+    if (load64(t) == 0) { return 1; }
+    return 0;
+}
+
 # Wait for thread to finish (blocks via futex).
 # Returns 0 on success.
 #
@@ -283,14 +478,35 @@ fn thread_create(fp, arg): i64 {
 # (= 128) hangs.
 fn thread_join(t): i64 {
     if (t == 0) { return 0 - 1; }
-    # CLONE_CHILD_CLEARTID: kernel sets tid to 0 and does futex_wake on exit
-    while (load64(t) != 0) {
-        # Atomic check inside the kernel: if *t == load64(t), park;
-        # else return immediately. Re-reading directly via
-        # load64(t) each iteration (rather than caching into a
-        # local) keeps the FUTEX_WAIT expected-val in lockstep
-        # with the condition check.
-        syscall(SYS_FUTEX, t, FUTEX_WAIT, load64(t), 0, 0, 0);
+    # CLONE_CHILD_CLEARTID: kernel sets tid to 0 and does futex_wake on exit.
+    #
+    # ⛔ ONE LOAD PER ITERATION, FEEDING BOTH USES. The expected-val handed to
+    # FUTEX_WAIT must be a tid THIS thread positively observed LIVE. Load it once,
+    # test it, and pass that same value; if the worker exits in the window the
+    # kernel compares *t (now 0) against our live tid, they differ, and it returns
+    # EAGAIN — so we loop, re-read 0, and leave. Parking cannot happen on a value
+    # we never saw alive.
+    #
+    # This used to read the word TWICE — once for the `while` condition and again,
+    # independently, as the FUTEX_WAIT argument — under a comment claiming that
+    # re-reading "keeps the expected-val in lockstep with the condition check".
+    # It does the exact opposite: two independent loads are not in lockstep, one
+    # load feeding both uses is. A worker exiting between them made the kernel's
+    # one-shot CLEARTID wake fire with nobody parked (discarded), after which the
+    # second load returned 0, FUTEX_WAIT(t, 0) found *t == 0 == val and parked on
+    # an address that would never be woken again — a permanent, silent, log-less
+    # deadlock recoverable only by SIGKILL, at roughly 1 join in 150k. cycc does
+    # not CSE the two loads (objdump shows two dereferences ~50 bytes and a taken
+    # branch apart), so on a multicore host the joiner need not even be preempted.
+    # szal-filed 2026-07-29; CHANGELOG [6.5.8].
+    #
+    # The sibling futex waiters in this file already follow this discipline and
+    # must keep it: chan_send loads `count` once under the mutex, chan_recv and
+    # sync.cyr's mutex_lock pass constants.
+    var tid = load64(t);
+    while (tid != 0) {
+        syscall(SYS_FUTEX, t, FUTEX_WAIT, tid, 0, 0, 0);
+        tid = load64(t);
     }
     # Free the thread stack
     munmap_stack(load64(t + 8), load64(t + 16));
@@ -355,6 +571,76 @@ fn chan_send(ch, val): i64 {
     return 0;
 }
 
+# Wake `n` waiters parked on the channel's count word (v6.4.84).
+#
+# On Linux/aarch64 this is FUTEX_WAKE. On **macOS there is no futex**: a raw
+# `syscall(SYS_FUTEX, ...)` raises **SIGSYS (bad system call)** and kills the process
+# outright — exit 140 on Darwin. `lib/sync.cyr` already routes `mutex_*` through a
+# real macOS backend (`lib/sync_macos.cyr`), but these channel fns called SYS_FUTEX
+# DIRECTLY, bypassing that abstraction. Caught by the cross-OS gate on ach, because
+# `vr01_chan_try_send` is the first `vr01_` test ever to exercise channels on macOS.
+#
+# The no-op on macOS is CORRECT, not a stub: the only thing this wake can release is a
+# waiter parked in `chan_send`/`chan_recv`'s FUTEX_WAIT, and those are equally
+# unavailable on macOS — so there can be no waiter to wake. That makes the NON-BLOCKING
+# pair (`chan_try_send` / `chan_try_recv`) fully correct on macOS as plain
+# mutex-protected ring operations, which is exactly what a non-blocking API needs.
+#
+# The BLOCKING paths remain macOS-broken and are NOT fixed here — they need a real
+# condvar backend, which is issue 2026-07-03 (macOS threading), pinned to v6.5.x.
+fn _chan_wake(ch, n): i64 {
+    #ifndef CYRIUS_TARGET_MACOS
+    syscall(SYS_FUTEX, ch + 32, FUTEX_WAKE | FUTEX_PRIVATE_FLAG, n, 0, 0, 0);
+    #endif
+    return 0;
+}
+
+# Non-blocking send — the exact mirror of `chan_try_recv` below, and the answer to
+# the channel API having been non-blocking on the RECEIVE side only (v6.4.84).
+#
+# Returns:
+#    0  → value enqueued
+#   -1  → channel closed, nothing enqueued (same convention as `chan_send`)
+#   -2  → buffer FULL, nothing enqueued; the caller decides to drop, retry, or shed
+#
+# WHY -2 IS DISTINCT FROM -1, and not collapsed the way `chan_try_recv` collapses
+# empty-and-closed into 0: a producer shedding load has to tell "nobody is listening
+# any more, stop producing" from "the consumer is briefly behind, drop this one."
+# Those call for opposite actions. `chan_try_recv`'s own doc comment concedes that its
+# collapse forces callers to peek at `*(ch + 48)`; not repeating that here.
+#
+# WHAT THIS EXISTS FOR: a producer could not express "deliver this if the consumer is
+# keeping up, otherwise drop it and carry on" — the normal contract for telemetry,
+# progress events and pub/sub fan-out, where one slow consumer must never stall a
+# producer. `chan_send` blocks on FUTEX_WAIT until the buffer drains, which turns
+# backpressure into head-of-line blocking across unrelated work. Live instance:
+# `majra/src/pubsub.cyr` holds the hub mutex across its whole fan-out and calls
+# blocking `chan_send` inside it, so ONE full subscriber channel stalls publishes to
+# every other topic — and majra could not fix that from its own side, because there
+# was no non-blocking send to reach for. (Narrowing that lock scope is still majra's
+# to do; this only removes the unbounded stall.)
+#
+# The wake is unconditional-on-success and targets the same word as `chan_send`'s, so
+# a receiver parked in `chan_recv`'s FUTEX_WAIT is released identically.
+fn chan_try_send(ch, val): i64 {
+    var mtx = load64(ch + 40);
+    mutex_lock(mtx);
+    if (load64(ch + 48) != 0) { mutex_unlock(mtx); return 0 - 1; }
+    var count = load64(ch + 32);
+    var cap = load64(ch + 8);
+    if (count >= cap) { mutex_unlock(mtx); return 0 - 2; }
+    var buf = load64(ch);
+    var tail = load64(ch + 24);
+    store64(buf + tail * 8, val);
+    store64(ch + 24, (tail + 1) % cap);
+    store64(ch + 32, count + 1);
+    mutex_unlock(mtx);
+    # Wake one receiver (mirrors chan_send's wake on the same count word).
+    # Routed through _chan_wake: a raw SYS_FUTEX here SIGSYS-es on macOS.
+    _chan_wake(ch, 1);
+    return 0;
+}
+
 # Receive a value from the channel. Blocks if empty. Returns value, or 0 if closed.
 fn chan_recv(ch): i64 {
     var mtx = load64(ch + 40);
@@ -389,8 +675,15 @@ fn chan_close(ch): i64 {
     mutex_lock(mtx);
     store64(ch + 48, 1);
     mutex_unlock(mtx);
-    # Wake all waiters
-    syscall(SYS_FUTEX, ch + 32, FUTEX_WAKE | FUTEX_PRIVATE_FLAG, 1000, 0, 0, 0);
+    # Wake all waiters. Routed through _chan_wake (v6.4.84): a raw SYS_FUTEX here
+    # SIGSYS-es on macOS. `chan_close` is reachable from the purely NON-BLOCKING
+    # surface — closing is how a producer signals "stop", and `chan_try_send`
+    # returns -1 for it — so it must not kill the process on a platform whose
+    # blocking paths are unavailable. This was the second raw wake on that path;
+    # the first (in chan_try_send) was found by the cross-OS gate on ach, and this
+    # one only surfaced after fixing that, because the SIGSYS discarded the buffered
+    # stdout that would have shown how far the test actually got.
+    _chan_wake(ch, 1000);
     return 0;
 }
 
@@ -422,9 +715,13 @@ fn chan_try_recv(ch): i64 {
     store64(ch + 32, count - 1);
     mutex_unlock(mtx);
     # Wake one sender (if it was waiting on full-buffer condition).
-    syscall(SYS_FUTEX, ch + 32, FUTEX_WAKE | FUTEX_PRIVATE_FLAG, 1, 0, 0, 0);
+    # Routed through _chan_wake: a raw SYS_FUTEX here SIGSYS-es on macOS. This fn is
+    # advertised as non-blocking, so it must not kill the process on a platform whose
+    # blocking paths are unavailable.
+    _chan_wake(ch, 1);
     return result;
 }
 
+#endif
 #endif
 #endif

@@ -8,7 +8,7 @@ description = "ifran (عرفان) — the AGNOS training control plane: jobs, ch
 # rust-old/ under its original license.
 license = "GPL-3.0-only"
 language = "cyrius"
-cyrius = "6.4.3"
+cyrius = "6.6.2"
 
 [build]
 entry = "src/main.cyr"

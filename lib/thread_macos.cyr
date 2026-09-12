@@ -1,0 +1,320 @@
+# thread_macos.cyr — macOS (Darwin) threading: single-threaded SERIAL fallback.
+# Usage: included by lib/thread.cyr under #ifdef CYRIUS_TARGET_MACOS.
+# Requires: alloc.cyr, fnptr.cyr, syscalls.cyr (sys_getpid), thread_local.cyr.
+#
+# v6.5.11. Darwin has no `clone(2)` and no futex. `lib/thread.cyr`'s Linux body is
+# built on SYS_CLONE + CLONE_* + futex + hand-assembled trampolines, and macOS fell
+# through to it because only WIN and AGNOS were routed away — so `thread_create` on
+# macOS reached a syscall number that does not exist on Darwin.
+#
+# ⛔ WHY THIS APPEARED ONLY AT v6.5.11, AND WHY THE OLD BEHAVIOUR WAS NOT "WORKING":
+# `mmap_stack` (thread.cyr) maps with `MAP_PRIVATE | MAP_ANONYMOUS`, and until v6.5.11
+# `lib/mmap.cyr` declared MAP_ANONYMOUS = 32 — the LINUX value — unguarded. On Darwin
+# that is not the anonymous bit (0x1000), so the mapping was a FILE mapping with
+# fd = -1 and the mmap FAILED. `thread_create` then hit `if (sbase < 0) { return 0; }`
+# and bailed out. The result looked like a benign no-op, and the VR-01 guards were
+# written to assert exactly that ("create/join ran without faulting").
+#
+# So a broken constant was acting as the accidental safety net for a missing backend.
+# Fixing MAP_ANONYMOUS (correctly) removed the net: the mapping now succeeds, execution
+# proceeds to SYS_CLONE, and Darwin answers with SIGSYS — measured on real ach (Intel
+# Mac): thread_spawn / thread_detach / sync_mutex all exit 140 (128 + 12 = SIGSYS),
+# where the pre-fix binary exited 0. Bisected with only lib/mmap.cyr swapped.
+#
+# The repair is NOT to guard thread_create into a polite no-op — that would re-create
+# the same silence deliberately. It is to route macOS to the serial fallback, exactly
+# as v6.0.53 did for Windows (2026-06-03-windows-threading-stdlib-gap) and v6.2.3 for
+# agnos. The thread body then ACTUALLY RUNS, which is precisely what
+# 2026-07-03-macos-threading-workers-dont-run reports as broken.
+#
+# ⚠ SCOPE, stated plainly: this makes threading CORRECT-but-UNPARALLELIZED on macOS.
+# It is not the concurrent Darwin backend (bsdthread_create / __ulock_wait), which
+# remains the roadmapped Slot 11 item and which this file does not attempt. Consumers
+# that use threads for THROUGHPUT get correct results, serially; consumers that need
+# genuine parallelism on macOS still need Slot 11. `lib/thread_agnos.cyr`'s own header
+# already described "the macOS single-threaded thread_local model" as this same family
+# — macOS was conceptually here all along and simply was never routed.
+#
+# The public surface MUST match lib/thread.cyr's so consumers stay target-agnostic:
+# thread_create / thread_join / thread_create_detached / thread_is_done / gettid /
+# chan_new / chan_send / chan_try_send / chan_recv / chan_try_recv / chan_close.
+# Mutex (MUTEX_SIZE + mutex_new/lock/unlock) comes from lib/sync.cyr, whose macOS
+# branch is lib/sync_macos.cyr; thread.cyr includes sync.cyr before routing here.
+
+# >>> include "lib/fnptr.cyr"
+include "lib/fnptr.cyr"
+# thread_local.cyr supplies thread_local_get/set + TLOCAL_MAX_SLOTS (128), used by
+# thread_create below to emulate per-thread TLS isolation, mirroring the agnos peer.
+include "lib/thread_local.cyr"
+
+# Run the thread body INLINE (serial — there is no second thread). fp is a
+# single-i64-param fn ptr; its result is discarded, matching the spawn-and-join
+# throughput model (workers communicate via shared memory, not the join value).
+#
+# TLS isolation: a REAL spawned thread gets a FRESH, zeroed thread-local block
+# (CLONE_SETTLS on the Linux path), so its thread_local_set writes never leak back
+# into the parent. The serial path shares one process-global TLS array, so we emulate
+# that contract — snapshot the caller's slots, hand the body a zeroed view, run it,
+# then restore. Without this a body's thread-local writes (e.g. sigil's
+# crypto_bank_set(worker_bank)) would persist past join and corrupt the main thread's
+# invariant. Identical reasoning to lib/thread_agnos.cyr:33-40.
+# Returns a fake non-zero handle so callers' null-checks pass + join is valid.
+# ======================================================================
+# v6.5.44 (band J phase 2) — REAL Darwin threads on arm64-macOS; x86-macOS stays serial.
+#
+# ⛔ WHY THE SPLIT IS NOT A SHORTCUT. The two Mach-O writers produce structurally different
+# binaries and only one of them can start a thread at all:
+#   arm64  EMITMACHO_ARM64 -> dyld/LC_MAIN PIE linking /usr/lib/libSystem.B.dylib. libpthread's
+#          initializer runs first, and `bsdthread_register` is ONE-SHOT PER PROCESS — so the raw
+#          bsdthread path the v6.5.43 routes enable returns EINVAL here (measured from a real
+#          cyrius binary on ecb, exit 22). But __got[5] has been bound to `_pthread_create`
+#          since v5.6.6 and never used, and THAT works.
+#   x86    EMITMACHO_EXEC -> static MH_NOUNDEFS/LC_UNIXTHREAD, no dyld, no libSystem, no __got.
+#          `pthread_create` is unreachable; `bsdthread_register` DOES work there. Its real
+#          backend is separate work and this file does not pretend otherwise — it keeps the
+#          serial fallback, which is correct-but-unparallelized, not broken.
+# So the roadmap's pinned mechanism ("bsdthread_register trampoline") is a dead end on the very
+# target band J names. The goal is unchanged; the mechanism is pthread_create.
+#
+# No trampoline is needed: a Darwin start routine is `void *(*)(void *)`, which is exactly the
+# shape of a cyrius `fn body(arg): i64` — arg 1 in x0, result in x0, stock AAPCS64 prologue.
+# ======================================================================
+# v6.5.44 — THREADS_CONCURRENT: does thread_create actually produce a SECOND thread?
+# 1 = the body runs concurrently with the caller; 0 = it runs INLINE at create (serial peer).
+# ⛔ This exists because the concurrency corpus could not tell the two apart. Every test in it
+# passed on macOS while bodies ran inline — a serial backend satisfies "the worker ran", "join
+# returned 0" and "the count is exact". A test that DISCRIMINATES must be guarded by capability
+# (never by target name, never by errno — the v6.5.36 lesson), and this is that capability.
+#ifdef CYRIUS_ARCH_AARCH64
+var THREADS_CONCURRENT = 1;   # REAL Darwin threads via __got[5] pthread_create
+#endif
+#ifndef CYRIUS_ARCH_AARCH64
+var THREADS_CONCURRENT = 0;   # x86-macOS: serial fallback (no libSystem, no __got)
+#endif
+
+#ifdef CYRIUS_ARCH_AARCH64
+
+# Control block, 40 B: +0 done · +8 fp · +16 arg · +24 pthread_t · +32 TLS block.
+# The HANDLE a caller holds IS this pointer, so `thread_is_done` reads +0 directly.
+var _THR_CTL = 40;
+
+# Thread entry. Runs on the new thread; `ctl` arrives in x0 as arg 1.
+#
+# ⚠ THE WAKE MUST FOLLOW THE STORE, AND THE FENCE MUST PRECEDE IT. A joiner parks on the
+# done word; publishing it after the wake would lose the wakeup permanently.
+fn _thr_entry(ctl): i64 {
+    _tls_bind(load64(ctl + 32));
+    fncall1(load64(ctl + 8), load64(ctl + 16));
+    _tls_unbind();
+    atomic_fence();                 # release: the body's writes happen-before done=1
+    atomic_store(ctl, 1);
+    _threads_live_dec();
+    sys_ulock_wake(0x101, ctl, 0);  # UL_COMPARE_AND_WAIT | ULF_WAKE_ALL — wake every joiner
+    return 0;
+}
+
+fn _threads_live_dec(): i64 {
+    if (_tls_live > 0) { _tls_live = _tls_live - 1; }
+    return 0;
+}
+
+# Spawn. Returns the control block as an opaque handle, or 0 on failure.
+#
+# ⚠ NO TLS SNAPSHOT HERE, and its absence is the fix rather than an omission. The serial peer
+# emulates isolation by saving/zeroing/restoring the caller's 128 slots around an INLINE call.
+# With a real thread that is not merely unnecessary, it is a race on the caller's own slots.
+# Isolation now comes from a genuinely separate per-thread block (lib/thread_local.cyr).
+fn thread_create(fp, arg): i64 {
+    alloc_init();
+    _threads_active = 1;            # arm the shared-heap lock BEFORE the thread can run
+    var ctl = alloc(_THR_CTL);
+    if (ctl == 0) { return 0; }
+    var blk = alloc(TLOCAL_MAX_SLOTS * 8);
+    if (blk == 0) { return 0; }
+    var i = 0;
+    while (i < TLOCAL_MAX_SLOTS) {  # a fresh thread must see zeroed slots
+        store64(blk + i * 8, 0);
+        i = i + 1;
+    }
+    store64(ctl, 0);                # done
+    store64(ctl + 8, fp);
+    store64(ctl + 16, arg);
+    store64(ctl + 24, 0);           # pthread_t out
+    store64(ctl + 32, blk);
+    _tls_live = _tls_live + 1;      # published BEFORE the thread can call thread_local_get
+    atomic_fence();
+    # pthread_create(&pthread_t, attr=NULL, _thr_entry, ctl) via __got[5]. 1700 is the
+    # libSystem-routine sub-band (see src/frontend/parse_expr.cyr) — NOT a BSD syscall number.
+    var rc = syscall(1700, ctl + 24, 0, &_thr_entry, ctl);
+    if (rc != 0) {
+        _threads_live_dec();
+        return 0;
+    }
+    return ctl;
+}
+
+# Block until the thread finishes. -1 on a null handle, 0 on success.
+#
+# ⚠ ONE LOAD PER ITERATION, and it is the loop condition. Darwin has no CLONE_CHILD_CLEARTID,
+# so the done word is published by the thread itself. Between the test and the park the thread
+# may finish — __ulock then sees a value MISMATCH and returns immediately (0, not -EAGAIN), the
+# loop re-tests and exits. That is why there is no lost-wakeup window.
+# ⚠ A negative return is NOT fatal: __ulock_wait yields EFAULT/EINTR transiently under memory
+# pressure and libpthread itself retries. The predicate is the word, not the return code.
+fn thread_join(t): i64 {
+    if (t == 0) { return 0 - 1; }
+    while (load64(t) == 0) {
+        sys_ulock_wait(1, t, 0, 0);   # park while the low 32 bits are still 0; 0 = forever
+    }
+    return 0;
+}
+
+# Detached spawn — 1 on success, 0 on failure.
+#
+# ⚖️ HONEST LIMITATION, stated rather than hidden: the pthread is created JOINABLE and never
+# joined, so libpthread retains its stack until process exit. Making it truly detached needs
+# `_pthread_detach` bound into __got, which means growing GOT_SIZE and the parallel
+# symtab/bind/indirect-symtab tables in src/backend/macho/emit.cyr — a Mach-O WRITER change
+# with its own verification surface, deliberately not bundled into the release that first makes
+# threads real. The behaviour is correct; the resource is retained.
+fn thread_create_detached(fp, arg): i64 {
+    if (thread_create(fp, arg) == 0) { return 0; }
+    return 1;
+}
+
+# Completion test. -1 on a null handle, else 0/1.
+# ⛔ VALID ONLY BEFORE `thread_join` — join consumes the handle (contract shared with the
+# serial peers).
+fn thread_is_done(t): i64 {
+    if (t == 0) { return 0 - 1; }
+    if (load64(t) == 0) { return 0; }
+    return 1;
+}
+
+# Current thread id. TPIDRRO_EL0 is thread-unique and non-zero on every Darwin thread, so it
+# satisfies the "distinct per thread" contract that the serial peer's sys_getpid could only
+# satisfy vacuously (one thread). Not a Mach port or a BSD tid — an identity, which is all the
+# contract asks for.
+fn gettid(): i64 { return _thr_self(); }
+#endif
+
+#ifndef CYRIUS_ARCH_AARCH64
+# ── x86-macOS: the SERIAL fallback, unchanged (see the split rationale above). ──
+fn thread_create(fp, arg): i64 {
+    _threads_active = 1;   # arm the shared-heap lock before the (inline) spawn
+    # ⛔ v6.5.39 — THIS WINDOW WAS 16 WHILE `TLOCAL_MAX_SLOTS` IS 128. Slots 16..127 were
+    # never snapshotted, never zeroed for the body, and never restored — so on this target a
+    # thread body's writes to any slot >= 16 leaked straight back into the caller, which is
+    # precisely the corruption the comment above says this code exists to prevent.
+    # ⚠ The array size must be a LITERAL, so 128 here duplicates `thread_local.cyr`'s
+    # TLOCAL_MAX_SLOTS; the LOOP bound uses the real constant so it can never under-copy again,
+    # and `tests/gates/concurrency/tls_window_matches_max_slots.sh` fails the build if the
+    # constant is ever raised above this literal.
+    var save: i64[128];
+    var i = 0;
+    while (i < TLOCAL_MAX_SLOTS) {
+        store64(&save + i * 8, thread_local_get(i));
+        thread_local_set(i, 0);
+        i = i + 1;
+    }
+    fncall1(fp, arg);
+    i = 0;
+    while (i < TLOCAL_MAX_SLOTS) {
+        thread_local_set(i, load64(&save + i * 8));
+        i = i + 1;
+    }
+    return 1;
+}
+
+# Join is a no-op — the body already ran inline at thread_create.
+fn thread_join(t): i64 {
+    if (t == 0) { return 0 - 1; }
+    return 0;
+}
+
+# ⚠ Delegating to thread_create is load-bearing, not laziness: it keeps the TLS save/restore
+# around the inline call.
+fn thread_create_detached(fp, arg): i64 {
+    if (thread_create(fp, arg) == 0) { return 0; }
+    return 1;
+}
+# The body ran inline at create, so any valid handle is by definition finished.
+# ⛔ VALID ONLY BEFORE `thread_join` — join CONSUMES the handle (contract shared across
+# all three serial fallbacks).
+fn thread_is_done(t): i64 {
+    if (t == 0) { return 0 - 1; }
+    return 1;
+}
+
+# Deliberately sys_getpid rather than SYS_GETTID: on macOS the stdlib imports the aarch64-LINUX
+# constant peer, so a gettid number there is a Linux number ESYSXLAT would have to renumber, and
+# there is exactly one thread here anyway.
+fn gettid(): i64 { return sys_getpid(); }
+#endif
+
+# Channel — a plain FIFO ring (single-threaded → no lock needed). Same 56-byte layout
+# as thread.cyr / thread_win.cyr / thread_agnos.cyr ({buf@0, cap@8, head@16, tail@24,
+# count@32, _@40, closed@48}); recv is non-blocking (0 when empty).
+fn chan_new(cap): i64 {
+    alloc_init();
+    var ch = alloc(56);
+    if (ch == 0) { return 0; }
+    var buf = alloc(cap * 8);
+    store64(ch, buf);          # buf
+    store64(ch + 8, cap);      # cap
+    store64(ch + 16, 0);       # head
+    store64(ch + 24, 0);       # tail
+    store64(ch + 32, 0);       # count
+    store64(ch + 40, 0);       # (unused — no lock on the serial path)
+    store64(ch + 48, 0);       # closed
+    return ch;
+}
+# Enqueue val (FIFO ring). Returns 0, or -1 if the channel is full.
+fn chan_send(ch, val): i64 {
+    var cap = load64(ch + 8);
+    var count = load64(ch + 32);
+    if (count >= cap) { return 0 - 1; }
+    var buf = load64(ch);
+    var tail = load64(ch + 24);
+    store64(buf + tail * 8, val);
+    store64(ch + 24, (tail + 1) % cap);
+    store64(ch + 32, count + 1);
+    return 0;
+}
+# Non-blocking send. Contract is IDENTICAL on all backends:
+#    0 → enqueued · -1 → closed · -2 → full
+#
+# ⚠ NOT an alias for this backend's `chan_send`: that returns -1 when FULL, while the
+# portable contract reserves -1 for CLOSED, and it never inspects `closed` (+48) at
+# all. Aliasing them would ship a divergent contract (the exact mistake the agnos peer
+# documents at :131-140).
+fn chan_try_send(ch, val): i64 {
+    if (load64(ch + 48) != 0) { return 0 - 1; }
+    var cap = load64(ch + 8);
+    var count = load64(ch + 32);
+    if (count >= cap) { return 0 - 2; }
+    var buf = load64(ch);
+    var tail = load64(ch + 24);
+    store64(buf + tail * 8, val);
+    store64(ch + 24, (tail + 1) % cap);
+    store64(ch + 32, count + 1);
+    return 0;
+}
+# Dequeue the oldest value (FIFO), or 0 if empty (never blocks — a blocking recv
+# would deadlock on a single thread with no concurrent sender).
+fn chan_try_recv(ch): i64 {
+    var count = load64(ch + 32);
+    if (count == 0) { return 0; }
+    var buf = load64(ch);
+    var cap = load64(ch + 8);
+    var head = load64(ch + 16);
+    var val = load64(buf + head * 8);
+    store64(ch + 16, (head + 1) % cap);
+    store64(ch + 32, count - 1);
+    return val;
+}
+# recv is non-blocking here (serial path — a blocking recv would deadlock with no
+# concurrent sender); identical to try_recv.
+fn chan_recv(ch): i64 { return chan_try_recv(ch); }
+# Mark the channel closed.
+fn chan_close(ch): i64 { store64(ch + 48, 1); return 0; }
