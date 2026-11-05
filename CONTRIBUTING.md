@@ -25,6 +25,7 @@ Start with the [README](README.md), the frozen 2.x surface in
 | `src/eval.cyr` | Eval runner + the benchmark store |
 | `src/pref.cyr` | Preference store + JSONL export |
 | `tests/ifran.{tcyr,bcyr,fcyr}` | Test suite, bench harness, fuzz harness |
+| `docker/`, `deploy/` | Container images, systemd units, the agnosticos package recipe |
 | `lib/` | Vendored stdlib + deps, written by `cyrius deps` — never edit by hand |
 
 ## Prerequisites
@@ -51,6 +52,10 @@ cd ifran
 # The full gate: lock guard, suite, bench, fuzz
 ./scripts/test.sh
 ```
+
+Or in a container with the pinned toolchain:
+`docker build -f docker/Dockerfile.dev -t ifran-dev .` then
+`docker run --rm -v "$PWD":/workspace ifran-dev` (runs `./scripts/test.sh`).
 
 The golden path (dataset → job → sweep → eval → store → preferences) is in
 [`docs/guides/getting-started.md`](docs/guides/getting-started.md), with runnable

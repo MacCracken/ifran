@@ -6,6 +6,14 @@
 
 ## Version
 
+**2.4.1 — 2026-11-04 (packaging).** `docker/` and `deploy/` converted from the
+Rust server to the Cyrius CLI and verified: four images (source, release,
+dev, GPU trainer) plus compose, systemd units for the reaper (oneshot +
+timer) and per-job runs, and a zugot-format package recipe. Workflow actions
+moved to their latest stable releases (checkout v7.0.1, action-gh-release
+v3.0.3), CI smokes the image, `sbom.yml` retired. Suite **133/133**. Detail in
+CHANGELOG `[2.4.1]`.
+
 **2.4.0 — 2026-11-04.** tula `1.2.0`; `assert`/`bench` moved to the `[test]`
 scope (binary −17 KB); readers of a non-`STR` column (a foreign or damaged
 `ifran.db`) fail cleanly instead of writing before a buffer; `tests/`
@@ -81,6 +89,10 @@ CLI on **cmdit** (generated help/version/errors). Exit codes: `run` = child's,
   All against `/tmp`.
 - Audit PASS (`docs/audit/2026-07-05-audit.md`, 0 changes) · benchmarks
   captured (`docs/benchmarks.md` — orchestration overhead ~0.6 ms/job).
+- Packaging (2.4.1): CI's `docker` job builds `docker/Dockerfile` and runs a
+  job inside it. The release/dev/trainer images, compose, the systemd units
+  (`systemd-analyze verify` + a sandboxed `systemd-run`) and the package
+  recipe's build/install steps were verified by hand at 2.4.1, not in CI.
 
 ## Consumers / proof
 
@@ -93,12 +105,11 @@ trigger.
 
 ## In flight / next
 
-Nothing in flight. The next work is in [`roadmap.md`](roadmap.md), and each
-item waits on a maintainer decision: **2.4.x** patches (the `sbom.yml`
-workflow and the stale `chore/dependency-update` branch; porting or retiring
-the Rust-era `docker/` + `deploy/` packaging) and the **2.5.0** minor (the
-experiment auto-loop's spec shape; whether `store add` adopts tula 1.2.0's
-strict checks). 2.6.x waits on cross-repo triggers (Lane 4 bote-MCP on the SY
+Nothing in flight. The next work is in [`roadmap.md`](roadmap.md): **2.4.x**
+packaging follow-ups (publishing release images, an arm64 build, syncing the
+zugot recipe at a tag) and the **2.5.0** minor, where each item waits on a
+maintainer decision (the experiment auto-loop's spec shape; whether
+`store add` adopts tula 1.2.0's strict checks; a state-directory flag). 2.6.x waits on cross-repo triggers (Lane 4 bote-MCP on the SY
 re-wire, the benchmark harness on a serving path); 2.7.x is the server stage
 (Lane 6, the priority queue); later 2.x is demand- or platform-gated (Lane 5,
 Lane 7, annotation sessions on tanur, agnos). Closed so far: Lanes 1–3, the

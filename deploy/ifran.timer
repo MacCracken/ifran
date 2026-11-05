@@ -1,0 +1,17 @@
+# Runs ifran.service (`ifran reap`) shortly after boot, which is when rows from
+# runs interrupted by a reboot need marking, and hourly after that.
+#
+# Install: /etc/systemd/system/ifran.timer, then
+#   systemctl enable --now ifran.timer
+
+[Unit]
+Description=ifran: mark orphaned runs at boot and hourly
+Documentation=https://github.com/MacCracken/ifran/blob/main/docs/cli-reference.md
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

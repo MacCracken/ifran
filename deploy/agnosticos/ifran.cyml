@@ -1,0 +1,64 @@
+# ifran — the AGNOS training control plane (Cyrius)
+# System package recipe for building from source via takumi, in the zugot
+# recipe format. This is the upstream draft for zugot's ai/ifran.cyml, which
+# still packages the Rust 1.3.0 line. Copy it there at a release tag and fill
+# [source] sha256 from that release's SHA256SUMS.
+#
+# Name: ifran (عرفان — gnosis)
+# Lang: Cyrius; one static binary, no runtime libraries.
+
+[package]
+name = "ifran"
+version = "2.4.1"
+description = "ifran — the AGNOS training control plane: jobs, signed checkpoint store, datasets, sweeps, evals, preference data"
+license = "GPL-3.0-only"
+groups = ["ai", "ml", "cyrius"]
+release = 1
+arch = "x86_64"
+
+[source]
+github_release = "MacCracken/ifran"
+release_asset = "ifran-*.tar.gz"
+# From the release's SHA256SUMS (the ifran-<tag>.tar.gz line)
+sha256 = ""
+
+[depends]
+runtime = []
+build = ["cyrius"]
+
+[build]
+pre_build = ""
+configure = ""
+# --locked: lib/ and cyrius.lock must be exactly what the pinned tags resolve
+make = "cyrius deps --locked && mkdir -p build && cyrius build src/main.cyr build/ifran"
+check = "cyrius test tests/ifran.tcyr"
+install = '''
+# The binary (static)
+mkdir -p $PKG/usr/bin
+install -m 0755 build/ifran $PKG/usr/bin/ifran
+
+# systemd: the reaper (oneshot + timer) and the per-job template
+mkdir -p $PKG/usr/lib/systemd/system
+install -m 0644 deploy/ifran.service deploy/ifran.timer 'deploy/ifran-job@.service' \
+    $PKG/usr/lib/systemd/system/
+
+# The GPU drop-in is opt-in: shipped as documentation, enabled by copying it to
+# /etc/systemd/system/ifran-job@.service.d/training.conf
+mkdir -p $PKG/usr/share/doc/ifran
+install -m 0644 deploy/ifran-training.conf $PKG/usr/share/doc/ifran/ifran-training.conf
+
+# The ifran system user and its state + job-spec directories
+mkdir -p $PKG/usr/lib/sysusers.d
+cat > $PKG/usr/lib/sysusers.d/ifran.conf << 'EOF'
+u ifran - "ifran training control plane" /var/lib/ifran /usr/sbin/nologin
+EOF
+mkdir -p $PKG/usr/lib/tmpfiles.d
+cat > $PKG/usr/lib/tmpfiles.d/ifran.conf << 'EOF'
+d /var/lib/ifran 0750 ifran ifran -
+d /etc/ifran 0750 root ifran -
+d /etc/ifran/jobs 0750 root ifran -
+EOF
+'''
+
+[security]
+hardening = ["pie", "fullrelro", "fortify", "stackprotector", "bindnow"]

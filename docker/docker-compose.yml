@@ -1,25 +1,34 @@
+# ifran is a CLI: each `run` is one command against the shared state volume.
+#
+#   docker compose -f docker/docker-compose.yml build ifran
+#   docker compose -f docker/docker-compose.yml run --rm ifran runs
+#   docker compose -f docker/docker-compose.yml run --rm ifran run job.cyml
+#
+# The GPU job runner (Dockerfile.trainer) is behind the "gpu" profile:
+#
+#   RENDER_GID="$(getent group render | cut -d: -f3)" \
+#     docker compose -f docker/docker-compose.yml --profile gpu run --rm trainer run jobs/train.cyml
 services:
-  ifran-server:
+  ifran:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    ports:
-      - "8420:8420"
-      - "8421:8421"
+    image: ifran:latest
     volumes:
-      - ifran-models:/var/lib/ifran/models
-      - ifran-data:/var/lib/ifran/data
-    environment:
-      - IFRAN_STORAGE__MODELS_DIR=/var/lib/ifran/models
-      - IFRAN_STORAGE__DATABASE=/var/lib/ifran/data/ifran.db
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+      - ifran-data:/var/lib/ifran
+
+  trainer:
+    profiles: ["gpu"]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.trainer
+    image: ifran-trainer:latest
+    volumes:
+      - ifran-data:/var/lib/ifran
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${RENDER_GID:-render}"
 
 volumes:
-  ifran-models:
   ifran-data:

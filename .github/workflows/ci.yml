@@ -16,7 +16,7 @@ jobs:
     name: Build & Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4 (pinned — CVE-21)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (pinned — CVE-21)
 
       - name: Install Cyrius toolchain
         # The cyrius.cyml [package].cyrius pin is the single source of
@@ -51,3 +51,24 @@ jobs:
         # stub didn't exist (Issue 1) and also wouldn't ever exercise
         # tests/${proj}.tcyr.
         run: cyrius test
+
+  docker:
+    name: Docker image (smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (pinned — CVE-21)
+
+      - name: Build docker/Dockerfile
+        # The image installs the cyrius.cyml pin and builds with
+        # `cyrius deps --locked`, so it compiles exactly what the job above does.
+        run: docker build -f docker/Dockerfile --build-arg VERSION="$(cat VERSION)" -t ifran:ci .
+
+      - name: Run a job inside the image
+        run: |
+          set -e
+          docker run --rm ifran:ci --version
+          docker volume create ifran-ci
+          docker run --rm -v ifran-ci:/var/lib/ifran --entrypoint sh ifran:ci -c \
+            'printf "[job]\nname = \"smoke\"\nbin = \"/bin/echo\"\nargs = \"ok\"\nlogdir = \"runs/logs\"\n" > job.cyml'
+          docker run --rm -v ifran-ci:/var/lib/ifran ifran:ci run job.cyml
+          docker run --rm -v ifran-ci:/var/lib/ifran ifran:ci show 1 | grep -x ok

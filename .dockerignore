@@ -1,13 +1,23 @@
-target/
+# Build context for docker/Dockerfile*. The source build needs the manifest,
+# VERSION, src/, the vendored lib/ and cyrius.lock (plus scripts/ and tests/
+# for the dev image); everything else stays out.
 .git/
 .github/
-docs/
 .claude/
-coverage/
-sbom/
-node_modules/
-tarpaulin-report.*
-vulnerability-report.json
+docs/
+benchmarks/
+examples/
+
+# Build outputs and the tracked binaries (the image builds its own)
+build/
+/ifran
+
+# Runtime artifacts
+ifran.db
+*.db-journal
+runs/
+
+# Models (too large, never part of an image)
 *.gguf
 *.safetensors
 *.bin

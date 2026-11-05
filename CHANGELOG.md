@@ -7,6 +7,82 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-11-04
+
+The remaining 2.4.x patch work: the Rust-era `docker/` and `deploy/` packaging
+is converted to the Cyrius CLI and verified working, and the workflows move to
+the latest stable actions. No change to ifran itself beyond the version
+literal.
+
+### Changed
+
+- **Docker images build and run the Cyrius ifran.** Each was built and run
+  here:
+  - `docker/Dockerfile` installs cyrius at the `cyrius.cyml` pin in a
+    `debian:trixie-slim` builder, runs `cyrius deps --locked` and builds the
+    static binary (byte-identical in size to a host build). The runtime is the
+    AGNOS base with an unprivileged `ifran` user, state in a `/var/lib/ifran`
+    volume, and `tini -- ifran` as the entrypoint. A job run, `runs`/`show`,
+    `keys init` (sk at 0600 in `/var/lib/ifran/.ifran`), `dataset add` +
+    `validate` and `reap` all work across separate `docker run`s on one volume.
+  - `Dockerfile.release` wraps a prebuilt `bin/<arch>/ifran` (the release job's
+    binary) and runs `ifran --version` at build time.
+  - `Dockerfile.dev` is the pinned toolchain with the repo mounted at
+    `/workspace`; its default command, `./scripts/test.sh`, passes in the
+    container.
+  - `Dockerfile.trainer` was a CUDA/Python trainer whose scripts no longer exist.
+    It is now a GPU job runner: ifran plus the sibling binaries staged in
+    `docker/siblings/` (on `PATH` at `/opt/ifran/siblings`). The siblings reach
+    the GPU through mabda's DRM render nodes, not CUDA, so the image passes
+    `--device /dev/dri` with the render group rather than using a vendor base.
+    A job ran a staged sibling, and the render node was usable by the `ifran`
+    user.
+  - `docker-compose.yml` runs the CLI on a shared volume (`ifran`) with the
+    trainer behind the `gpu` profile, replacing the server with its ports.
+  - `.dockerignore` is rewritten for the Cyrius tree; `.gitignore` ignores the
+    staged `docker/siblings/*` and `bin/`.
+- **systemd units for the CLI.** Each verifies with `systemd-analyze` and runs
+  under its own sandboxing through `systemd-run`:
+  - `deploy/ifran.service` (was the `ifran serve` daemon) is a hardened oneshot
+    running `ifran reap`, with no devices and no network. The new
+    `deploy/ifran.timer` runs it 2 minutes after boot and hourly.
+  - The new `deploy/ifran-job@.service` runs `/etc/ifran/jobs/<name>.cyml` as a
+    unit whose exit code is the job's (checked with a failing job), with only
+    `/var/lib/ifran` writable.
+  - `deploy/ifran-training.conf` is now that unit's GPU drop-in (render/video
+    groups, memlock and nofile limits) instead of a Docker-group override.
+  - Each `ExecStart` names `ifran` bare, so systemd's search path finds it in
+    `/usr/local/bin` or `/usr/bin`.
+- **`deploy/agnosticos/ifran.cyml` replaces `ifran.pkg.toml`.** The Cyrius
+  ecosystem builds packages from zugot `.cyml` recipes. This is the upstream
+  draft for zugot's `ai/ifran.cyml`, which still packages the Rust 1.3.0 line.
+  It builds with cyrius, has no runtime libraries (the binary is static), and
+  installs the binary, the units, the drop-in as documentation, and
+  sysusers/tmpfiles entries for the `ifran` user, `/var/lib/ifran` and
+  `/etc/ifran/jobs`. Its `make`, `check` and `install` steps were run into a
+  scratch `$PKG`. The old recipe was `type = "cargo"` and `license = "MIT"`, and
+  it registered HTTP/gRPC endpoints ifran no longer has.
+- **Workflow actions on their latest stable releases**, still SHA-pinned
+  (CVE-21): `actions/checkout` v4 → **v7.0.1**, `softprops/action-gh-release`
+  v2 → **v3.0.3**. Both moved to Node 24. checkout v6 persists credentials to a
+  separate file (`release-automation`'s push still works), and v7 blocks
+  fork-PR checkout under `pull_request_target`/`workflow_run`, which ifran
+  doesn't use.
+- **CI builds and smokes the image**: a new `docker` job builds
+  `docker/Dockerfile` and runs a job inside it. The agnosticos base is pulled
+  anonymously from GHCR.
+- The getting-started guide gains *Containers and services*, and CONTRIBUTING
+  the dev image. The guide's stale `rust-old/` line is corrected.
+
+### Removed
+
+- `.github/workflows/sbom.yml`. Its GitHub dependency review does not read
+  `cyrius.cyml`, so it checked nothing; CI's `cyrius deps --locked` is the lock
+  guard.
+- `deploy/ifran-inference.conf` and `deploy/ifran.toml.example`: the Cyrius
+  ifran has no inference mode (serving is hoosh's) and reads no config file.
+  Both survive in git history.
+
 ## [2.4.0] - 2026-11-04
 
 The roadmap's 2.4.x items that needed no design decision: tula 1.2.0, the

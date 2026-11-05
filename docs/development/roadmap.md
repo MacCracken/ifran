@@ -10,21 +10,25 @@ Everything here is additive on the frozen 2.x surface. Nothing is calendared:
 an item opens when its trigger fires or the maintainer pulls it forward. A
 release line is the earliest an item could land, not a promise that it will.
 
-## 2.4.x — patch-sized follow-ups (each waits on a maintainer decision)
+## 2.4.x — packaging follow-ups
 
-- **CI leftovers.** `sbom.yml` runs GitHub's dependency review, which does not
-  read `cyrius.cyml`, so it checks nothing (and its actions are unpinned):
-  retire it, or replace it with a check that sees cyrius deps (CI's
-  `cyrius deps --locked` already guards the lock). The remote branch
-  `chore/dependency-update`, left by the deleted Rust workflow, can go.
-- **Packaging: port or retire `docker/` and `deploy/`.** Both still describe
-  the Rust product: an `ifran-server` with REST/gRPC ports 8420/8421, a
-  Python trainer image, an `ifran serve` systemd unit with `RUST_LOG`, and
-  `deploy/agnosticos/ifran.pkg.toml` with `type = "cargo"` and
-  `license = "MIT"`. The Cyrius ifran is a GPL-3.0-only CLI with no server.
-  Decide between a runtime image plus an agnosticos package carrying the Cyrius
-  binary (the `Dockerfile.release` pattern on the agnosticos base) and removing
-  them.
+2.4.1 converted `docker/` and `deploy/` to the Cyrius CLI and verified each
+piece by hand; CI builds and smokes only `docker/Dockerfile`. What is left:
+
+- **Publish release images.** `release.yml` would stage `build/ifran` as
+  `bin/amd64/ifran`, build `docker/Dockerfile.release` and push it to GHCR
+  (`packages: write`, a SHA-pinned login action). *Decision*: the image name and
+  tags (e.g. `ghcr.io/maccracken/ifran:<tag>` + `latest`).
+- **arm64.** Build `cyrius build --aarch64` in the release job, publish the
+  binary, and make the image multi-arch (`bin/arm64/ifran`). Check that the
+  cyrius installer ships an aarch64 toolchain for the source-build images too.
+- **Sync the zugot recipe at a tag.** Copy `deploy/agnosticos/ifran.cyml` into
+  zugot's `ai/ifran.cyml`, fill `[source] sha256` from the release's
+  `SHA256SUMS`, and update or retire `marketplace/ifran.cyml`, which still
+  describes the Rust crate.
+- **Delete the stale remote branch** `chore/dependency-update`, left by the
+  deleted Rust workflow (needs push access:
+  `git push origin --delete chore/dependency-update`).
 
 ## 2.5.0 — the next minor (each waits on a maintainer decision)
 
@@ -42,6 +46,13 @@ release line is the earliest an item could land, not a promise that it will.
   migration), or left alone, and whether an opt-in `--require-signed` exists.
   Either one changes what the frozen `store` verbs accept, so it ships as an
   additive minor with the default stated.
+- **A state-directory option.** ifran keeps `ifran.db` (and relative logdirs)
+  in the working directory and keys in `$HOME/.ifran`. The 2.4.1 units and
+  images place state by setting both, which works but is implicit. An
+  `IFRAN_HOME`-style variable or a global `--db` flag would make it explicit;
+  `src/runstore.cyr` already has the override hook (`runstore_set_path`).
+  *Decision*: its name and precedence. This is additive: today's behavior is
+  the default.
 
 ## 2.6.x — cross-repo triggers
 

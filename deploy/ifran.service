@@ -1,51 +1,39 @@
+# ifran — mark orphaned runs (`ifran reap`), run by ifran.timer.
+#
+# ifran is a CLI with no daemon. Its one recurring maintenance task is the
+# reaper: a run row left `running` by a crash or reboot is re-checked (a
+# signal-0 probe of its recorded PID) and marked orphaned only when the PID is
+# definitely gone. Live runs are left alone.
+#
+# Install: /etc/systemd/system/ifran.service + ifran.timer, then
+#   systemctl enable --now ifran.timer
+# State lives in /var/lib/ifran (ifran.db, run logs, keys under .ifran/).
+
 [Unit]
-Description=Ifran LLM Controller
-Documentation=https://github.com/MacCracken/ifran
-After=network-online.target
-Wants=network-online.target
+Description=ifran: mark orphaned runs (reap)
+Documentation=https://github.com/MacCracken/ifran/blob/main/docs/cli-reference.md
+After=local-fs.target
 
 [Service]
-Type=notify
-ExecStart=/usr/local/bin/ifran serve
-Environment=IFRAN_CONFIG=/etc/ifran/ifran.toml
-Environment=RUST_LOG=info
-
-# Run as dedicated service user
+Type=oneshot
+# Resolved through systemd's fixed search path (/usr/local/bin, /usr/bin, …)
+ExecStart=ifran reap
 User=ifran
 Group=ifran
+WorkingDirectory=/var/lib/ifran
+Environment=HOME=/var/lib/ifran
 
-# Restart policy
-Restart=on-failure
-RestartSec=5
-WatchdogSec=30
-ExecHealthCheck=/usr/bin/curl -sf http://127.0.0.1:8420/health
-
-# Resource limits
-LimitNOFILE=65536
-LimitMEMLOCK=infinity
-
-# Security hardening
-# NOTE: Drop-in overrides for inference-only and training modes are available.
-# See deploy/ifran-inference.conf and deploy/ifran-training.conf.
-# Install to /etc/systemd/system/ifran.service.d/ as needed.
+# The reaper reads and updates ifran.db and probes PIDs. Nothing else.
 ProtectSystem=strict
 ProtectHome=true
-PrivateTmp=true
-NoNewPrivileges=true
 ReadWritePaths=/var/lib/ifran
-ReadOnlyPaths=/etc/ifran
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+NoNewPrivileges=true
+RestrictSUIDSGID=true
+LockPersonality=true
 
-# GPU access — NVIDIA devices and DRI for AMD ROCm
-DeviceAllow=/dev/nvidia* rwm
-DeviceAllow=/dev/nvidiactl rwm
-DeviceAllow=/dev/nvidia-uvm rwm
-DeviceAllow=/dev/nvidia-uvm-tools rwm
-DeviceAllow=/dev/dri/* rwm
-
-# Logging
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=ifran
-
-[Install]
-WantedBy=multi-user.target

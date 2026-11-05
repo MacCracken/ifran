@@ -1,0 +1,42 @@
+# ifran — run one job spec as a unit: /etc/ifran/jobs/<name>.cyml
+#
+#   systemctl start ifran-job@train        # ifran run /etc/ifran/jobs/train.cyml
+#   journalctl -u ifran-job@train           # ifran's output; the run's own log is in its logdir
+#
+# The unit exits with the job's exit code (ifran's `run` contract), so
+# `systemctl status` shows the child's result. The run is recorded in
+# /var/lib/ifran/ifran.db like any other. A relative `logdir` in the spec is
+# relative to /var/lib/ifran.
+#
+# GPU jobs: add ifran-training.conf as a drop-in
+# (/etc/systemd/system/ifran-job@.service.d/training.conf).
+
+[Unit]
+Description=ifran job %i
+Documentation=https://github.com/MacCracken/ifran/blob/main/docs/guides/getting-started.md
+After=local-fs.target
+ConditionPathExists=/etc/ifran/jobs/%i.cyml
+
+[Service]
+Type=exec
+# Resolved through systemd's fixed search path (/usr/local/bin, /usr/bin, …)
+ExecStart=ifran run /etc/ifran/jobs/%i.cyml
+User=ifran
+Group=ifran
+WorkingDirectory=/var/lib/ifran
+Environment=HOME=/var/lib/ifran
+
+# A job spec's `bin` may live anywhere (a sibling's build dir under /home is
+# common), so home directories are readable; nothing outside /var/lib/ifran
+# is writable.
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/ifran
+ReadOnlyPaths=/etc/ifran
+PrivateTmp=true
+NoNewPrivileges=true
+RestrictSUIDSGID=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ifran-job-%i

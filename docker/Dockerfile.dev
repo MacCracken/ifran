@@ -1,15 +1,30 @@
-FROM rust:1.89-bookworm
+# Development image: the cyrius toolchain at the cyrius.cyml pin, with the
+# repository mounted at /workspace. The default command is the full local gate.
+#
+#   docker build -f docker/Dockerfile.dev -t ifran-dev .
+#   docker run --rm -v "$PWD":/workspace ifran-dev                      # ./scripts/test.sh
+#   docker run --rm -v "$PWD":/workspace ifran-dev ./scripts/build.sh   # -> build/ifran
+#
+# Rebuild the image after a toolchain pin move: the pin is read at build time.
+FROM debian:trixie-slim
 
-RUN apt-get update && apt-get install -y \
-    protobuf-compiler \
-    cmake \
-    pkg-config \
-    libssl-dev \
-    python3 \
-    python3-pip \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl git \
     && rm -rf /var/lib/apt/lists/*
+
+# The toolchain pin comes from cyrius.cyml, never from this file.
+COPY cyrius.cyml /tmp/cyrius.cyml
+RUN CYRIUS_VERSION="$(grep '^cyrius = ' /tmp/cyrius.cyml | head -1 | sed 's/cyrius = "\(.*\)"/\1/')" \
+    && echo "Installing Cyrius $CYRIUS_VERSION" \
+    && curl -sSf https://raw.githubusercontent.com/MacCracken/cyrius/main/scripts/install.sh \
+        | CYRIUS_VERSION="$CYRIUS_VERSION" sh \
+    && rm /tmp/cyrius.cyml
+ENV PATH="/root/.cyrius/bin:${PATH}"
+
+# The mounted checkout belongs to the host user; let git read it anyway.
+RUN git config --global --add safe.directory /workspace
 
 WORKDIR /workspace
 VOLUME ["/workspace"]
 
-CMD ["cargo", "watch", "-x", "run --bin ifran-server --all-features"]
+CMD ["./scripts/test.sh"]

@@ -1,29 +1,66 @@
-FROM nvidia/cuda:12.4.1-devel-ubuntu22.04
+# GPU job runner: ifran plus the sibling binaries its jobs run, with GPU access.
+#
+# The sovereign ML siblings reach the GPU through mabda, which drives DRM
+# render nodes directly (amdgpu, nouveau), not CUDA. So this image needs no
+# vendor runtime: pass the render node in at run time.
+#
+#   cp /path/to/attn11 /path/to/tarka docker/siblings/       # what your jobs' `bin` names
+#   docker build -f docker/Dockerfile.trainer --build-arg VERSION="$(cat VERSION)" -t ifran-trainer .
+#   docker run --rm -v ifran-data:/var/lib/ifran \
+#       --device /dev/dri --group-add "$(getent group render | cut -d: -f3)" \
+#       ifran-trainer run jobs/train.cyml
+#
+# Binaries in docker/siblings/ land in /opt/ifran/siblings (on PATH); a job
+# spec names them by full path (bin = "/opt/ifran/siblings/attn11").
 
-RUN apt-get update && apt-get install -y \
-    python3 python3-pip python3-venv git \
+FROM debian:trixie-slim AS builder
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl git \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /trainer
+WORKDIR /src
 
-# Install Python dependencies (cached layer)
-COPY scripts/train/requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+# The toolchain pin comes from cyrius.cyml, never from this file.
+COPY cyrius.cyml VERSION ./
+RUN CYRIUS_VERSION="$(grep '^cyrius = ' cyrius.cyml | head -1 | sed 's/cyrius = "\(.*\)"/\1/')" \
+    && echo "Installing Cyrius $CYRIUS_VERSION" \
+    && curl -sSf https://raw.githubusercontent.com/MacCracken/cyrius/main/scripts/install.sh \
+        | CYRIUS_VERSION="$CYRIUS_VERSION" sh
+ENV PATH="/root/.cyrius/bin:${PATH}"
 
-# Copy all training scripts
-COPY scripts/train/*.py /trainer/scripts/
+COPY . .
+RUN cyrius deps --locked \
+    && mkdir -p build \
+    && cyrius build src/main.cyr build/ifran \
+    && ./build/ifran --version
 
-# Create workspace directories for checkpoints, datasets, and configs
-RUN mkdir -p /workspace/checkpoints /workspace/datasets /workspace/configs
+FROM ghcr.io/maccracken/agnosticos:latest
 
-# Default: run the SFT script. Override with the appropriate script per method:
-#   docker run ... ifran-trainer scripts/train_sft.py --config-file /workspace/configs/config.json
-#   docker run ... ifran-trainer scripts/train_dpo.py --config-json '...'
-#   docker run ... ifran-trainer scripts/train_rlhf.py --config-json '...'
-#   docker run ... ifran-trainer scripts/train_full.py --config-json '...'
-#   docker run ... ifran-trainer scripts/train_distill.py --config-json '...'
-#
-# Or pass config via TRAINING_CONFIG env var (used by Ifran DockerExecutor):
-#   docker run -e TRAINING_CONFIG='...' ... ifran-trainer scripts/train_sft.py
-ENTRYPOINT ["python3"]
-CMD ["scripts/train_sft.py"]
+ARG VERSION=dev
+LABEL org.opencontainers.image.title="ifran-trainer"
+LABEL org.opencontainers.image.description="ifran with sibling training binaries and DRM GPU access, for running training jobs"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.source="https://github.com/MacCracken/ifran"
+LABEL org.opencontainers.image.licenses="GPL-3.0-only"
+LABEL org.opencontainers.image.base.name="ghcr.io/maccracken/agnosticos:latest"
+
+USER root
+RUN groupadd -g 1002 ifran \
+    && useradd -u 1002 -g ifran -d /var/lib/ifran -M -s /usr/sbin/nologin ifran \
+    && mkdir -p /var/lib/ifran /opt/ifran/siblings \
+    && chown ifran:ifran /var/lib/ifran \
+    && chmod 0750 /var/lib/ifran
+
+COPY --from=builder /src/build/ifran /usr/local/bin/ifran
+COPY docker/siblings/ /opt/ifran/siblings/
+RUN rm -f /opt/ifran/siblings/README.md
+
+USER ifran
+ENV HOME=/var/lib/ifran
+ENV PATH="/opt/ifran/siblings:${PATH}"
+WORKDIR /var/lib/ifran
+VOLUME ["/var/lib/ifran"]
+
+ENTRYPOINT ["tini", "--", "/usr/local/bin/ifran"]
+CMD ["--help"]

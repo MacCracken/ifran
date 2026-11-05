@@ -66,10 +66,35 @@ dataset = 2                                      # an `ifran dataset` id
 Sweeps wrap the same shape (`[sweep]` + `[sweep.grid]` axes); evals add
 `metric = "loss"` to pull a number from the log. See `examples/`.
 
+## Containers and services
+
+ifran is one static binary, so it packages simply. Each container run or unit
+start is one command against the state in `/var/lib/ifran` (`ifran.db`, run
+logs, keys under `.ifran/`).
+
+```sh
+# image from source (docker/Dockerfile), state on a named volume
+docker build -f docker/Dockerfile --build-arg VERSION="$(cat VERSION)" -t ifran .
+docker run --rm -v ifran-data:/var/lib/ifran ifran runs
+
+# GPU jobs: stage sibling binaries in docker/siblings/, pass the render node
+docker build -f docker/Dockerfile.trainer -t ifran-trainer .
+docker run --rm -v ifran-data:/var/lib/ifran --device /dev/dri \
+    --group-add "$(getent group render | cut -d: -f3)" ifran-trainer run jobs/train.cyml
+```
+
+`docker/docker-compose.yml` wraps both (`--profile gpu` for the trainer).
+On a host, `deploy/` has the systemd units: `ifran-job@.service` runs
+`/etc/ifran/jobs/<name>.cyml` as a unit that exits with the job's code
+(`deploy/ifran-training.conf` is its GPU drop-in), and `ifran.timer` runs
+`ifran reap` at boot and hourly. `deploy/agnosticos/ifran.cyml` is the package
+recipe that installs all of it.
+
 ## Layout
 
 - `src/main.cyr` — the cmdit CLI; `src/{jobspec,run,runstore}.cyr` — the job
   core; `src/{keys,store}.cyr` — the signed model store; `src/dataset.cyr` ·
   `src/sweep.cyr` · `src/eval.cyr` · `src/pref.cyr`.
 - `tests/ifran.tcyr` — the suite (all against `/tmp`).
-- `rust-old/` — the preserved Rust line (reference-only; held until ~2.1/2.2).
+- `docker/` · `deploy/` — container images, systemd units, the package recipe.
+- The Rust line (`rust-old/`) was removed after 2.2.0; it survives in git history.

@@ -51,3 +51,8 @@ runs/
 # cyrius local mode (CYRIUS_LOCAL=1 / --local, cyrius >= 6.7.6) vendors the
 # ../<dep> checkouts here. Only this subdir: build/ifran etc. are tracked.
 /build/local-deps/
+
+# Binaries staged for docker images (Dockerfile.trainer siblings, Dockerfile.release bin/<arch>/)
+/docker/siblings/*
+!/docker/siblings/README.md
+/bin/
