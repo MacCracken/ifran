@@ -10,7 +10,7 @@ watch — redis/tokio/axum — retired with the port; see `rust-old/`.)
 | cyrius | 6.6.20 | toolchain | bump opportunistically per release discipline; check its CHANGELOG + `docs/development/ecosystem-migration.md` first |
 | patra | 1.15.2 | run/model/dataset/pref tables | dialect gotchas recorded in CHANGELOG porting notes (0-based binds, no implicit rowid, type-keyword column names). Newest 6.6-line tag; 1.16.0+ pins 6.7.x |
 | sigil | 3.13.10 | ed25519 (keys, tula verify) + sha256 (content addressing) | tula's unresolved-symbol supplier — include BEFORE tula. Newest 6.6-line tag; 3.13.11+ pins 6.7.x |
-| tula | 1.0.2 | artifact format (validate/verify) | format v1 frozen; nothing to chase |
+| tula | 1.0.3 | artifact format (validate/verify) | format v1 frozen; nothing to chase. Pins exactly 6.6.20, with the same sigil (3.13.10) as ifran |
 | cmdit | 1.2.6 | CLI (verbs/help/version/exit codes) | API frozen at 1.0; append-only. Pins exactly 6.6.20; 1.3.0+ pins 6.7.x |
 
 On 6.6.x the `path = "../<dep>"` lines override `tag`: every compiling verb

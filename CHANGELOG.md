@@ -7,6 +7,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.2.3] - 2026-11-04
+
+### Changed
+
+- **tula `1.0.2` → `1.0.3`**, tula's own move to cyrius 6.6.20 (no source
+  change). Its sigil dep moves to `3.13.10`, the version ifran already pins,
+  so the graph still has a single sigil. `lib/tula.cyr` changes only in its
+  version lines. `cyrius.lock` adds the 1.0.3 commit pin (`ad2a39c`); the
+  1.0.2 pin line stays, because 6.6.20 keeps an old tag's pin after a bump.
+- Re-verified from a staged copy outside `~/Repos` (see the `[2.2.2]` porting
+  notes): build, `tests/ifran.tcyr` **120/120**, bench, fuzz.
+
 ## [2.2.2] - 2026-11-04
 
 ### Changed

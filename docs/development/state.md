@@ -6,6 +6,10 @@
 
 ## Version
 
+**2.2.3 — 2026-11-04 (dep maintenance).** tula `1.0.2` → `1.0.3` (tula's
+own 6.6.20 bump; no source change). Suite **120/120**, plus bench and fuzz.
+Detail in CHANGELOG `[2.2.3]`.
+
 **2.2.2 — 2026-11-04 (toolchain maintenance).** cyrius `6.6.2` → `6.6.20`;
 deps moved to their newest 6.6-line tags (see below); `lib/` re-vendored from
 the 6.6.20 snapshot. No surface change. Suite **120/120**, plus bench and
@@ -52,7 +56,7 @@ CLI on **cmdit** (generated help/version/errors). Exit codes: `run` = child's,
 ## Toolchain & deps
 
 - **Cyrius pin**: `6.6.20` (cyrius.cyml).
-- Deps: patra 1.15.2 · sigil 3.13.10 · tula 1.0.2 · cmdit 1.2.6. These are
+- Deps: patra 1.15.2 · sigil 3.13.10 · tula 1.0.3 · cmdit 1.2.6. These are
   the newest tags each dep has on the 6.6 line; the next ones need cyrius
   6.7.x (pins + watch: [`dependency-watch.md`](dependency-watch.md)).
 - ⚠ **Local resolution**: on 6.6.x the `path = "../<dep>"` overrides make
