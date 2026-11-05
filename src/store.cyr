@@ -182,17 +182,14 @@ fn store_verify(id): i64 {
         patra_result_free(rs);
         return 1;
     }
-    var pathp = patra_result_get_str(rs, 0, 0);
-    var pathl = patra_result_get_str_len(rs, 0, 0);
-    var path = alloc(pathl + 1);
-    memcpy(path, pathp, pathl);
-    store8(path + pathl, 0);
-    var hashp = patra_result_get_str(rs, 0, 1);
-    var hashl = patra_result_get_str_len(rs, 0, 1);
-    var want = alloc(hashl + 1);
-    memcpy(want, hashp, hashl);
-    store8(want + hashl, 0);
+    var path = ifr_str_cell(rs, 0, 0);
+    var want = ifr_str_cell(rs, 0, 1);
     patra_result_free(rs);
+    if (path == 0) { want = 0; }
+    if (want == 0) {
+        println("ifran: models.path/hash are not STR columns (foreign or damaged ifran.db)");
+        return 1;
+    }
     var sizep = alloc(8);
     var buf = _store_map_file(path, sizep);
     if (buf == 0) { println("ifran: stored file missing/unreadable"); return 1; }

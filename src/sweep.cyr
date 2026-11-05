@@ -351,11 +351,8 @@ fn sweep_best(sid, key, want_max): i64 {
                             var row = rows + have * 24;
                             store64(row, patra_result_get_int(rs, i, 0));
                             store64(row + 8, load64(vp));
-                            var ap = patra_result_get_str(rs, i, 1);
-                            var al = patra_result_get_str_len(rs, i, 1);
-                            var ac = alloc(al + 1);
-                            memcpy(ac, ap, al);
-                            store8(ac + al, 0);
+                            var ac = ifr_str_cell(rs, i, 1);
+                            if (ac == 0) { ac = "?"; }      # non-STR args: show, don't copy
                             store64(row + 16, ac);
                             have = have + 1;
                             got = 1;

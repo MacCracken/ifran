@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Claude Code PostToolUse hook (matcher "Write|Edit"): format-check a
-# first-party Cyrius file after it changes, and lint it when it is under src/.
-# Nothing is rewritten; findings go
+# Claude Code PostToolUse hook (matcher "Write|Edit"): format-check and lint a
+# first-party Cyrius file after it changes. Nothing is rewritten; findings go
 # back to Claude on stderr with exit 2. Not wired by default — add it under
 # hooks.PostToolUse in .claude/settings.json to use it.
 set -euo pipefail
@@ -33,12 +32,7 @@ if ! out=$(cyrius fmt --check "$FILE" 2>&1); then
     echo "$out" >&2
     exit 2
 fi
-# 0 lint warnings is the src/ rule (docs/development/README.md)
-case "$FILE" in
-    "$REPO_ROOT"/src/*)
-        if ! out=$(cyrius lint --exit-with-count "$FILE" 2>&1); then
-            echo "$out" >&2
-            exit 2
-        fi
-        ;;
-esac
+if ! out=$(cyrius lint --exit-with-count "$FILE" 2>&1); then
+    echo "$out" >&2
+    exit 2
+fi

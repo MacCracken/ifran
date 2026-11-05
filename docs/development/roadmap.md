@@ -10,20 +10,13 @@ Everything here is additive on the frozen 2.x surface. Nothing is calendared:
 an item opens when its trigger fires or the maintainer pulls it forward. A
 release line is the earliest an item could land, not a promise that it will.
 
-## 2.4.x — ready to pick up (no external blocker)
+## 2.4.x — patch-sized follow-ups (each waits on a maintainer decision)
 
-- **Experiment auto-loop** (train → eval → compare per combo, as one
-  orchestration). *Blocked on a spec decision*: how an eval template sits inside
-  `[sweep]` — which metric, which gate, per combo or post hoc. Its query half
-  (`sweep best`) shipped in 2.2.0. This is the natural 2.4.0 headline once the
-  spec shape is chosen.
-- **Corrupt-DB hardening of text lengths.** Since patra 1.16.5/1.16.6, a
-  malformed or negative stored BYTES/TEXT length reads back as −1
-  (`PATRA_ERR_PAGE`). `src/dataset.cyr:154` and `src/store.cyr:186`/`:191` use
-  the length unguarded (`alloc(len + 1)`, `memcpy`, `store8(p + len)`), so a
-  corrupt DB writes one byte before the buffer. Refuse `len < 0` loudly. Needs
-  a corrupt-DB fixture to test (patra's `fuzz_bytes` harness shows how to build
-  one). DBs patra wrote itself are unaffected.
+- **CI leftovers.** `sbom.yml` runs GitHub's dependency review, which does not
+  read `cyrius.cyml`, so it checks nothing (and its actions are unpinned):
+  retire it, or replace it with a check that sees cyrius deps (CI's
+  `cyrius deps --locked` already guards the lock). The remote branch
+  `chore/dependency-update`, left by the deleted Rust workflow, can go.
 - **Packaging: port or retire `docker/` and `deploy/`.** Both still describe
   the Rust product: an `ifran-server` with REST/gRPC ports 8420/8421, a
   Python trainer image, an `ifran serve` systemd unit with `RUST_LOG`, and
@@ -32,17 +25,25 @@ release line is the earliest an item could land, not a promise that it will.
   Decide between a runtime image plus an agnosticos package carrying the Cyrius
   binary (the `Dockerfile.release` pattern on the agnosticos base) and removing
   them.
-- **Test scope in the manifest** (cyrius 6.7.6's `[test]` section). Move
-  `assert` and `bench` from `[deps] stdlib` to `[test] stdlib`, so they reach
-  only test/bench/fuzz compiles. Confirm the binary builds and the suite passes.
-- **CI and tooling leftovers.** `sbom.yml` runs GitHub's dependency review,
-  which does not read `cyrius.cyml`, so it checks nothing (and its actions are
-  unpinned): retire it, or replace it with a check that sees cyrius deps. The
-  remote branch `chore/dependency-update`, left by the deleted Rust workflow,
-  can go. Bringing `tests/` to 0 lint warnings (4 lines over 120 characters)
-  would let the hooks lint tests as well as `src/`.
 
-## 2.5.x — cross-repo triggers
+## 2.5.0 — the next minor (each waits on a maintainer decision)
+
+- **Experiment auto-loop** (train → eval → compare per combo, as one
+  orchestration). *Blocked on a spec decision*: how an eval template sits inside
+  `[sweep]` — which metric, which gate, per combo or post hoc. Its query half
+  (`sweep best`) shipped in 2.2.0. The natural 2.5.0 headline once the spec
+  shape is chosen.
+- **Strict checkpoint ingestion with tula 1.2.0.** `store add` validates with
+  `tula_open` and records the signature status: `verified`, `unsigned`, or
+  `signed-unknown-key`, all accepted. tula 1.2.0 adds `tula_validate_strict`
+  (canonical layout: no overlaps, gaps or reordering, exact lengths, unique
+  names) and `tula_verify_required` (unsigned is refused). *Decision*: whether
+  non-canonical files are refused, accepted with a recorded flag (a column
+  migration), or left alone, and whether an opt-in `--require-signed` exists.
+  Either one changes what the frozen `store` verbs accept, so it ships as an
+  additive minor with the default stated.
+
+## 2.6.x — cross-repo triggers
 
 - **Lane 4 — the bote-MCP interface** (*trigger*: SecureYeoman re-wires off
   its Rust-ifran HTTP proxy). Expose the run/store/dataset/eval verbs as MCP
@@ -57,7 +58,7 @@ release line is the earliest an item could land, not a promise that it will.
   so it needs hoosh serving (or the Lane 4 re-wire) to have something to score.
   The exit-code gate + metric extraction stays the default.
 
-## 2.6.x — server stage
+## 2.7.x — server stage
 
 - **Lane 6 — approval, quotas, journal depth.** Job approval gates, per-set
   quotas, and a **libro**-backed run journal (an audit chain), with the

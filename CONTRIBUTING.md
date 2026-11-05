@@ -99,7 +99,8 @@ chore(deps): move to cyrius 6.7.18
 
 - **Format:** cyrfmt-canonical. `cyrius fmt --check <file>` reports;
   `cyrius fmt <file>` rewrites in place.
-- **Lint:** `cyrius lint src/<file>.cyr` with 0 warnings; lines ≤ 120.
+- **Lint:** `cyrius lint <file>` with 0 warnings, for `src/` and `tests/`;
+  lines ≤ 120.
 - **Orchestration, never math.** Anything that computes a gradient, loss or
   metric belongs in a sibling; ifran spawns, records and stores.
 - **Delegate parsing** to tula/bayan/patra. A new parser of foreign input ships
@@ -113,7 +114,7 @@ chore(deps): move to cyrius 6.7.18
   are the contract (`run` = the child's, `eval` = the gate, usage errors = 2).
 
 Optional Claude Code hooks: `scripts/hook-quality.sh` (PostToolUse on
-Write|Edit: format-check, plus lint under `src/`) and
+Write|Edit: format-check and lint) and
 `scripts/hook-release-gate.sh` (PreToolUse on Bash: blocks `git commit` until
 the gate passes). Wire them in `.claude/settings.json` to use them.
 
@@ -122,7 +123,11 @@ the gate passes). Wire them in `.claude/settings.json` to use them.
 - `cyrius test tests/ifran.tcyr` — the suite; everything runs against `/tmp`.
 - `cyrius bench tests/ifran.bcyr` — the bench harness;
   `./scripts/bench-history.sh [label]` appends a run to `benchmarks/history.csv`.
-- `cyrius run tests/ifran.fcyr` — the fuzz harness.
+- `cyrius fuzz tests/ifran.fcyr` — the fuzz harness.
+- `assert` and `bench` are `[test] stdlib` leaves: they reach only test, bench
+  and fuzz compiles. Each test file includes what it uses (`lib/assert.cyr`,
+  `lib/bench.cyr`) so it also compiles outside the test scope, e.g. in an
+  editor's language server.
 - Test after every change. A bug fix lands with a test that fails without it.
 
 ## Dependencies

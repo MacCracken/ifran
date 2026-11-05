@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Claude Code PreToolUse hook (matcher "Bash"): block `git commit` unless the
-# first-party sources are cyrfmt-clean, src/ is lint-clean, lib/ + cyrius.lock match
+# first-party sources are cyrfmt-clean and lint-clean, lib/ + cyrius.lock match
 # the pinned tags, ifran builds, and the suite passes. Not wired by default —
 # add it under hooks.PreToolUse in .claude/settings.json to use it.
 set -euo pipefail
@@ -29,9 +29,6 @@ block() {
 
 for f in src/*.cyr tests/*.tcyr tests/*.bcyr tests/*.fcyr; do
     cyrius fmt --check "$f" >/dev/null 2>&1 || block "cyrius fmt --check failed: $f"
-done
-# 0 lint warnings is the src/ rule (docs/development/README.md)
-for f in src/*.cyr; do
     cyrius lint --exit-with-count "$f" >/dev/null 2>&1 || block "cyrius lint failed: $f"
 done
 cyrius deps --locked >/dev/null 2>&1 || block "cyrius deps --locked failed: lib/ or cyrius.lock differ from the pinned tags"

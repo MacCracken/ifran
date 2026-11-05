@@ -7,6 +7,62 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-11-04
+
+The roadmap's 2.4.x items that needed no design decision: tula 1.2.0, the
+cyrius test scope, a memory-safety fix for foreign or damaged run stores, and
+lint-clean tests. No API addition: the frozen 2.x surface is 2.3.3's, and the
+only behavior change is that those readers now refuse cleanly where they used
+to write out of bounds.
+
+### Changed
+
+- **tula `1.1.2` → `1.2.0`** (additive). Every 1.1.2 call behaves the same,
+  the on-disk format is v1 unchanged, and the plain builder's output is
+  byte-identical. New: `tula_validate_strict` (canonical-layout check),
+  `tula_verify_required` (an unsigned file is refused), a checked builder add,
+  `tula_find_scale`, `tula_entry_nelems`, and error codes 13–16. `store add` /
+  `store verify` still use `tula_open` + `tula_verify`: adopting the strict
+  checks would change what the store accepts, so that is on the roadmap as a
+  decision. `lib/tula.cyr` re-vendored; `cyrius.lock` re-pinned.
+- **`assert` and `bench` moved to a `[test] stdlib` section** (cyrius 6.7.6's
+  test scope), so they reach only `cyrius test` / `bench` / `fuzz` compiles. The
+  ifran binary drops from 2,356,976 to 2,339,880 B. `tests/ifran.tcyr` and
+  `tests/ifran.bcyr` now include `lib/assert.cyr` / `lib/bench.cyr` themselves
+  (the sibling repos' pattern), so they still compile outside the test scope;
+  without that, the editor's cyrius language server reported every `assert_*`
+  as undefined.
+- **`scripts/test.sh` runs the fuzz harness with `cyrius fuzz`**, the test-scope
+  verb with a per-harness timeout, instead of `cyrius run`.
+- **`tests/` is lint-clean.** The 4 spec literals over 120 columns are split in
+  two through a small `_t_cat` helper (each concatenation checked
+  byte-identical to the old literal). Both hooks now lint every first-party
+  file, tests included.
+
+### Fixed
+
+- **A table with non-`STR` columns no longer makes ifran write before a buffer.**
+  ifran's `CREATE TABLE` is error-ignored when the table exists, so an
+  `ifran.db` whose `datasets`, `models` or `runs` table was created with other
+  types (a foreign or damaged file) reaches ifran's readers. For a non-`STR`
+  column, `patra_result_get_str_len` answers −1, and `dataset_path`,
+  `store verify` (path and hash) and the `sweep best` leaderboard (args)
+  copied that length: `alloc(0)`, `memcpy(…, -1)`, `store8(p - 1)`. The suite
+  died with SIGSEGV on such a DB. A new `ifr_str_cell` (`src/runstore.cyr`)
+  returns a copy or 0, and the three readers fail with a message
+  (`dataset_path` → 0, `store verify` → exit 1) or show `?` (the leaderboard's
+  args). The roadmap had pinned this on patra 1.16.6's BYTES/TEXT change.
+  Those columns are not what ifran reads (all `STR`, a fixed inline slot), but
+  the non-`STR` case is the same unguarded copy, and it predates every recent
+  bump.
+
+### Tests
+
+- `tests/ifran.tcyr` 129 → **133**: a `foreign-db` group builds an `ifran.db`
+  whose `runs.args`, `datasets.path` and `models.path` are `TEXT`. The
+  leaderboard ranks cleanly, `dataset_path` returns 0 and `store verify` fails
+  with exit 1. On the old code the group dies with SIGSEGV.
+
 ## [2.3.3] - 2026-11-04
 
 Housekeeping: the Rust-era tooling the port left behind now drives the Cyrius

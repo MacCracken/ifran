@@ -150,12 +150,9 @@ fn dataset_path(id): i64 {
     patra_finalize(stmt);
     if (rs == 0) { return 0; }
     if (patra_result_count(rs) == 0) { patra_result_free(rs); return 0; }
-    var pp = patra_result_get_str(rs, 0, 0);
-    var pl = patra_result_get_str_len(rs, 0, 0);
-    var path = alloc(pl + 1);
-    memcpy(path, pp, pl);
-    store8(path + pl, 0);
+    var path = ifr_str_cell(rs, 0, 0);
     patra_result_free(rs);
+    if (path == 0) { println("ifran: datasets.path is not a STR column (foreign or damaged ifran.db)"); }
     return path;
 }
 

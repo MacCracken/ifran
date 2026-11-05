@@ -1,5 +1,7 @@
 # ifran benchmarks
-# Stdlib auto-included via cyrius.cyml
+# Stdlib auto-included via cyrius.cyml; bench is a [test] stdlib leaf (2.4),
+# included explicitly so the file is self-contained outside the test scope.
+include "lib/bench.cyr"
 #
 # Pattern: bench_new -> bench_batch_start -> tight loop -> bench_batch_stop -> bench_report.
 # For sub-1us ops use batch_size >= 1000 to amortize clock_gettime overhead

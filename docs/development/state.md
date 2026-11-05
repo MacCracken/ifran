@@ -6,6 +6,12 @@
 
 ## Version
 
+**2.4.0 — 2026-11-04.** tula `1.2.0`; `assert`/`bench` moved to the `[test]`
+scope (binary −17 KB); readers of a non-`STR` column (a foreign or damaged
+`ifran.db`) fail cleanly instead of writing before a buffer; `tests/`
+lint-clean. No surface change. Suite **133/133**. Detail in CHANGELOG
+`[2.4.0]`.
+
 **2.3.3 — 2026-11-04 (housekeeping).** `scripts/` and
 `release-automation.yml` ported from cargo to cyrius; CI resolves with
 `cyrius deps --locked`; CONTRIBUTING rewritten for the Cyrius project; the
@@ -59,7 +65,7 @@ CLI on **cmdit** (generated help/version/errors). Exit codes: `run` = child's,
 ## Toolchain & deps
 
 - **Cyrius pin**: `6.7.18` (cyrius.cyml).
-- Deps: patra 1.16.6 · sigil 3.13.15 · tula 1.1.2 · cmdit 1.5.0, the latest
+- Deps: patra 1.16.6 · sigil 3.13.15 · tula 1.2.0 · cmdit 1.5.0, the latest
   tag of each (pins + watch: [`dependency-watch.md`](dependency-watch.md)).
 - **Git first**: a default `cyrius deps` / `build` / `test` resolves the
   tags, sibling checkouts or not. `CYRIUS_LOCAL=1` / `--local` builds the
@@ -69,7 +75,7 @@ CLI on **cmdit** (generated help/version/errors). Exit codes: `run` = child's,
 
 ## Tests / quality
 
-- `tests/ifran.tcyr` — **129/129** on cyrius 6.7.18 (jobspec, executor incl. failure paths, keys,
+- `tests/ifran.tcyr` — **133/133** on cyrius 6.7.18 (jobspec, executor incl. failure paths, keys,
   model store incl. tamper-detection, datasets incl. dedup, sweeps incl.
   seeded-random reproducibility, evals, prefs incl. JSON-escaping round-trip).
   All against `/tmp`.
@@ -87,12 +93,13 @@ trigger.
 
 ## In flight / next
 
-Nothing in flight. The next work is in [`roadmap.md`](roadmap.md), by
-release line: **2.4.x** is ready to pick up (the experiment auto-loop once its
-spec shape is chosen, corrupt-DB length hardening, porting or retiring the
-Rust-era `docker/` + `deploy/` packaging, the `[test]` manifest scope, CI
-leftovers); 2.5.x waits on cross-repo triggers (Lane 4 bote-MCP on the SY
-re-wire, the benchmark harness on a serving path); 2.6.x is the server stage
+Nothing in flight. The next work is in [`roadmap.md`](roadmap.md), and each
+item waits on a maintainer decision: **2.4.x** patches (the `sbom.yml`
+workflow and the stale `chore/dependency-update` branch; porting or retiring
+the Rust-era `docker/` + `deploy/` packaging) and the **2.5.0** minor (the
+experiment auto-loop's spec shape; whether `store add` adopts tula 1.2.0's
+strict checks). 2.6.x waits on cross-repo triggers (Lane 4 bote-MCP on the SY
+re-wire, the benchmark harness on a serving path); 2.7.x is the server stage
 (Lane 6, the priority queue); later 2.x is demand- or platform-gated (Lane 5,
 Lane 7, annotation sessions on tanur, agnos). Closed so far: Lanes 1–3, the
 `rust-old/` removal and its audit triage — history in the CHANGELOG.

@@ -1,5 +1,8 @@
 # ifran test suite — M1: jobspec parse, run store round-trip, the executor
 # (happy path + spawn-failure), all against /tmp (no repo-cwd artifacts).
+# assert is a [test] stdlib leaf (2.4): the explicit include keeps this file
+# self-contained for tools that compile it outside the test scope.
+include "lib/assert.cyr"
 include "src/jobspec.cyr"
 include "src/runstore.cyr"
 include "src/run.cyr"
@@ -13,6 +16,14 @@ include "src/pref.cyr"
 fn _t_write(path, s): i64 {
     file_write_all(path, s, strlen(s));
     return 0;
+}
+
+# a + b as one fresh cstr (keeps long spec literals under lint's 120 columns)
+fn _t_cat(a, b): i64 {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, a);
+    str_builder_add_cstr(sb, b);
+    return str_cstr(str_builder_build(sb));
 }
 
 fn test_jobspec(): i64 {
@@ -279,7 +290,8 @@ fn test_datasets(): i64 {
     assert_eq(_t_ds_field(db, did, "parent"), id, "derivation parent recorded");
 
     # {dataset} placeholder resolves through a real job (/bin/cat prints it)
-    var spec = "[job]\nname = \"ds\"\nbin = \"/bin/cat\"\nargs = \"{dataset}\"\nlogdir = \"/tmp/ifran_test_logs\"\ndataset = ";
+    var spec = _t_cat("[job]\nname = \"ds\"\nbin = \"/bin/cat\"\n",
+      "args = \"{dataset}\"\nlogdir = \"/tmp/ifran_test_logs\"\ndataset = ");
     var sb = str_builder_new();
     str_builder_add_cstr(sb, spec);
     str_builder_add_int(sb, did);
@@ -326,7 +338,8 @@ fn _t_runs_in_sweep(db, sid): i64 {
 fn test_sweeps(): i64 {
     var db = runstore_open();
     # 3x2 grid over /bin/echo: every combo runs + is tagged with the sweep id
-    var spec = "[sweep]\nname = \"g\"\nbin = \"/bin/echo\"\nargs = \"s={steps} l={lr}\"\nlogdir = \"/tmp/ifran_test_logs\"\n[sweep.grid]\nsteps = \"10 20 30\"\nlr = \"0.1 0.2\"\n";
+    var spec = _t_cat("[sweep]\nname = \"g\"\nbin = \"/bin/echo\"\nargs = \"s={steps} l={lr}\"\n",
+      "logdir = \"/tmp/ifran_test_logs\"\n[sweep.grid]\nsteps = \"10 20 30\"\nlr = \"0.1 0.2\"\n");
     file_write_all("/tmp/ifran_t_sweep.cyml", spec, strlen(spec));
     assert_eq(sweep_run("/tmp/ifran_t_sweep.cyml"), 0, "3x2 grid sweep runs clean");
     assert_eq(_t_runs_in_sweep(db, 1), 6, "6 combo runs tagged with sweep 1");
@@ -339,7 +352,8 @@ fn test_sweeps(): i64 {
 
     # deterministic random mode: same seed -> same combos (compare via a
     # second identical sweep's captured args)
-    var rspec = "[sweep]\nname = \"r\"\nbin = \"/bin/echo\"\nargs = \"{steps}\"\nlogdir = \"/tmp/ifran_test_logs\"\nmode = \"random\"\nsamples = 4\nseed = 7\n[sweep.grid]\nsteps = \"a b c d e f g h\"\n";
+    var rspec = _t_cat("[sweep]\nname = \"r\"\nbin = \"/bin/echo\"\nargs = \"{steps}\"\nlogdir = \"/tmp/",
+      "ifran_test_logs\"\nmode = \"random\"\nsamples = 4\nseed = 7\n[sweep.grid]\nsteps = \"a b c d e f g h\"\n");
     file_write_all("/tmp/ifran_t_sweep.cyml", rspec, strlen(rspec));
     assert_eq(sweep_run("/tmp/ifran_t_sweep.cyml"), 0, "random sweep (seed 7) runs");
     assert_eq(sweep_run("/tmp/ifran_t_sweep.cyml"), 0, "random sweep (seed 7) again");
@@ -456,7 +470,8 @@ fn test_evals(): i64 {
     assert(streq(v3, "0.000001049"), "'=' skipped before the number");
 
     # passing eval with a metric, through the full runner
-    var spec = "[eval]\nname = \"toy-gate\"\nbin = \"/bin/echo\"\nargs = \"loss 0.75 ok\"\nlogdir = \"/tmp/ifran_test_logs\"\nmetric = \"loss\"\n";
+    var spec = _t_cat("[eval]\nname = \"toy-gate\"\nbin = \"/bin/echo\"\n",
+      "args = \"loss 0.75 ok\"\nlogdir = \"/tmp/ifran_test_logs\"\nmetric = \"loss\"\n");
     file_write_all("/tmp/ifran_t_eval.cyml", spec, strlen(spec));
     assert_eq(eval_run("/tmp/ifran_t_eval.cyml"), 0, "passing eval gates 0");
     # failing eval: /bin/false -> gate 1
@@ -570,6 +585,54 @@ fn test_prefs(): i64 {
     return 0;
 }
 
+# 2.4: a table whose columns were created with other types (a foreign or
+# damaged ifran.db; ifran's CREATE TABLE is error-ignored when the table
+# already exists) reads its non-STR cells as length -1. Each reader must fail
+# cleanly instead of copying -1 bytes and writing before its buffer.
+fn test_foreign_db(): i64 {
+    var keep = _rs_db;
+    var fpath = "/tmp/ifran_t_foreign.db";
+    sys_unlink(fpath);
+    # runs first, so runstore_open finds it already there (args as TEXT)
+    var fdb = patra_open(fpath);
+    var r1 = "CREATE TABLE runs (id INT AUTOINCREMENT, name STR, bin STR, args TEXT, ";
+    var r2 = "started INT, duration_ms INT, exit_code INT, status STR, log STR, sweep INT, pid INT)";
+    var rsb = str_builder_new();
+    str_builder_add_cstr(rsb, r1);
+    str_builder_add_cstr(rsb, r2);
+    patra_exec(fdb, str_cstr(str_builder_build(rsb)));
+    patra_close(fdb);
+    _rs_db = 0;
+    runstore_set_path(fpath);
+    var db = runstore_open();
+    assert_nonnull(db, "foreign db opens");
+    var flog = "/tmp/ifran_t_foreign.log";
+    file_write_all(flog, "v=3\n", 4);
+    patra_exec(db, "INSERT INTO runs (name, args, log, sweep) VALUES ('f', 'x', '/tmp/ifran_t_foreign.log', 1)");
+    assert_eq(sweep_best(1, "v", 0), 0, "leaderboard over a non-STR runs.args ranks cleanly");
+    # datasets + models with path as TEXT
+    var d1 = "CREATE TABLE datasets (id INT AUTOINCREMENT, name STR, path TEXT, hash STR, ";
+    var d2 = "nbytes INT, nlines INT, kind STR, parent INT, ingested INT)";
+    var dsb = str_builder_new();
+    str_builder_add_cstr(dsb, d1);
+    str_builder_add_cstr(dsb, d2);
+    patra_exec(db, str_cstr(str_builder_build(dsb)));
+    patra_exec(db, "INSERT INTO datasets (name, path, hash) VALUES ('d', '/tmp/x', 'h')");
+    assert_eq(dataset_path(1), 0, "a non-STR datasets.path resolves to 0, not a bad copy");
+    var m1 = "CREATE TABLE models (id INT AUTOINCREMENT, name STR, path TEXT, hash STR, ";
+    var m2 = "size INT, tensors INT, sigstat STR, ingested INT)";
+    var msb = str_builder_new();
+    str_builder_add_cstr(msb, m1);
+    str_builder_add_cstr(msb, m2);
+    patra_exec(db, str_cstr(str_builder_build(msb)));
+    patra_exec(db, "INSERT INTO models (name, path, hash) VALUES ('m', '/tmp/x', 'h')");
+    assert_eq(store_verify(1), 1, "a non-STR models.path fails verify cleanly");
+    patra_close(db);
+    _rs_db = keep;
+    runstore_set_path("/tmp/ifran_test.db");
+    return 0;
+}
+
 fn main(): i64 {
     alloc_init();
     test_group("jobspec");
@@ -588,6 +651,8 @@ fn main(): i64 {
     test_evals();
     test_group("prefs");
     test_prefs();
+    test_group("foreign-db");
+    test_foreign_db();
     return assert_summary();
 }
 

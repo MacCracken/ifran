@@ -237,6 +237,22 @@ fn runstore_list(): i64 {
     return 0;
 }
 
+# A STR cell as a fresh NUL-terminated copy, or 0 when it can't be read as
+# one: patra_result_get_str_len answers -1 for a cell outside the result or a
+# column that isn't STR (a foreign or damaged ifran.db whose table was created
+# with other types), and copying that length would write before the buffer.
+fn ifr_str_cell(rs, row, col): i64 {
+    var p = patra_result_get_str(rs, row, col);
+    var l = patra_result_get_str_len(rs, row, col);
+    if (p == 0) { return 0; }
+    if (l < 0) { return 0; }
+    var out = alloc(l + 1);
+    if (out == 0) { return 0; }
+    memcpy(out, p, l);
+    store8(out + l, 0);
+    return out;
+}
+
 fn _rs_print_str(rs, row, col): i64 {
     var p = patra_result_get_str(rs, row, col);
     var l = patra_result_get_str_len(rs, row, col);

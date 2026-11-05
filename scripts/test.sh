@@ -6,5 +6,5 @@ cd "$(dirname "$0")/.."
 cyrius deps --locked
 cyrius test tests/ifran.tcyr
 cyrius bench tests/ifran.bcyr
-cyrius run tests/ifran.fcyr
+cyrius fuzz tests/ifran.fcyr
 echo "All checks passed."
