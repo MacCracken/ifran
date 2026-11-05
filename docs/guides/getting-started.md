@@ -9,7 +9,7 @@ datasets, sweeps, evals, preferences. It never does the math.
 ```sh
 cyrius deps                              # resolve patra/sigil/tula/cmdit + stdlib
 cyrius build src/main.cyr build/ifran
-cyrius test tests/ifran.tcyr             # 77 checks
+cyrius test tests/ifran.tcyr             # 183 checks
 ```
 
 ## The workspace
@@ -17,7 +17,9 @@ cyrius test tests/ifran.tcyr             # 77 checks
 ifran operates on the **current directory**: `ifran.db` (the patra database),
 `ifran-store/` (signed artifacts), `ifran-data/` (corpora), `runs/logs/`
 (captured output). One directory = one workspace. Operator keys are global:
-`$HOME/.ifran/`.
+`$HOME/.ifran/`. To pin the state to one place whatever the working directory,
+set `IFRAN_HOME`: `ifran.db`, `ifran-store/`, `ifran-data/` and the keys
+(`.ifran/`) then live under it (2.5).
 
 ## The golden path
 
@@ -34,6 +36,8 @@ ifran runs                               # records exit/duration; exit = child's
 
 # 3. sweep a hyperparameter
 ifran sweep examples/sweep-demo.cyml     # grid over {steps}; combos = tagged runs
+ifran sweep examples/sweep-eval-demo.cyml  # 2.5: + a [sweep.eval] per combo, ranked
+ifran sweep best 2                       # re-rank that sweep by its evals
 
 # 4. gate + benchmark
 ifran eval examples/eval-fidelity.cyml   # exit = the gate; metric -> the store
@@ -41,6 +45,7 @@ ifran evals
 
 # 5. store the artifacts
 ifran store add ckpt.tula my-model       # tula-validate + Ed25519-verify + dedup
+                                         # (2.5: --strict, --require-signed)
 ifran store verify 1                     # re-check hash/structure/signature
 
 # 6. preference data for tarka

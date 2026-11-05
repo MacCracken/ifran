@@ -21,6 +21,8 @@ ExecStart=ifran reap
 User=ifran
 Group=ifran
 WorkingDirectory=/var/lib/ifran
+# IFRAN_HOME roots ifran.db, ifran-store/, ifran-data/ and the keys (.ifran/)
+Environment=IFRAN_HOME=/var/lib/ifran
 Environment=HOME=/var/lib/ifran
 
 # The reaper reads and updates ifran.db and probes PIDs. Nothing else.

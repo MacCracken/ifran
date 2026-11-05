@@ -20,19 +20,37 @@ semantics worth naming:
 
 - **Exit codes**: `ifran run` exits with the CHILD's exit code (127 = exec
   failed, 128+sig = signaled, −1→1 orchestration failure); `ifran eval` exits
-  with the GATE. CI-composable by construction.
+  with the GATE; `ifran sweep` exits 0 iff every combo passed (its training
+  run exited 0, and its `[sweep.eval]` gate too when the spec has one, 2.5).
+  `ifran store add` exits 1 when a file is rejected or refused (2.5:
+  `--strict`, `--require-signed`). CI-composable by construction.
 - **Spec formats** (bayan TOML/CYML): `[job]`
   (name/bin/args/logdir/dataset/timeout_s — `timeout_s` added 2.1),
   `[sweep]` + `[sweep.grid]` (mode/samples/seed + axes; 2.2 budgets:
-  `max_trials`, `time_budget_s`), `[eval]` (+ metric).
-  `{dataset}` / `{axis}` placeholders substitute within tokens; `args`
-  supports `"double quotes"` for spaced args (2.1).
+  `max_trials`, `time_budget_s`), `[eval]` (+ metric), and an optional
+  `[sweep.eval]` (2.5: the experiment auto-loop — `[eval]`'s keys with `name`
+  optional, defaulting to `<sweep name>-eval`, plus `direction = "min"|"max"`,
+  default min; it runs after each combo whose training exited 0).
+  `{dataset}` / `{axis}` placeholders substitute within tokens; a
+  `[sweep.eval]`'s `args` also take `{run}` (the combo's training run id) and
+  `{log}` (its log path) (2.5); `args` supports `"double quotes"` for spaced
+  args (2.1).
 - **Run statuses**: `running` → `done` / `failed` / `spawn-failed` /
   `timed-out` (2.1: `timeout_s` expiry, SIGKILL) / `orphaned` (2.1: set by
   `ifran reap` on rows whose recorded PID is gone).
 - **Workspace layout**: `ifran.db` (patra tables: runs, sweeps, evals, models,
   datasets, psets, prefs), `ifran-store/<sha16>.tula`, `ifran-data/<sha16>.txt`,
-  `runs/logs/run-<id>.log`, `$HOME/.ifran/operator.{sk,pk}`.
+  `runs/logs/run-<id>.log`, `$HOME/.ifran/operator.{sk,pk}`. All of these sit
+  in the working directory, except the keys. With `IFRAN_HOME` set (2.5),
+  `ifran.db`, `ifran-store/`, `ifran-data/` and the keys (`.ifran/`) live under
+  it instead; a job spec's relative `logdir` stays relative to the working
+  directory.
+- **Columns added in 2.5** (in-place migrations; older rows read the
+  defaults): `models.canonical` (1 = passed tula's strict layout check, −1 =
+  failed it, 0 = not checked, i.e. ingested before 2.5), `evals.sweep` +
+  `evals.subject` (the sweep and the training run a `[sweep.eval]` judged; 0
+  for `ifran eval`), `sweeps.eval_metric` + `sweeps.eval_max` (the
+  `[sweep.eval]` metric and direction; empty and 0 without one).
 - **Export formats**: preference JSONL, escaped — `{"kind":"pair",...}`
   (+`"conf":N` when set, 2.2) / `{"kind":"unary",...,"label":±1}` /
   `{"kind":"tie"/"bothbad",...,"a":...,"b":...}` (4-state, 2.2; pair/unary-only
@@ -48,14 +66,18 @@ semantics worth naming:
   `runstore_list`.
 - **keys** — `keys_init/show/sk/pk/set_dir` (0600 secret; init no-clobber).
 - **store** — `store_add(path, name)` → id (validate/verify/content-address;
-  garbage rejected; honest sigstat), `store_ls`, `store_verify(id)`,
-  `store_set_dir`.
+  garbage rejected; honest sigstat), `store_add_policy(path, name, strict,
+  require_signed)` → id or −1 (2.5; `store_add` is it with both 0),
+  `store_ls`, `store_verify(id)`, `store_set_dir`.
 - **dataset** — `dataset_add(path, name)` → id, `dataset_dedup(id)` → child id,
   `dataset_path(id)`, `dataset_ls`, `dataset_set_dir`.
-- **sweep** — `sweep_parse(path)`, `sweep_run(path)` (0 iff all combos exit 0),
-  `sweep_ls`, `sweep_subst(tok, name, value)`.
-- **eval** — `eval_run(path)` → gate, `eval_ls`,
-  `eval_extract_metric(buf, n, key)`.
+- **sweep** — `sweep_parse(path)`, `sweep_run(path)` (0 iff all combos pass),
+  `sweep_ls`, `sweep_subst(tok, name, value)`, `sweep_best(sid, key, max)`,
+  `sweep_best_evals(sid)` (2.5).
+- **eval** — `eval_run(path)` → gate, `eval_run_spec(js, metric, sweep,
+  subject)` → gate or −1 (2.5), `eval_ls`, `eval_extract_metric(buf, n, key)`.
+- **state root** (2.5) — `ifr_home()` (`IFRAN_HOME`, or 0 when unset/empty),
+  `ifr_home_path(rel)`.
 - **pref** — `pref_new(name)` → set id, `pref_pair(sid, p, c, r)`,
   `pref_unary(sid, p, c, ±1)`, `pref_ls`, `pref_export(sid, path)` → count.
 

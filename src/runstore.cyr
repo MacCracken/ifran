@@ -10,29 +10,63 @@
 # Unnamed INSERT columns take zero/empty defaults (duration/exit stay 0 while
 # `running` — the status column carries the truth).
 #
-# DB path: `ifran.db` in the working directory (env/flag overrides are a later
-# minor — single-operator box first).
+# DB path: `ifran.db` in the working directory, or under IFRAN_HOME (2.5).
 
-var _rs_path = 0;                            # 0 = default "ifran.db" (cwd)
+var _rs_path = 0;                            # 0 = default "ifran.db" (cwd / IFRAN_HOME)
 var _rs_db = 0;
 var _rs_sweep = 0;                           # current sweep id (0 = standalone run)
+
+# ---- IFRAN_HOME (2.5): one root for ifran's own state ------------------------
+# When IFRAN_HOME is set (and not empty), ifran.db, ifran-store/, ifran-data/
+# and the keys dir (.ifran/) live under it; unset, they are where 2.4 put them
+# (the working directory, keys in $HOME/.ifran). A job spec's relative paths
+# (logdir) stay relative to the working directory. An explicit *_set_* override
+# beats IFRAN_HOME. ifr_set_home overrides the variable itself (tests: the
+# stdlib has no setenv): 0 = read the environment, "" = treat as unset.
+var _ifr_home = 0;
+
+fn ifr_set_home(p): i64 { _ifr_home = p; return 0; }
+
+# The IFRAN_HOME root, or 0 when unset or empty.
+fn ifr_home(): i64 {
+    var h = _ifr_home;
+    if (h == 0) { h = getenv("IFRAN_HOME"); }
+    if (h == 0) { return 0; }
+    if (load8(h) == 0) { return 0; }
+    return h;
+}
+
+# `rel` under IFRAN_HOME when it is set, else `rel` itself (cwd-relative).
+fn ifr_home_path(rel): i64 {
+    var h = ifr_home();
+    if (h == 0) { return rel; }
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, h);
+    str_builder_add_cstr(sb, "/");
+    str_builder_add_cstr(sb, rel);
+    return str_cstr(str_builder_build(sb));
+}
 
 # tag subsequent runs with a sweep id (the sweep runner brackets its combos)
 fn runstore_set_sweep(id): i64 { _rs_sweep = id; return 0; }
 
-# override the DB path (tests; a --db flag later). Call before first use.
+# override the DB path (tests). Call before first use.
 fn runstore_set_path(p): i64 { _rs_path = p; return 0; }
 
 fn RUNSTORE_PATH(): i64 {
     if (_rs_path != 0) { return _rs_path; }
-    return "ifran.db";
+    return ifr_home_path("ifran.db");
 }
 
 fn runstore_open(): i64 {
     if (_rs_db != 0) { return _rs_db; }
     patra_init();
+    if (_rs_path == 0) { if (ifr_home() != 0) { ifr_mkdir_p(ifr_home()); } }
     _rs_db = patra_open(RUNSTORE_PATH());
-    if (_rs_db == 0) { println("ifran: cannot open ifran.db"); return 0; }
+    if (_rs_db == 0) {
+        ifr_print_cstr("ifran: cannot open "); ifr_print_cstr(RUNSTORE_PATH()); println("");
+        return 0;
+    }
     # idempotent create (patra_exec errors on an existing table; ignored)
     var c1 = "CREATE TABLE runs (id INT AUTOINCREMENT, name STR, bin STR, args STR, ";
     var c2 = "started INT, duration_ms INT, exit_code INT, status STR, log STR, sweep INT, pid INT)";

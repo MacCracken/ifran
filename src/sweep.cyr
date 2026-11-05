@@ -34,8 +34,10 @@ fn _sw_next(n): i64 {
     return v % n;
 }
 
-# parse [sweep] + [sweep.grid] -> (template jobspec, axes vec, mode, samples, seed)
-# packed: +0 js, +8 axes, +16 mode-cstr, +24 samples, +32 seed
+# parse [sweep] + [sweep.grid] (+ an optional [sweep.eval], 2.5) -> packed:
+#   +0 js · +8 axes · +16 mode-cstr · +24 samples · +32 seed · +40 max_trials
+#   +48 time_budget_s · +56 eval template js (0 = none) · +64 eval metric
+#   (cstr, 0 = none) · +72 eval direction (1 = max, 0 = min)
 fn sweep_parse(path): i64 {
     var sections = bayan_toml_parse_file(path);
     var ss = bayan_toml_get_sections_by_cstr(sections, "sweep");
@@ -86,7 +88,30 @@ fn sweep_parse(path): i64 {
         tbud = str_to_int(tbv);
         if (tbud < 0) { println("ifran: [sweep] `time_budget_s` must be >= 0"); return 0; }
     }
-    var sw = alloc(56);
+    # the experiment auto-loop (2.5): an optional per-combo eval template, the
+    # [eval] keys plus `direction`; its name defaults to "<sweep name>-eval"
+    var ejs = 0;
+    var emetric = 0;
+    var emax = 0;
+    var es = bayan_toml_get_sections_by_cstr(sections, "sweep.eval");
+    if (vec_len(es) > 0) {
+        var epairs = bayan_toml_section_pairs(vec_get(es, 0));
+        var dsb = str_builder_new();
+        str_builder_add_cstr(dsb, jobspec_name(js));
+        str_builder_add_cstr(dsb, "-eval");
+        ejs = jobspec_from_pairs_in(epairs, "[sweep.eval]", str_cstr(str_builder_build(dsb)));
+        if (ejs == 0) { return 0; }
+        emetric = _js_get_cstr(epairs, "metric");
+        var dir = _js_get_cstr(epairs, "direction");
+        if (dir != 0) {
+            if (streq(dir, "max") == 1) { emax = 1; }
+            elif (streq(dir, "min") == 0) {
+                println("ifran: [sweep.eval] `direction` must be min or max");
+                return 0;
+            }
+        }
+    }
+    var sw = alloc(80);
     store64(sw, js);
     store64(sw + 8, axes);
     store64(sw + 16, mode);
@@ -94,6 +119,9 @@ fn sweep_parse(path): i64 {
     store64(sw + 32, seed);
     store64(sw + 40, maxt);
     store64(sw + 48, tbud);
+    store64(sw + 56, ejs);
+    store64(sw + 64, emetric);
+    store64(sw + 72, emax);
     return sw;
 }
 
@@ -144,21 +172,27 @@ fn sweep_subst(tok, name, value): i64 {
     return str_cstr(str_builder_build(sb));
 }
 
+# substitute every axis placeholder in `tok` with the combo's value per `idx`
+# (a vec of value-indices, one per axis)
+fn _sw_subst_axes(tok, axes, idx): i64 {
+    var out = tok;
+    var a = 0;
+    while (a < vec_len(axes)) {
+        var ax = vec_get(axes, a);
+        out = sweep_subst(out, _sw_axis_name(ax), vec_get(_sw_axis_values(ax), load64(vec_get(idx, a))));
+        a = a + 1;
+    }
+    return out;
+}
+
 # build a per-combo jobspec: fresh argv with axis placeholders substituted per
-# `idx` (a vec of value-indices, one per axis), name = "<base>#<k>"
+# `idx`, name = "<base>#<k>"
 fn _sw_combo_spec(js, axes, idx, k): i64 {
     var argv = jobspec_argv(js);
     var nv = vec_new();
     var t = 0;
     while (t < vec_len(argv)) {
-        var out = vec_get(argv, t);
-        var a = 0;
-        while (a < vec_len(axes)) {
-            var ax = vec_get(axes, a);
-            out = sweep_subst(out, _sw_axis_name(ax), vec_get(_sw_axis_values(ax), load64(vec_get(idx, a))));
-            a = a + 1;
-        }
-        vec_push(nv, out);
+        vec_push(nv, _sw_subst_axes(vec_get(argv, t), axes, idx));
         t = t + 1;
     }
     var sb = str_builder_new();
@@ -177,20 +211,68 @@ fn _sw_combo_spec(js, axes, idx, k): i64 {
     return cjs;
 }
 
+# build combo k's eval jobspec from the [sweep.eval] template (2.5): the axis
+# placeholders as for training, then {run} (the training run's id) and {log}
+# (its log path). An axis named `run` or `log` is substituted first and wins.
+fn _sw_eval_spec(ejs, axes, idx, k, train_id, train_log): i64 {
+    var rsb = str_builder_new();
+    str_builder_add_int(rsb, train_id);
+    var rid = str_cstr(str_builder_build(rsb));
+    var argv = jobspec_argv(ejs);
+    var nv = vec_new();
+    var t = 0;
+    while (t < vec_len(argv)) {
+        var out = _sw_subst_axes(vec_get(argv, t), axes, idx);
+        out = sweep_subst(out, "run", rid);
+        out = sweep_subst(out, "log", train_log);
+        vec_push(nv, out);
+        t = t + 1;
+    }
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, jobspec_name(ejs));
+    str_builder_add_cstr(sb, "#");
+    str_builder_add_int(sb, k);
+    var e = alloc(48);                       # the full jobspec record
+    store64(e, str_cstr(str_builder_build(sb)));
+    store64(e + 8, jobspec_bin(ejs));
+    store64(e + 16, nv);
+    store64(e + 24, jobspec_logdir(ejs));
+    store64(e + 32, jobspec_dataset(ejs));
+    store64(e + 40, jobspec_timeout(ejs));
+    return e;
+}
+
 fn _sw_open_table(): i64 {
     var db = runstore_open();
     if (db == 0) { return 0; }
-    patra_exec(db, "CREATE TABLE sweeps (id INT AUTOINCREMENT, name STR, mode STR, combos INT, started INT)");
+    var c1 = "CREATE TABLE sweeps (id INT AUTOINCREMENT, name STR, mode STR, combos INT, started INT, ";
+    var c2 = "eval_metric STR, eval_max INT)";
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, c1);
+    str_builder_add_cstr(sb, c2);
+    patra_exec(db, str_cstr(str_builder_build(sb)));
+    # schema migrations for older dbs (error-ignored when the column exists).
+    # 2.5: a sweep with a [sweep.eval] metric records it and its direction, so
+    # `sweep best <id>` can re-rank by the evals later
+    patra_exec(db, "ALTER TABLE sweeps ADD COLUMN eval_metric STR");
+    patra_exec(db, "ALTER TABLE sweeps ADD COLUMN eval_max INT");
     return db;
 }
 
-fn _sw_insert(db, name, mode, combos): i64 {
-    var stmt = patra_prepare(db, "INSERT INTO sweeps (name, mode, combos, started) VALUES (?, ?, ?, ?)");
+fn _sw_insert(db, name, mode, combos, emetric, emax): i64 {
+    var q1 = "INSERT INTO sweeps (name, mode, combos, started, eval_metric, eval_max) ";
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, q1);
+    str_builder_add_cstr(sb, "VALUES (?, ?, ?, ?, ?, ?)");
+    var stmt = patra_prepare(db, str_cstr(str_builder_build(sb)));
     if (stmt == 0) { return 0 - 1; }
+    if (emetric == 0) { emetric = ""; }
     patra_bind_text(stmt, 0, name, strlen(name));
     patra_bind_text(stmt, 1, mode, strlen(mode));
     patra_bind_int(stmt, 2, combos);
     patra_bind_int(stmt, 3, clock_epoch_secs());
+    patra_bind_text(stmt, 4, emetric, strlen(emetric));
+    patra_bind_int(stmt, 5, emax);
     var idp = alloc(8);
     if (patra_insert_returning(db, stmt, idp) != 0) { patra_finalize(stmt); return 0 - 1; }
     patra_finalize(stmt);
@@ -217,7 +299,10 @@ fn sweep_run(path): i64 {
     var maxt = load64(sw + 40);
     if (maxt > 0) { if (maxt < combos) { combos = maxt; } }
     var tbud = load64(sw + 48);
-    var sid = _sw_insert(db, jobspec_name(js), mode, combos);
+    var ejs = load64(sw + 56);
+    var emetric = load64(sw + 64);
+    var emax = load64(sw + 72);
+    var sid = _sw_insert(db, jobspec_name(js), mode, combos, emetric, emax);
     if (sid < 0) { println("ifran: sweep record insert failed"); return 1; }
     ifr_print_cstr("sweep "); fmt_int(sid);
     ifr_print_cstr(" ("); ifr_print_cstr(mode);
@@ -256,7 +341,19 @@ fn sweep_run(path): i64 {
                 }
             }
             var cjs = _sw_combo_spec(js, axes, idx, k);
-            if (run_job(cjs) != 0) { failures = failures + 1; }
+            var trc = run_job(cjs);
+            if (trc != 0) { failures = failures + 1; }
+            elif (ejs != 0) {
+                # the auto-loop (2.5): judge this combo with the eval template.
+                # Eval runs are linked through evals.sweep/subject, not tagged
+                # with the sweep, so the sweep's runs stay its training runs.
+                var tid = run_last_id();
+                var ecjs = _sw_eval_spec(ejs, axes, idx, k, tid, run_last_log());
+                runstore_set_sweep(0);
+                var gate = eval_run_spec(ecjs, emetric, sid, tid);
+                runstore_set_sweep(sid);
+                if (gate != 0) { failures = failures + 1; }
+            }
             if (is_random == 0) {
                 # odometer increment
                 a = na - 1;
@@ -282,7 +379,10 @@ fn sweep_run(path): i64 {
     ifr_print_cstr("sweep "); fmt_int(sid);
     ifr_print_cstr(" complete: "); fmt_int(ran - failures);
     ifr_print_cstr("/"); fmt_int(ran);
-    ifr_print_cstr(" combos exited 0"); println("");
+    if (ejs != 0) { ifr_print_cstr(" combos passed training + eval"); }
+    else { ifr_print_cstr(" combos exited 0"); }
+    println("");
+    if (ejs != 0) { if (emetric != 0) { sweep_best_evals(sid); } }
     if (failures == 0) { return 0; }
     return 1;
 }
@@ -369,6 +469,18 @@ fn sweep_best(sid, key, want_max): i64 {
         println("` not found in any combo log");
         return 1;
     }
+    return _sw_rank_print(sid, rows, have, key, want_max, missing, "");
+}
+
+# the best run of the last leaderboard printed (tests; 0 = none yet)
+var _sw_best_run = 0;
+
+fn sweep_last_best_run(): i64 { return _sw_best_run; }
+
+# Rank `have` rows (24 B each: run id, f64 value, args cstr) by direction and
+# print the leaderboard; `src` names where the values came from ("" = the run
+# logs, "eval " = the sweep's evals). Returns 0.
+fn _sw_rank_print(sid, rows, have, key, want_max, missing, src): i64 {
     # selection sort by direction (combo counts are small)
     var a = 0;
     while (a < have - 1) {
@@ -394,11 +506,11 @@ fn sweep_best(sid, key, want_max): i64 {
         a = a + 1;
     }
     ifr_print_cstr("sweep "); fmt_int(sid);
-    ifr_print_cstr(" leaderboard by `"); ifr_print_cstr(key);
+    ifr_print_cstr(" leaderboard by "); ifr_print_cstr(src); ifr_print_cstr("`"); ifr_print_cstr(key);
     if (want_max == 1) { ifr_print_cstr("` (max)"); } else { ifr_print_cstr("` (min)"); }
     println(":");
     println("rank | run | value | args");
-    i = 0;
+    var i = 0;
     while (i < have) {
         var row2 = rows + i * 24;
         fmt_int(i + 1); ifr_print_cstr(" | ");
@@ -409,10 +521,100 @@ fn sweep_best(sid, key, want_max): i64 {
     }
     if (missing > 0) {
         ifr_print_cstr("("); fmt_int(missing);
-        println(" combos had no extractable metric — skipped)");
+        ifr_print_cstr(" combos had no usable `"); ifr_print_cstr(key);
+        println("` — skipped)");
     }
+    _sw_best_run = load64(rows);
     ifr_print_cstr("best: run "); fmt_int(load64(rows));
     ifr_print_cstr(" ("); fmt_float(load64(rows + 8), 6);
     println(")");
     return 0;
+}
+
+# a run's args (fresh cstr), or "?" when it can't be read
+fn _sw_run_args(db, run_id): i64 {
+    var stmt = patra_prepare(db, "SELECT args FROM runs WHERE id = ?");
+    if (stmt == 0) { return "?"; }
+    patra_bind_int(stmt, 0, run_id);
+    var rs = patra_query_prepared(db, stmt);
+    patra_finalize(stmt);
+    if (rs == 0) { return "?"; }
+    var a = 0;
+    if (patra_result_count(rs) > 0) { a = ifr_str_cell(rs, 0, 0); }
+    patra_result_free(rs);
+    if (a == 0) { return "?"; }
+    return a;
+}
+
+# ---- the auto-loop's leaderboard (2.5) ----------------------------------------
+# `ifran sweep best <sweep-id>` (no metric): rank the combos by the evals a
+# [sweep.eval] recorded for them, in the direction the sweep recorded. An eval
+# whose gate failed, or whose log had no value for the metric, is skipped.
+fn sweep_best_evals(sid): i64 {
+    var db = _sw_open_table();
+    if (db == 0) { return 1; }
+    if (_ev_open_table() == 0) { return 1; }
+    var st = patra_prepare(db, "SELECT eval_metric, eval_max FROM sweeps WHERE id = ?");
+    if (st == 0) { return 1; }
+    patra_bind_int(st, 0, sid);
+    var srs = patra_query_prepared(db, st);
+    patra_finalize(st);
+    if (srs == 0) { println("ifran: query failed"); return 1; }
+    if (patra_result_count(srs) == 0) {
+        patra_result_free(srs);
+        println("ifran: no sweep with that id");
+        return 1;
+    }
+    var key = ifr_str_cell(srs, 0, 0);
+    var want_max = patra_result_get_int(srs, 0, 1);
+    patra_result_free(srs);
+    if (key == 0) { key = ""; }
+    if (strlen(key) == 0) {
+        ifr_print_cstr("ifran: sweep "); fmt_int(sid);
+        println(" has no [sweep.eval] metric (rank its run logs: sweep best <id> <metric>)");
+        return 1;
+    }
+    var stmt = patra_prepare(db, "SELECT subject, value, gate FROM evals WHERE sweep = ?");
+    if (stmt == 0) { return 1; }
+    patra_bind_int(stmt, 0, sid);
+    var rs = patra_query_prepared(db, stmt);
+    patra_finalize(stmt);
+    if (rs == 0) { println("ifran: query failed"); return 1; }
+    var n = patra_result_count(rs);
+    if (n == 0) {
+        patra_result_free(rs);
+        ifr_print_cstr("ifran: sweep "); fmt_int(sid); println(" has no evals");
+        return 1;
+    }
+    var rows = alloc(n * 24);
+    var have = 0;
+    var missing = 0;
+    var vp = alloc(8);
+    var i = 0;
+    while (i < n) {
+        var got = 0;
+        if (patra_result_get_int(rs, i, 2) == 0) {
+            var vs = ifr_str_cell(rs, i, 1);
+            if (vs != 0) {
+                if (f64_parse_ok(vs, vp) == 1) {
+                    var row = rows + have * 24;
+                    var subj = patra_result_get_int(rs, i, 0);
+                    store64(row, subj);
+                    store64(row + 8, load64(vp));
+                    store64(row + 16, _sw_run_args(db, subj));
+                    have = have + 1;
+                    got = 1;
+                }
+            }
+        }
+        if (got == 0) { missing = missing + 1; }
+        i = i + 1;
+    }
+    patra_result_free(rs);
+    if (have == 0) {
+        ifr_print_cstr("ifran: no eval of sweep "); fmt_int(sid);
+        ifr_print_cstr(" passed with a value for `"); ifr_print_cstr(key); println("`");
+        return 1;
+    }
+    return _sw_rank_print(sid, rows, have, key, want_max, missing, "eval ");
 }

@@ -15,7 +15,7 @@
 # structural validation — always rejected.
 #
 # Layout: <storedir>/<sha256-hex16>.tula + the patra `models` index. Default
-# storedir "ifran-store" (cwd, beside ifran.db); override via store_set_dir.
+# storedir "ifran-store" (beside ifran.db: the cwd, or IFRAN_HOME); override via store_set_dir.
 #
 # ⚠ EXTRACTION BOUNDARY (the plan's named first-extraction candidate): this
 # module + keys.cyr talk to the rest of ifran ONLY through their public fns —
@@ -27,19 +27,29 @@ fn store_set_dir(p): i64 { _store_dir = p; return 0; }
 
 fn store_dir(): i64 {
     if (_store_dir != 0) { return _store_dir; }
-    return "ifran-store";
+    return ifr_home_path("ifran-store");          # beside ifran.db (2.5: IFRAN_HOME)
 }
 
 fn _store_open_table(): i64 {
     var db = runstore_open();                # same ifran.db, second table
     if (db == 0) { return 0; }
     var c1 = "CREATE TABLE models (id INT AUTOINCREMENT, name STR, path STR, hash STR, ";
-    var c2 = "size INT, tensors INT, sigstat STR, ingested INT)";
+    var c2 = "size INT, tensors INT, sigstat STR, ingested INT, canonical INT)";
     var sb = str_builder_new();
     str_builder_add_cstr(sb, c1);
     str_builder_add_cstr(sb, c2);
     patra_exec(db, str_cstr(str_builder_build(sb)));
+    # schema migration for older dbs (error-ignored when the column exists).
+    # canonical: 1 = passed tula_validate_strict, -1 = failed it, 0 = not checked
+    # (rows ingested before 2.5 keep the ALTER default)
+    patra_exec(db, "ALTER TABLE models ADD COLUMN canonical INT");     # 2.5
     return db;
+}
+
+fn _store_layout_name(canon): i64 {
+    if (canon == 1) { return "canonical"; }
+    if (canon < 0) { return "non-canonical"; }
+    return "-";
 }
 
 # mmap a file read-only; returns ptr, size via out. 0 on failure.
@@ -79,7 +89,14 @@ fn _store_find_hash(db, hex): i64 {
 }
 
 # Ingest an artifact. Returns the model id, or -1.
-fn store_add(path, name): i64 {
+fn store_add(path, name): i64 { return store_add_policy(path, name, 0, 0); }
+
+# Ingest under an acceptance policy (2.5). Every add runs tula's strict
+# canonical-layout check (tula_validate_strict) and records the result.
+#   strict = 1          refuse a file that is not canonical (`--strict`)
+#   require_signed = 1  refuse anything but `verified` (`--require-signed`)
+# With both 0 this accepts exactly what 2.4 did. A refusal indexes nothing.
+fn store_add_policy(path, name, strict, require_signed): i64 {
     var db = _store_open_table();
     if (db == 0) { return 0 - 1; }
     var sizep = alloc(8);
@@ -91,8 +108,27 @@ fn store_add(path, name): i64 {
         println("ifran: artifact REJECTED (tula structural validation failed)");
         return 0 - 1;
     }
+    var canon = 1;
+    var why = tula_validate_strict(buf, size);
+    if (why != TULA_OK) { canon = 0 - 1; }
+    if (strict == 1) {
+        if (canon != 1) {
+            ifr_print_cstr("ifran: artifact REFUSED (--strict: not canonical: ");
+            ifr_print_cstr(tula_err_name(why)); println(")");
+            return 0 - 1;
+        }
+    }
     var sigstat = _store_sigstat(r);
-    var ntensors = tula_count(r);
+    if (require_signed == 1) {
+        if (streq(sigstat, "verified") == 0) {
+            ifr_print_cstr("ifran: artifact REFUSED (--require-signed: ");
+            ifr_print_cstr(sigstat); println(")");
+            return 0 - 1;
+        }
+    }
+    # tula 1.3.0+ stores names over 47 chars in a reserved `__tula.names__`
+    # entry, the last one; it is bookkeeping, not a tensor
+    var ntensors = tula_count(r) - tula_has_long_names(r);
     var digest = alloc(32);
     sha256(buf, size, digest);
     var hex = _keys_hex(digest, 32);
@@ -103,9 +139,17 @@ fn store_add(path, name): i64 {
     }
     ifr_mkdir_p(store_dir());
     var dst = _store_dst_path(hex);
-    file_write_all(dst, buf, size);
-    var ins = "INSERT INTO models (name, path, hash, size, tensors, sigstat, ingested) ";
-    var vals = "VALUES (?, ?, ?, ?, ?, ?, ?)";
+    # crash-safe and checked (tula 1.4.0): a temp file, fsync'd and renamed into
+    # place, so a failed or interrupted copy leaves no partial file and no row
+    var wrote = tula_write_file_atomic(dst, buf, size);
+    if (wrote != size) {
+        ifr_print_cstr("ifran: cannot write the stored copy ");
+        ifr_print_cstr(dst);
+        ifr_print_cstr(" (error "); fmt_int(wrote); println(")");
+        return 0 - 1;
+    }
+    var ins = "INSERT INTO models (name, path, hash, size, tensors, sigstat, ingested, canonical) ";
+    var vals = "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
     var sb = str_builder_new();
     str_builder_add_cstr(sb, ins);
     str_builder_add_cstr(sb, vals);
@@ -118,12 +162,14 @@ fn store_add(path, name): i64 {
     patra_bind_int(stmt, 4, ntensors);
     patra_bind_text(stmt, 5, sigstat, strlen(sigstat));
     patra_bind_int(stmt, 6, clock_epoch_secs());
+    patra_bind_int(stmt, 7, canon);
     var idp = alloc(8);
     if (patra_insert_returning(db, stmt, idp) != 0) { patra_finalize(stmt); return 0 - 1; }
     patra_finalize(stmt);
     var id = load64(idp);
     ifr_print_cstr("stored id "); fmt_int(id);
     ifr_print_cstr(" ("); ifr_print_cstr(sigstat);
+    ifr_print_cstr(", "); ifr_print_cstr(_store_layout_name(canon));
     ifr_print_cstr(", "); fmt_int(ntensors);
     ifr_print_cstr(" tensors, "); fmt_int(size);
     ifr_print_cstr(" bytes) "); ifr_print_cstr(dst); println("");
@@ -146,10 +192,10 @@ fn _store_dst_path(hex): i64 {
 fn store_ls(): i64 {
     var db = _store_open_table();
     if (db == 0) { return 1; }
-    var rs = patra_query(db, "SELECT id, name, sigstat, tensors, size, hash FROM models");
+    var rs = patra_query(db, "SELECT id, name, sigstat, tensors, size, hash, canonical FROM models");
     if (rs == 0) { println("ifran: models query failed"); return 1; }
     var n = patra_result_count(rs);
-    println("id | name | sig | tensors | bytes | hash");
+    println("id | name | sig | tensors | bytes | hash | layout");
     var i = 0;
     while (i < n) {
         fmt_int(patra_result_get_int(rs, i, 0)); ifr_print_cstr(" | ");
@@ -157,7 +203,8 @@ fn store_ls(): i64 {
         _rs_print_str(rs, i, 2); ifr_print_cstr(" | ");
         fmt_int(patra_result_get_int(rs, i, 3)); ifr_print_cstr(" | ");
         fmt_int(patra_result_get_int(rs, i, 4)); ifr_print_cstr(" | ");
-        _rs_print_str(rs, i, 5);
+        _rs_print_str(rs, i, 5); ifr_print_cstr(" | ");
+        ifr_print_cstr(_store_layout_name(patra_result_get_int(rs, i, 6)));
         println("");
         i = i + 1;
     }
@@ -204,6 +251,12 @@ fn store_verify(id): i64 {
     if (r == 0) { println("ifran: VERIFY FAIL — structural validation"); return 1; }
     ifr_print_cstr("verify id "); fmt_int(id);
     ifr_print_cstr(": hash ok, structure ok, sig ");
-    ifr_print_cstr(_store_sigstat(r)); println("");
+    ifr_print_cstr(_store_sigstat(r));
+    # the layout is re-derived (a pre-2.5 row was never checked); reported, not
+    # gated, because acceptance policy is applied at `store add`
+    var why = tula_validate_strict(buf, size);
+    if (why == TULA_OK) { ifr_print_cstr(", layout canonical"); }
+    else { ifr_print_cstr(", layout non-canonical ("); ifr_print_cstr(tula_err_name(why)); ifr_print_cstr(")"); }
+    println("");
     return 0;
 }

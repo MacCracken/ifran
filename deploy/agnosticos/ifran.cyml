@@ -9,7 +9,7 @@
 
 [package]
 name = "ifran"
-version = "2.4.1"
+version = "2.5.0"
 description = "ifran — the AGNOS training control plane: jobs, signed checkpoint store, datasets, sweeps, evals, preference data"
 license = "GPL-3.0-only"
 groups = ["ai", "ml", "cyrius"]

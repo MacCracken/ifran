@@ -7,6 +7,89 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-11-04
+
+**The experiment auto-loop, strict checkpoint ingestion, and `IFRAN_HOME`.**
+All additive on the frozen 2.x surface: a spec without `[sweep.eval]`, a
+`store add` without the new flags, and a shell without `IFRAN_HOME` behave as
+2.4.1 did. Schema changes are in-place migrations; a 2.4.1 `ifran.db` was
+upgraded and checked.
+
+### Added
+
+- **The experiment auto-loop: `[sweep.eval]`.** A sweep spec can carry an eval
+  template: `[eval]`'s keys, `name` optional (default `<sweep name>-eval`),
+  plus `direction = "min"|"max"` (default min).
+  - After each combo's training run exits 0, ifran runs it as a recorded eval.
+    Its `args` take the combo's `{axis}` values, `{run}` (the training run id)
+    and `{log}` (that run's log path).
+  - The eval row links back through new `evals.sweep` and `evals.subject`
+    columns. Eval runs are not tagged with the sweep, so `sweep best <id>
+    <metric>` and the sweep's run count still see only training runs.
+  - A failing gate fails the combo; a failed training run gets no eval;
+    `ifran sweep` exits 0 only if every combo passed both.
+  - With a `metric`, the sweep ends by ranking the combos on their eval values.
+    The sweep records the metric and direction (new `sweeps.eval_metric` /
+    `eval_max` columns), so `ifran sweep best <id>` with no metric re-ranks by
+    the evals later. With a metric it still ranks the training logs, as in
+    2.2.
+  - `examples/sweep-eval-demo.cyml` runs anywhere.
+- **Strict checkpoint ingestion.** Every `store add` now runs tula's
+  `tula_validate_strict` and records the result in a new `models.canonical`
+  column: 1 canonical, −1 not, 0 not checked (rows from before 2.5).
+  - `store ls` adds a `layout` column. `store verify` reports the layout,
+    re-derived; its exit code is unchanged.
+  - Two opt-in flags: `--strict` refuses a non-canonical file, naming tula's
+    reason, and `--require-signed` refuses anything not `verified` (unsigned,
+    or signed by another key). A refusal exits 1 and indexes nothing.
+  - Without the flags, everything 2.4 accepted is still accepted.
+  - `store add` parses its own flags, so they can go before or after the file.
+    An unknown flag is a usage error (exit 2).
+- **`IFRAN_HOME`.** When it is set, `ifran.db`, `ifran-store/`, `ifran-data/`
+  and the keys (`.ifran/`) live under it, whatever the working directory. It is
+  created if missing, and an empty value means unset. A job spec's relative
+  `logdir` stays relative to the working directory. `ifran: cannot open …` now
+  names the path. The images and systemd units set it to `/var/lib/ifran`
+  explicitly instead of relying on the working directory and `HOME`.
+- Module functions, for the frozen list in `docs/api.md`:
+  - `store_add_policy(path, name, strict, require_signed)` (`store_add` calls it
+    with both flags off)
+  - `eval_run_spec(js, metric, sweep, subject)` (the eval core; `eval_run` is
+    unchanged)
+  - `sweep_best_evals(sid)`, `ifr_home()` / `ifr_home_path(rel)`, and
+    `jobspec_from_pairs_in(pairs, section, default_name)`
+
+### Changed
+
+- **tula `1.2.0` → `1.4.0`**: long tensor names in a names table and
+  F32/F16/BF16 (1.3.0); big-file streaming, atomic writes and heap reads past
+  2 GiB (1.4.0). Every earlier call behaves the same.
+
+### Fixed
+
+- **`store add` ignored a failed copy.** It discarded `file_write_all`'s result,
+  so a copy that failed or was cut short (disk full, an unwritable store dir)
+  was still indexed. The copy now goes through `tula_write_file_atomic`: a temp
+  file, fsync'd and renamed into place. Anything short of the full length
+  refuses the add with the error code, and nothing is indexed or left behind.
+- **A file with long tensor names recorded one tensor too many.** tula 1.3.0's
+  reserved `__tula.names__` entry was counted as a tensor. It isn't anymore.
+
+### Tests
+
+- `tests/ifran.tcyr` 133 → **183**, in new groups `auto-loop`, `ifran-home` and
+  `store-migration`, plus the model-store additions:
+  - the copy failure, the long-name count, the strict and signature refusals
+  - the 2.4 → 2.5 `models` migration: removing the `ALTER` fails 3 of its
+    assertions
+  - `IFRAN_HOME`'s four paths, plus the directory created and empty = unset
+  - the auto-loop: per-combo evals, ranking in both directions, `{run}`/`{log}`
+    substitution, failing gates, failed training, a bad `direction`
+- By hand with the binary: a 2.4.1 binary wrote an `ifran.db`, then 2.5.0 read
+  and extended it. `IFRAN_HOME` was checked with the real variable from another
+  working directory. The new `store add` flags were checked, including `--help`
+  and an unknown flag.
+
 ## [2.4.1] - 2026-11-04
 
 The remaining 2.4.x patch work: the Rust-era `docker/` and `deploy/` packaging

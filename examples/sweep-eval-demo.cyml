@@ -1,0 +1,27 @@
+# The experiment auto-loop (2.5): train each combo, then judge it with a
+# recorded eval, and rank the combos by the eval's metric.
+#
+#   ifran sweep examples/sweep-eval-demo.cyml   # 3 trainings + 3 evals + the ranking
+#   ifran sweep best <sweep-id>                 # re-rank later from the recorded evals
+#   ifran evals                                 # each eval names the training run it judged
+#
+# This demo runs anywhere: "training" echoes a loss, and the eval reads it back
+# from the training log through {log}. For real work, `bin` is a trainer
+# (e.g. /home/macro/Repos/attn11/build/attn11 with --steps {steps}) and the
+# eval is the sibling that scores its checkpoint; the eval's args can name the
+# combo's {axis} values, {run} (the training run id) and {log}.
+[sweep]
+name = "loss-demo"
+bin = "/bin/echo"
+args = "steps={steps} loss={loss}"
+logdir = "runs/logs"
+[sweep.grid]
+steps = "10"
+loss = "0.42 0.17 0.31"
+
+[sweep.eval]
+bin = "/bin/cat"
+args = "{log}"
+logdir = "runs/logs"
+metric = "loss"
+direction = "min"

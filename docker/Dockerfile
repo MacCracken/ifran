@@ -54,7 +54,9 @@ RUN groupadd -g 1002 ifran \
 COPY --from=builder /src/build/ifran /usr/local/bin/ifran
 
 USER ifran
-# keys default to $HOME/.ifran; ifran.db and relative logdirs land in the cwd
+# IFRAN_HOME roots ifran.db, ifran-store/, ifran-data/ and the keys (.ifran/);
+# a job's relative logdir lands in the working directory, the same place
+ENV IFRAN_HOME=/var/lib/ifran
 ENV HOME=/var/lib/ifran
 WORKDIR /var/lib/ifran
 VOLUME ["/var/lib/ifran"]

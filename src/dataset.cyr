@@ -21,7 +21,7 @@
 # a curation tool at corpus scale.
 #
 # Layout: <datadir>/<sha256-hex16>.txt + the patra `datasets` table. Default
-# datadir "ifran-data" (cwd, beside ifran.db); override via dataset_set_dir.
+# datadir "ifran-data" (beside ifran.db: the cwd, or IFRAN_HOME); override via dataset_set_dir.
 
 var _ds_dir = 0;
 
@@ -29,7 +29,7 @@ fn dataset_set_dir(p): i64 { _ds_dir = p; return 0; }
 
 fn dataset_dir(): i64 {
     if (_ds_dir != 0) { return _ds_dir; }
-    return "ifran-data";
+    return ifr_home_path("ifran-data");           # beside ifran.db (2.5: IFRAN_HOME)
 }
 
 fn _ds_open_table(): i64 {

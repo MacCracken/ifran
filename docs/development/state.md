@@ -6,6 +6,14 @@
 
 ## Version
 
+**2.5.0 — 2026-11-04 (the experiment auto-loop).** `[sweep.eval]` runs a
+recorded eval per combo and ranks the combos by it (`sweep best <id>`
+re-ranks); `store add` records tula's strict canonical-layout check, with
+opt-in `--strict` / `--require-signed`, and copies atomically; `IFRAN_HOME`
+roots the db, store, datasets and keys (set explicitly in the images and
+units). tula `1.4.0`. All additive; a 2.4.1 `ifran.db` migrates in place.
+Suite **183/183**. Detail in CHANGELOG `[2.5.0]`.
+
 **2.4.1 — 2026-11-04 (packaging).** `docker/` and `deploy/` converted from the
 Rust server to the Cyrius CLI and verified: four images (source, release,
 dev, GPU trainer) plus compose, systemd units for the reaper (oneshot +
@@ -73,7 +81,7 @@ CLI on **cmdit** (generated help/version/errors). Exit codes: `run` = child's,
 ## Toolchain & deps
 
 - **Cyrius pin**: `6.7.18` (cyrius.cyml).
-- Deps: patra 1.16.6 · sigil 3.13.15 · tula 1.2.0 · cmdit 1.5.0, the latest
+- Deps: patra 1.16.6 · sigil 3.13.15 · tula 1.4.0 · cmdit 1.5.0, the latest
   tag of each (pins + watch: [`dependency-watch.md`](dependency-watch.md)).
 - **Git first**: a default `cyrius deps` / `build` / `test` resolves the
   tags, sibling checkouts or not. `CYRIUS_LOCAL=1` / `--local` builds the
@@ -83,7 +91,7 @@ CLI on **cmdit** (generated help/version/errors). Exit codes: `run` = child's,
 
 ## Tests / quality
 
-- `tests/ifran.tcyr` — **133/133** on cyrius 6.7.18 (jobspec, executor incl. failure paths, keys,
+- `tests/ifran.tcyr` — **183/183** on cyrius 6.7.18 (jobspec, executor incl. failure paths, keys,
   model store incl. tamper-detection, datasets incl. dedup, sweeps incl.
   seeded-random reproducibility, evals, prefs incl. JSON-escaping round-trip).
   All against `/tmp`.
@@ -105,12 +113,12 @@ trigger.
 
 ## In flight / next
 
-Nothing in flight. The next work is in [`roadmap.md`](roadmap.md): **2.4.x**
+Nothing in flight. The next work is in [`roadmap.md`](roadmap.md): **2.5.x**
 packaging follow-ups (publishing release images, an arm64 build, syncing the
-zugot recipe at a tag) and the **2.5.0** minor, where each item waits on a
-maintainer decision (the experiment auto-loop's spec shape; whether
-`store add` adopts tula 1.2.0's strict checks; a state-directory flag). 2.6.x waits on cross-repo triggers (Lane 4 bote-MCP on the SY
-re-wire, the benchmark harness on a serving path); 2.7.x is the server stage
-(Lane 6, the priority queue); later 2.x is demand- or platform-gated (Lane 5,
-Lane 7, annotation sessions on tanur, agnos). Closed so far: Lanes 1–3, the
-`rust-old/` removal and its audit triage — history in the CHANGELOG.
+zugot recipe at a tag); 2.6.x waits on cross-repo triggers (Lane 4 bote-MCP
+on the SY re-wire, the benchmark harness on a serving path); 2.7.x is the
+server stage (Lane 6, the priority queue); later 2.x is demand- or
+platform-gated (Lane 5, Lane 7, annotation sessions on tanur, agnos). Closed
+so far: Lanes 1–3, the `rust-old/` removal and its audit triage, and the
+2.5.0 minor (auto-loop, strict ingestion, `IFRAN_HOME`) — history in the
+CHANGELOG.

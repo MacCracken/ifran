@@ -8,8 +8,8 @@
 #   ifran keys show    print the public key (hex)
 #
 # Layout: <keydir>/operator.sk (64 B seed||pk, file mode 0600) +
-# <keydir>/operator.pk (32 B). Default keydir: $HOME/.ifran (override for
-# tests via keys_set_dir).
+# <keydir>/operator.pk (32 B). Default keydir: $IFRAN_HOME/.ifran when
+# IFRAN_HOME is set (2.5), else $HOME/.ifran (override for tests via keys_set_dir).
 
 var _keys_dir = 0;
 
@@ -17,6 +17,7 @@ fn keys_set_dir(p): i64 { _keys_dir = p; return 0; }
 
 fn keys_dir(): i64 {
     if (_keys_dir != 0) { return _keys_dir; }
+    if (ifr_home() != 0) { return ifr_home_path(".ifran"); }    # 2.5: IFRAN_HOME/.ifran
     var home = getenv("HOME");
     if (home == 0) { return ".ifran"; }
     var sb = str_builder_new();

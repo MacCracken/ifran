@@ -14,7 +14,7 @@
 ```sh
 cyrius deps                               # after manifest changes
 cyrius build src/main.cyr build/ifran
-cyrius test tests/ifran.tcyr              # the suite (133) — runs against /tmp
+cyrius test tests/ifran.tcyr              # the suite (183) — runs against /tmp
 cyrius lint <file>                        # src/ + tests/: keep 0 warns; lines <= 120
 ```
 

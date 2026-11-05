@@ -24,6 +24,8 @@ ExecStart=ifran run /etc/ifran/jobs/%i.cyml
 User=ifran
 Group=ifran
 WorkingDirectory=/var/lib/ifran
+# IFRAN_HOME roots ifran.db, ifran-store/, ifran-data/ and the keys (.ifran/)
+Environment=IFRAN_HOME=/var/lib/ifran
 Environment=HOME=/var/lib/ifran
 
 # A job spec's `bin` may live anywhere (a sibling's build dir under /home is

@@ -10,10 +10,11 @@ Everything here is additive on the frozen 2.x surface. Nothing is calendared:
 an item opens when its trigger fires or the maintainer pulls it forward. A
 release line is the earliest an item could land, not a promise that it will.
 
-## 2.4.x — packaging follow-ups
+## 2.5.x — packaging follow-ups
 
 2.4.1 converted `docker/` and `deploy/` to the Cyrius CLI and verified each
-piece by hand; CI builds and smokes only `docker/Dockerfile`. What is left:
+piece by hand; CI builds and smokes only `docker/Dockerfile`. 2.5.0 set
+`IFRAN_HOME` in the images and units. What is left:
 
 - **Publish release images.** `release.yml` would stage `build/ifran` as
   `bin/amd64/ifran`, build `docker/Dockerfile.release` and push it to GHCR
@@ -26,33 +27,6 @@ piece by hand; CI builds and smokes only `docker/Dockerfile`. What is left:
   zugot's `ai/ifran.cyml`, fill `[source] sha256` from the release's
   `SHA256SUMS`, and update or retire `marketplace/ifran.cyml`, which still
   describes the Rust crate.
-- **Delete the stale remote branch** `chore/dependency-update`, left by the
-  deleted Rust workflow (needs push access:
-  `git push origin --delete chore/dependency-update`).
-
-## 2.5.0 — the next minor (each waits on a maintainer decision)
-
-- **Experiment auto-loop** (train → eval → compare per combo, as one
-  orchestration). *Blocked on a spec decision*: how an eval template sits inside
-  `[sweep]` — which metric, which gate, per combo or post hoc. Its query half
-  (`sweep best`) shipped in 2.2.0. The natural 2.5.0 headline once the spec
-  shape is chosen.
-- **Strict checkpoint ingestion with tula 1.2.0.** `store add` validates with
-  `tula_open` and records the signature status: `verified`, `unsigned`, or
-  `signed-unknown-key`, all accepted. tula 1.2.0 adds `tula_validate_strict`
-  (canonical layout: no overlaps, gaps or reordering, exact lengths, unique
-  names) and `tula_verify_required` (unsigned is refused). *Decision*: whether
-  non-canonical files are refused, accepted with a recorded flag (a column
-  migration), or left alone, and whether an opt-in `--require-signed` exists.
-  Either one changes what the frozen `store` verbs accept, so it ships as an
-  additive minor with the default stated.
-- **A state-directory option.** ifran keeps `ifran.db` (and relative logdirs)
-  in the working directory and keys in `$HOME/.ifran`. The 2.4.1 units and
-  images place state by setting both, which works but is implicit. An
-  `IFRAN_HOME`-style variable or a global `--db` flag would make it explicit;
-  `src/runstore.cyr` already has the override hook (`runstore_set_path`).
-  *Decision*: its name and precedence. This is additive: today's behavior is
-  the default.
 
 ## 2.6.x — cross-repo triggers
 

@@ -22,11 +22,16 @@ fn _ev_open_table(): i64 {
     var db = runstore_open();
     if (db == 0) { return 0; }
     var c1 = "CREATE TABLE evals (id INT AUTOINCREMENT, name STR, run INT, gate INT, ";
-    var c2 = "metric STR, value STR, created INT)";
+    var c2 = "metric STR, value STR, created INT, sweep INT, subject INT)";
     var sb = str_builder_new();
     str_builder_add_cstr(sb, c1);
     str_builder_add_cstr(sb, c2);
     patra_exec(db, str_cstr(str_builder_build(sb)));
+    # schema migrations for older dbs (error-ignored when the column exists).
+    # 2.5: an eval run by a sweep's [sweep.eval] records the sweep and the
+    # training run it judged (subject); both 0 for a standalone `ifran eval`
+    patra_exec(db, "ALTER TABLE evals ADD COLUMN sweep INT");
+    patra_exec(db, "ALTER TABLE evals ADD COLUMN subject INT");
     return db;
 }
 
@@ -84,9 +89,9 @@ fn eval_extract_metric(buf, n, key): i64 {
     return 0;
 }
 
-fn _ev_insert(db, name, run_id, gate, metric, value): i64 {
-    var q1 = "INSERT INTO evals (name, run, gate, metric, value, created) ";
-    var q2 = "VALUES (?, ?, ?, ?, ?, ?)";
+fn _ev_insert(db, name, run_id, gate, metric, value, sweep_id, subject_id): i64 {
+    var q1 = "INSERT INTO evals (name, run, gate, metric, value, created, sweep, subject) ";
+    var q2 = "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
     var qsb = str_builder_new();
     str_builder_add_cstr(qsb, q1);
     str_builder_add_cstr(qsb, q2);
@@ -98,6 +103,8 @@ fn _ev_insert(db, name, run_id, gate, metric, value): i64 {
     patra_bind_text(stmt, 3, metric, strlen(metric));
     patra_bind_text(stmt, 4, value, strlen(value));
     patra_bind_int(stmt, 5, clock_epoch_secs());
+    patra_bind_int(stmt, 6, sweep_id);
+    patra_bind_int(stmt, 7, subject_id);
     var idp = alloc(8);
     if (patra_insert_returning(db, stmt, idp) != 0) { patra_finalize(stmt); return 0 - 1; }
     patra_finalize(stmt);
@@ -112,11 +119,20 @@ fn eval_run(path): i64 {
     var pairs = bayan_toml_section_pairs(vec_get(es, 0));
     var js = jobspec_from_pairs(pairs);
     if (js == 0) { return 1; }
-    var metric = _js_get_cstr(pairs, "metric");
-    var db = _ev_open_table();
-    if (db == 0) { return 1; }
-    var gate = run_job(js);
+    var gate = eval_run_spec(js, _js_get_cstr(pairs, "metric"), 0, 0);
     if (gate < 0) { return 1; }
+    return gate;
+}
+
+# Run a parsed eval: the job is the gate, `metric` (0 = none) is pulled from its
+# log, and the eval is recorded. `sweep_id` / `subject_id` link an eval run by a
+# sweep's [sweep.eval] to the sweep and the training run it judged (2.5); both 0
+# for `ifran eval`. Returns the gate (the job's exit code), or -1.
+fn eval_run_spec(js, metric, sweep_id, subject_id): i64 {
+    var db = _ev_open_table();
+    if (db == 0) { return 0 - 1; }
+    var gate = run_job(js);
+    if (gate < 0) { return 0 - 1; }
     var value = 0;
     if (metric != 0) {
         var sizep = alloc(8);
@@ -125,8 +141,8 @@ fn eval_run(path): i64 {
     }
     if (metric == 0) { metric = "-"; }
     if (value == 0) { value = "-"; }
-    var eid = _ev_insert(db, jobspec_name(js), run_last_id(), gate, metric, value);
-    if (eid < 0) { println("ifran: eval record insert failed"); return 1; }
+    var eid = _ev_insert(db, jobspec_name(js), run_last_id(), gate, metric, value, sweep_id, subject_id);
+    if (eid < 0) { println("ifran: eval record insert failed"); return 0 - 1; }
     ifr_print_cstr("eval "); fmt_int(eid);
     if (gate == 0) { ifr_print_cstr(" PASS (exit 0)"); }
     else { ifr_print_cstr(" FAIL (exit "); fmt_int(gate); ifr_print_cstr(")"); }
@@ -142,10 +158,10 @@ fn eval_run(path): i64 {
 fn eval_ls(): i64 {
     var db = _ev_open_table();
     if (db == 0) { return 1; }
-    var rs = patra_query(db, "SELECT id, name, gate, metric, value, run FROM evals");
+    var rs = patra_query(db, "SELECT id, name, gate, metric, value, run, sweep, subject FROM evals");
     if (rs == 0) { println("ifran: evals query failed"); return 1; }
     var n = patra_result_count(rs);
-    println("id | name | gate | metric | value | run");
+    println("id | name | gate | metric | value | run | sweep | subject");
     var i = 0;
     while (i < n) {
         fmt_int(patra_result_get_int(rs, i, 0)); ifr_print_cstr(" | ");
@@ -153,7 +169,9 @@ fn eval_ls(): i64 {
         fmt_int(patra_result_get_int(rs, i, 2)); ifr_print_cstr(" | ");
         _rs_print_str(rs, i, 3); ifr_print_cstr(" | ");
         _rs_print_str(rs, i, 4); ifr_print_cstr(" | ");
-        fmt_int(patra_result_get_int(rs, i, 5));
+        fmt_int(patra_result_get_int(rs, i, 5)); ifr_print_cstr(" | ");
+        fmt_int(patra_result_get_int(rs, i, 6)); ifr_print_cstr(" | ");
+        fmt_int(patra_result_get_int(rs, i, 7));
         println("");
         i = i + 1;
     }

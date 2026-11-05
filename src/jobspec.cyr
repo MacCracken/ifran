@@ -108,12 +108,22 @@ fn jobspec_parse(path): i64 {
 
 # Build a spec record from a section's pairs ([job] — and [sweep] reuses this
 # shape for the shared template fields). Returns the record or 0.
-fn jobspec_from_pairs(pairs): i64 {
+fn jobspec_from_pairs(pairs): i64 { return jobspec_from_pairs_in(pairs, "[job]", 0); }
+
+# The same, for a job-shaped table named `section` in error messages (2.5:
+# `[sweep.eval]`). A missing `name` takes `default_name`; 0 makes it required.
+fn _js_err(section, msg): i64 {
+    ifr_print_cstr("ifran: "); ifr_print_cstr(section); ifr_print_cstr(" "); println(msg);
+    return 0;
+}
+
+fn jobspec_from_pairs_in(pairs, section, default_name): i64 {
     var name = _js_get_cstr(pairs, "name");
-    if (name == 0) { println("ifran: [job] missing `name`"); return 0; }
+    if (name == 0) { name = default_name; }
+    if (name == 0) { return _js_err(section, "missing `name`"); }
     if (strlen(name) > 63) { println("ifran: `name` too long (<= 63)"); return 0; }
     var bin = _js_get_cstr(pairs, "bin");
-    if (bin == 0) { println("ifran: [job] missing `bin`"); return 0; }
+    if (bin == 0) { return _js_err(section, "missing `bin`"); }
     if (load8(bin) != 47) { println("ifran: `bin` must be an absolute path"); return 0; }
     var js = alloc(48);
     store64(js, name);
@@ -123,8 +133,7 @@ fn jobspec_from_pairs(pairs): i64 {
     var args = _js_get_cstr(pairs, "args");
     if (args != 0) {
         if (_js_split_args(args, argv) != 0) {
-            println("ifran: [job] `args` has an unterminated quote");
-            return 0;
+            return _js_err(section, "`args` has an unterminated quote");
         }
     }
     store64(js + 16, argv);
@@ -137,7 +146,7 @@ fn jobspec_from_pairs(pairs): i64 {
     var tov = bayan_toml_get_by_cstr(pairs, "timeout_s");
     if (tov != 0) {
         var tosec = str_to_int(tov);
-        if (tosec < 0) { println("ifran: [job] `timeout_s` must be >= 0"); return 0; }
+        if (tosec < 0) { return _js_err(section, "`timeout_s` must be >= 0"); }
         store64(js + 40, tosec);
     } else { store64(js + 40, 0); }
     return js;

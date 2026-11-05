@@ -180,6 +180,45 @@ fn _t_make_tula(path, sk): i64 {
 
 fn t_zeroes(n): i64 { return alloc(n); }
 
+# a tula file holding two LoRA tensors whose names are over 47 chars, so tula
+# (1.3.0+) adds its reserved names table as a third entry; `seed` varies the
+# payload so each call is new content to the store
+fn _t_make_tula_long(path, seed): i64 {
+    var data = t_zeroes(64);
+    store8(data, seed);
+    var na = "base_model.model.model.layers.0.self_attn.q_proj.lora_A.weight";    # 62 chars
+    var nb = "base_model.model.model.layers.0.self_attn.q_proj.lora_B.weight";
+    var b = tula_builder_new();
+    tula_builder_add_long(b, na, TULA_DT_F64, _t_shp1(4), 1, data, 32);
+    tula_builder_add_long(b, nb, TULA_DT_F64, _t_shp1(4), 1, data + 32, 32);
+    var buf = tula_builder_finish(b);
+    var total = tula_total_len(buf);
+    tula_write_file(path, buf, total);
+    return total;
+}
+
+fn _t_models_count(db): i64 {
+    var rs = patra_query(db, "SELECT id FROM models");
+    if (rs == 0) { return 0; }
+    var n = patra_result_count(rs);
+    patra_result_free(rs);
+    return n;
+}
+
+fn _t_model_int(db, id, col): i64 {
+    var sb = str_builder_new();
+    str_builder_add_cstr(sb, "SELECT ");
+    str_builder_add_cstr(sb, col);
+    str_builder_add_cstr(sb, " FROM models WHERE id = ?");
+    var stmt = patra_prepare(db, str_cstr(str_builder_build(sb)));
+    patra_bind_int(stmt, 0, id);
+    var rs = patra_query_prepared(db, stmt);
+    patra_finalize(stmt);
+    var v = patra_result_get_int(rs, 0, 0);
+    patra_result_free(rs);
+    return v;
+}
+
 fn test_model_store(): i64 {
     store_set_dir("/tmp/ifran_test_store");
     var sk = keys_sk();
@@ -227,6 +266,54 @@ fn test_model_store(): i64 {
     store8(fbuf + fn2 - 3, load8(fbuf + fn2 - 3) ^ 1);
     file_write_all(path, fbuf, fn2);
     assert_eq(store_verify(id1), 1, "tampered stored file FAILS verify (hash)");
+
+    # ---- 2.5: long names — tula's names table is not a tensor -----------------
+    _t_make_tula_long("/tmp/ifran_t_long.tula", 1);
+    var idl = store_add("/tmp/ifran_t_long.tula", "lora");
+    assert_gt(idl, 0, "long-name artifact ingests");
+    assert_eq(_t_model_int(db, idl, "tensors"), 2, "2 tensors recorded (the names table is not counted)");
+
+    # ---- 2.5: the stored copy is checked — a failed copy indexes nothing ------
+    file_write_all("/tmp/ifran_t_notadir", "x", 1);
+    store_set_dir("/tmp/ifran_t_notadir/store");
+    _t_make_tula_long("/tmp/ifran_t_copyfail.tula", 2);
+    var before = _t_models_count(db);
+    assert_eq(store_add("/tmp/ifran_t_copyfail.tula", "nocopy"), 0 - 1, "an unwritable store dir refuses the add");
+    assert_eq(_t_models_count(db), before, "nothing indexed for a copy that failed");
+    store_set_dir("/tmp/ifran_test_store");
+
+    # ---- 2.5: strict ingestion — the layout is recorded; opt-in flags refuse --
+    assert_eq(_t_model_int(db, id1, "canonical"), 1, "a tula-built file records canonical (1)");
+    # a canonical file plus 8 trailing bytes: it still opens, but it is not canonical
+    var tl = _t_make_tula_long("/tmp/ifran_t_trail.tula", 3);
+    var tb = alloc(tl + 8);
+    file_read_all("/tmp/ifran_t_trail.tula", tb, tl);
+    store64(tb + tl, 0);
+    file_write_all("/tmp/ifran_t_trail.tula", tb, tl + 8);
+    var idt = store_add("/tmp/ifran_t_trail.tula", "trailing");
+    assert_gt(idt, 0, "a non-canonical file still ingests by default");
+    assert_eq(_t_model_int(db, idt, "canonical"), 0 - 1, "and records non-canonical (-1)");
+    var tl2 = _t_make_tula_long("/tmp/ifran_t_trail2.tula", 4);
+    var tb2 = alloc(tl2 + 8);
+    file_read_all("/tmp/ifran_t_trail2.tula", tb2, tl2);
+    store64(tb2 + tl2, 0);
+    file_write_all("/tmp/ifran_t_trail2.tula", tb2, tl2 + 8);
+    var before2 = _t_models_count(db);
+    assert_eq(store_add_policy("/tmp/ifran_t_trail2.tula", "s", 1, 0), 0 - 1, "--strict refuses a non-canonical file");
+    assert_eq(_t_models_count(db), before2, "nothing indexed for a --strict refusal");
+    # --require-signed: unsigned and another key's signature are refused
+    _t_make_tula_long("/tmp/ifran_t_unsig2.tula", 5);
+    assert_eq(store_add_policy("/tmp/ifran_t_unsig2.tula", "u", 0, 1), 0 - 1,
+      "--require-signed refuses an unsigned file");
+    var osk = alloc(64);
+    memcpy(osk, sk, 64);
+    store8(osk, load8(osk) ^ 255);
+    _t_make_tula("/tmp/ifran_t_otherkey.tula", osk);
+    assert_eq(store_add_policy("/tmp/ifran_t_otherkey.tula", "o", 0, 1), 0 - 1,
+      "--require-signed refuses another key's signature");
+    assert_eq(_t_models_count(db), before2, "nothing indexed for --require-signed refusals");
+    assert_eq(store_add_policy("/tmp/ifran_t_signed.tula", "both", 1, 1), id1,
+      "a canonical operator-signed file passes both flags");
     return 0;
 }
 
@@ -585,6 +672,156 @@ fn test_prefs(): i64 {
     return 0;
 }
 
+fn _t_evals_in_sweep(db, sid): i64 {
+    var stmt = patra_prepare(db, "SELECT id FROM evals WHERE sweep = ?");
+    patra_bind_int(stmt, 0, sid);
+    var rs = patra_query_prepared(db, stmt);
+    patra_finalize(stmt);
+    var n = patra_result_count(rs);
+    patra_result_free(rs);
+    return n;
+}
+
+# int column `col` of the first eval row recorded for sweep `sid`
+fn _t_first_eval_int(db, sid, col): i64 {
+    var stmt = patra_prepare(db, _t_cat(_t_cat("SELECT ", col), " FROM evals WHERE sweep = ?"));
+    patra_bind_int(stmt, 0, sid);
+    var rs = patra_query_prepared(db, stmt);
+    patra_finalize(stmt);
+    var v = patra_result_get_int(rs, 0, 0);
+    patra_result_free(rs);
+    return v;
+}
+
+fn _t_write_spec(a, b): i64 {
+    var spec = _t_cat(a, b);
+    file_write_all("/tmp/ifran_t_al.cyml", spec, strlen(spec));
+    return 0;
+}
+
+# 2.5: the experiment auto-loop. A [sweep.eval] template runs as a recorded
+# eval after each combo's training exits 0; the sweep ranks combos by it.
+fn test_sweep_eval(): i64 {
+    var db = runstore_open();
+    # training echoes v=N; the eval cats the training log ({log}), so the eval's
+    # own metric `v` can only come from the combo it judged
+    var s1 = "[sweep]\nname = \"al\"\nbin = \"/bin/echo\"\nargs = \"v={v}\"\nlogdir = \"/tmp/ifran_test_logs\"\n";
+    var s2 = "[sweep.grid]\nv = \"3 7 5\"\n[sweep.eval]\nbin = \"/bin/cat\"\nargs = \"{log}\"\n";
+    var s3 = "logdir = \"/tmp/ifran_test_logs\"\nmetric = \"v\"\ndirection = \"max\"\n";
+    _t_write_spec(s1, _t_cat(s2, s3));
+    var r0 = run_last_id();
+    assert_eq(sweep_run("/tmp/ifran_t_al.cyml"), 0, "a sweep with [sweep.eval] runs clean");
+    var sid = _t_last_sweep(db);
+    assert_eq(_t_runs_in_sweep(db, sid), 3, "only the 3 training runs are tagged with the sweep");
+    assert_eq(_t_evals_in_sweep(db, sid), 3, "one recorded eval per combo");
+    assert_eq(run_last_id() - r0, 6, "3 training runs + 3 eval runs recorded");
+    assert_eq(_t_first_eval_int(db, sid, "subject"), r0 + 1, "evals.subject names the training run judged");
+    assert_eq(_t_first_eval_int(db, sid, "gate"), 0, "the eval's gate is recorded");
+    assert_eq(sweep_last_best_run(), r0 + 3, "the sweep's own ranking (max) picks the v=7 combo");
+    assert_eq(sweep_best_evals(sid), 0, "`sweep best <id>` re-ranks by the evals");
+    assert_eq(sweep_last_best_run(), r0 + 3, "and agrees");
+    assert_eq(sweep_best(sid, "v", 1), 0, "the log-based leaderboard is unchanged");
+    assert_eq(sweep_last_best_run(), r0 + 3, "and ranks the same training runs");
+    assert_eq(sweep_best_evals(1), 1, "a sweep without evals can't be ranked by them");
+
+    # the eval template substitutes axis values, {run} and {log}
+    var t1 = "[sweep]\nname = \"al\"\nbin = \"/bin/echo\"\n[sweep.grid]\nv = \"3\"\n";
+    _t_write_spec(t1, "[sweep.eval]\nbin = \"/bin/echo\"\nargs = \"x={v} r={run} l={log}\"\n");
+    var sw = sweep_parse("/tmp/ifran_t_al.cyml");
+    assert_nonnull(sw, "an eval template without a metric parses");
+    var idx = vec_new();
+    var c0 = alloc(8);
+    store64(c0, 0);
+    vec_push(idx, c0);
+    var ejs = _sw_eval_spec(load64(sw + 56), load64(sw + 8), idx, 0, 42, "/tmp/l.log");
+    assert(streq(jobspec_name(ejs), "al-eval#0"), "the eval name defaults to <sweep>-eval#<k>");
+    assert(streq(vec_get(jobspec_argv(ejs), 1), "x=3"), "an axis value reaches the eval's args");
+    assert(streq(vec_get(jobspec_argv(ejs), 2), "r=42"), "{run} is the training run's id");
+    assert(streq(vec_get(jobspec_argv(ejs), 3), "l=/tmp/l.log"), "{log} is the training run's log");
+
+    # a failing gate fails the combo; a failed training run skips its eval
+    _t_write_spec(_t_cat(s1, "[sweep.grid]\nv = \"1 2\"\n"), "[sweep.eval]\nbin = \"/bin/false\"\n");
+    assert_eq(sweep_run("/tmp/ifran_t_al.cyml"), 1, "a failing eval gate fails the sweep");
+    var sid2 = _t_last_sweep(db);
+    assert_eq(_t_evals_in_sweep(db, sid2), 2, "both gates recorded");
+    assert_eq(_t_first_eval_int(db, sid2, "gate"), 1, "with their exit code");
+    var f1 = "[sweep]\nname = \"al\"\nbin = \"/bin/false\"\n[sweep.grid]\nv = \"1 2\"\n";
+    _t_write_spec(f1, "[sweep.eval]\nbin = \"/bin/echo\"\n");
+    assert_eq(sweep_run("/tmp/ifran_t_al.cyml"), 1, "failed training fails the sweep");
+    assert_eq(_t_evals_in_sweep(db, _t_last_sweep(db)), 0, "no eval runs for failed training");
+
+    # direction must be min or max
+    _t_write_spec(t1, "[sweep.eval]\nbin = \"/bin/echo\"\nmetric = \"v\"\ndirection = \"up\"\n");
+    assert_eq(sweep_parse("/tmp/ifran_t_al.cyml"), 0, "direction other than min/max is refused");
+    return 0;
+}
+
+# 2.5: IFRAN_HOME roots ifran.db, ifran-store/, ifran-data/ and the keys dir.
+# The environment variable is read by ifr_home(); ifr_set_home is the suite's
+# override for it (the stdlib has no setenv). The binary is checked with the
+# real variable by hand.
+fn test_ifran_home(): i64 {
+    var keep = _rs_db;
+    var root = "/tmp/ifran_t_home";
+    sys_unlink("/tmp/ifran_t_home/ifran.db");
+    ifr_set_home(root);
+    runstore_set_path(0);
+    store_set_dir(0);
+    dataset_set_dir(0);
+    keys_set_dir(0);
+    _rs_db = 0;
+    assert(streq(RUNSTORE_PATH(), "/tmp/ifran_t_home/ifran.db"), "ifran.db under IFRAN_HOME");
+    assert(streq(store_dir(), "/tmp/ifran_t_home/ifran-store"), "ifran-store/ under IFRAN_HOME");
+    assert(streq(dataset_dir(), "/tmp/ifran_t_home/ifran-data"), "ifran-data/ under IFRAN_HOME");
+    assert(streq(keys_dir(), "/tmp/ifran_t_home/.ifran"), "the keys dir under IFRAN_HOME");
+    var db = runstore_open();
+    assert_nonnull(db, "the db opens under IFRAN_HOME (the dir is created)");
+    assert_eq(file_exists("/tmp/ifran_t_home/ifran.db"), 1, "ifran.db is written there");
+    file_write_all("/tmp/ifran_t_home_corpus.txt", "a\nb\n", 4);
+    var did = dataset_add("/tmp/ifran_t_home_corpus.txt", "h");
+    assert_gt(did, 0, "a dataset ingests under IFRAN_HOME");
+    var dp = dataset_path(did);
+    assert_eq(memeq(dp, "/tmp/ifran_t_home/ifran-data/", 29), 1, "and its stored copy lands in IFRAN_HOME/ifran-data/");
+    ifr_set_home("");
+    assert(streq(RUNSTORE_PATH(), "ifran.db"), "an empty IFRAN_HOME means unset (the cwd)");
+    assert(streq(store_dir(), "ifran-store"), "the store dir falls back to the cwd");
+    patra_close(db);
+    ifr_set_home(0);
+    _rs_db = keep;
+    runstore_set_path("/tmp/ifran_test.db");
+    store_set_dir("/tmp/ifran_test_store");
+    dataset_set_dir("/tmp/ifran_test_data");
+    keys_set_dir("/tmp/ifran_test_keys");
+    return 0;
+}
+
+# 2.5: an ifran.db written by 2.4 has no models.canonical column. The ALTER
+# migration adds it; the old row reads 0 (not checked), new rows record theirs.
+fn test_store_migration(): i64 {
+    var keep = _rs_db;
+    var mpath = "/tmp/ifran_t_migrate.db";
+    sys_unlink(mpath);
+    var mdb = patra_open(mpath);
+    patra_exec(mdb, _t_cat("CREATE TABLE models (id INT AUTOINCREMENT, name STR, path STR, hash STR, ",
+        "size INT, tensors INT, sigstat STR, ingested INT)"));
+    patra_exec(mdb, _t_cat("INSERT INTO models (name, path, hash, size, tensors, sigstat, ingested) ",
+        "VALUES ('old', '/tmp/x', 'h', 1, 1, 'unsigned', 0)"));
+    patra_close(mdb);
+    _rs_db = 0;
+    runstore_set_path(mpath);
+    var db = runstore_open();
+    _t_make_tula_long("/tmp/ifran_t_migrate.tula", 6);
+    var idm = store_add("/tmp/ifran_t_migrate.tula", "new");
+    assert_gt(idm, 0, "store add works on a 2.4 models table (the ALTER adds canonical)");
+    assert_eq(_t_model_int(db, 1, "canonical"), 0, "the 2.4 row reads as not checked (0)");
+    assert_eq(_t_model_int(db, idm, "canonical"), 1, "the new row records canonical (1)");
+    assert_eq(store_ls(), 0, "store ls over 2.4 and 2.5 rows");
+    patra_close(db);
+    _rs_db = keep;
+    runstore_set_path("/tmp/ifran_test.db");
+    return 0;
+}
+
 # 2.4: a table whose columns were created with other types (a foreign or
 # damaged ifran.db; ifran's CREATE TABLE is error-ignored when the table
 # already exists) reads its non-STR cells as length -1. Each reader must fail
@@ -651,6 +888,12 @@ fn main(): i64 {
     test_evals();
     test_group("prefs");
     test_prefs();
+    test_group("auto-loop");
+    test_sweep_eval();
+    test_group("ifran-home");
+    test_ifran_home();
+    test_group("store-migration");
+    test_store_migration();
     test_group("foreign-db");
     test_foreign_db();
     return assert_summary();

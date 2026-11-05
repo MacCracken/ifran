@@ -10,8 +10,8 @@ listed module functions.
 - **Additive-only minors:** new commands, new spec keys (absent = old
   behavior), new columns (defaults), the named additive lane in api.md.
 - **Out of freeze:** `_`-internals, caps/defaults, log text.
-- **`rust-old/`** is reference-only, retained (with its docs and original
-  AGPL license) for a release or two past 2.0.0 before removal; it is not API.
+- **`rust-old/`** was removed after 2.2.0 and survives in git history (with
+  its original AGPL license); it was never API.
 
 Breaking any frozen item requires 3.0.0 with a CHANGELOG **Breaking** section
 and a migration note.

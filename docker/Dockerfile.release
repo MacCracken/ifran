@@ -32,6 +32,9 @@ COPY bin/${TARGETARCH}/ifran /usr/local/bin/ifran
 RUN chmod 0755 /usr/local/bin/ifran && /usr/local/bin/ifran --version
 
 USER ifran
+# IFRAN_HOME roots ifran.db, ifran-store/, ifran-data/ and the keys (.ifran/);
+# a job's relative logdir lands in the working directory, the same place
+ENV IFRAN_HOME=/var/lib/ifran
 ENV HOME=/var/lib/ifran
 WORKDIR /var/lib/ifran
 VOLUME ["/var/lib/ifran"]

@@ -19,7 +19,7 @@ include "src/pref.cyr"
 
 # Embedded version literal — bumped as part of cut mechanics (VERSION file is
 # the source of truth; keep in sync at each cut).
-fn IFRAN_VERSION(): i64 { return "2.4.1"; }
+fn IFRAN_VERSION(): i64 { return "2.5.0"; }
 
 # slice accessor: token i of a verb-remainder argv (cstr*)
 fn _cli_tok(argv, i): i64 { return load64(argv + i * 8); }
@@ -52,9 +52,9 @@ fn main(): i64 {
     cmdit_verb(h, "run", "execute a job spec: spawn, capture, record (exit = child's)");   # 0
     cmdit_verb(h, "runs", "list recorded runs");                                           # 1
     cmdit_verb(h, "keys", "operator Ed25519 keypair: init | show");                        # 2
-    cmdit_verb(h, "store", "signed model store: add <file> [name] | ls | verify <id>");    # 3
+    cmdit_verb(h, "store", "signed model store: add <file> [name] [--strict|--require-signed] | ls | verify <id>"); # 3
     cmdit_verb(h, "dataset", "corpora: add <file> [name] | ls | dedup <id> | validate <id>");              # 4
-    cmdit_verb(h, "sweep", "run a sweep (grid/random; budgets) | best <id> <metric> [min|max]");       # 5
+    cmdit_verb(h, "sweep", "run a sweep (grid/random; budgets; [sweep.eval]) | best <id> [<metric> [min|max]]"); # 5
     cmdit_verb(h, "sweeps", "list sweeps");                                                # 6
     cmdit_verb(h, "eval", "run a gate as a recorded eval (exit = the gate)");              # 7
     cmdit_verb(h, "evals", "list the benchmark store");                                    # 8
@@ -99,17 +99,25 @@ fn main(): i64 {
     }
     if (v == 3) {                                    # store add|ls|verify
         var sh = cmdit_new("ifran store");
-        cmdit_verb(sh, "add", "validate + verify + ingest a .tula artifact: <file> [name]");
+        cmdit_verb(sh, "add", "ingest a .tula artifact: <file> [name] [--strict] [--require-signed]");
         cmdit_verb(sh, "ls", "list the model store");
         cmdit_verb(sh, "verify", "re-check hash/structure/signature: <id>");
         if (_cli_sub(h, sh, rc) == 0) { return load64(rc); }
         var sv = cmdit_verb_matched(sh);
         var sa = cmdit_verb_argv(sh);
         if (sv == 0) {
-            if (_cli_need(sh, 1, "<file.tula>") == 0) { return CMDIT_EXIT_USAGE; }
-            var nm = _cli_tok(sa, 1);
-            if (cmdit_verb_argc(sh) >= 3) { nm = _cli_tok(sa, 2); }
-            if (store_add(_cli_tok(sa, 1), nm) < 0) { return 1; }
+            # 2.5: the acceptance flags, parsed from the verb's own remainder
+            var ah = cmdit_new("ifran store add");
+            var f_strict = cmdit_bool(ah, 0, "strict", "refuse a file whose layout is not canonical");
+            var f_reqsig = cmdit_bool(ah, 0, "require-signed", "refuse anything not signed by the operator key");
+            var ar = cmdit_parse_argv(ah, cmdit_verb_argc(sh), sa);
+            if (ar == CMDIT_HELP) { cmdit_help(ah); return CMDIT_EXIT_OK; }
+            if (ar == CMDIT_RESULT_ERR) { cmdit_print_error(ah); return CMDIT_EXIT_USAGE; }
+            if (cmdit_positional_count(ah) < 1) { println("ifran: missing <file.tula>"); return CMDIT_EXIT_USAGE; }
+            var af = cmdit_positional(ah, 0);
+            var nm = af;
+            if (cmdit_positional_count(ah) >= 2) { nm = cmdit_positional(ah, 1); }
+            if (store_add_policy(af, nm, cmdit_get_bool(ah, f_strict), cmdit_get_bool(ah, f_reqsig)) < 0) { return 1; }
             return 0;
         }
         if (sv == 1) { return store_ls(); }
@@ -141,16 +149,18 @@ fn main(): i64 {
         if (dataset_dedup(atoi(_cli_tok(da, 1))) < 0) { return 1; }
         return 0;
     }
-    if (v == 5) {                                    # sweep <spec.cyml> | best <id> <metric> [min|max]
+    if (v == 5) {                                    # sweep <spec.cyml> | best <id> [<metric> [min|max]]
         if (vc < 2) {
-            println("ifran: sweep needs a <spec.cyml> (or: best <id> <metric> [min|max])");
+            println("ifran: sweep needs a <spec.cyml> (or: best <id> [<metric> [min|max]])");
             return CMDIT_EXIT_USAGE;
         }
         if (streq(_cli_tok(va, 1), "best") == 1) {
-            if (vc < 4) {
-                println("ifran: sweep best needs <sweep-id> <metric-key> [min|max]");
+            if (vc < 3) {
+                println("ifran: sweep best needs <sweep-id> [<metric-key> [min|max]]");
                 return CMDIT_EXIT_USAGE;
             }
+            # 2.5: no metric = rank by the evals a [sweep.eval] recorded
+            if (vc == 3) { return sweep_best_evals(atoi(_cli_tok(va, 2))); }
             var wmax = 0;
             if (vc >= 5) { if (streq(_cli_tok(va, 4), "max") == 1) { wmax = 1; } }
             return sweep_best(atoi(_cli_tok(va, 2)), _cli_tok(va, 3), wmax);
