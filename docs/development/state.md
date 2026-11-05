@@ -6,11 +6,16 @@
 
 ## Version
 
+**2.3.1 — 2026-11-04 (toolchain maintenance).** cyrius `6.7.9` → `6.7.18`;
+deps moved to their latest tags (see below); `lib/` re-vendored; bayan's
+deprecated getters replaced with their `_by_cstr` equivalents (no behavior
+change). No surface change, but `dataset validate` now fails JSONL lines
+with a duplicate top-level key (bayan 1.11.1). Suite **120/120**, plus
+bench, fuzz and `cyrius deps --locked`. Detail in CHANGELOG `[2.3.1]`.
+
 **2.3.0 — 2026-11-04 (the cyrius 6.7 line).** cyrius `6.6.20` → `6.7.9`;
-deps moved to their newest tags that pin ≤ 6.7.9 (see below); `lib/`
-re-vendored from the 6.7.9 snapshot; git-first resolution, so local builds
-compile the tags as CI does. No surface change. Suite **120/120**, plus
-bench, fuzz and `cyrius deps --locked`. Detail in CHANGELOG `[2.3.0]`.
+git-first resolution, so local builds compile the tags as CI does. No
+surface change. Detail in CHANGELOG `[2.3.0]`.
 
 **2.2.1–2.2.3 — 2026-09-11 → 11-04 (toolchain maintenance).** cyrius
 `6.4.3` → `6.6.2` (the `Result` value form; `rust-old/` removed) → `6.6.20`,
@@ -52,10 +57,9 @@ CLI on **cmdit** (generated help/version/errors). Exit codes: `run` = child's,
 
 ## Toolchain & deps
 
-- **Cyrius pin**: `6.7.9` (cyrius.cyml).
-- Deps: patra 1.16.0 · sigil 3.13.15 · tula 1.1.0 · cmdit 1.4.0. These are
-  the newest tags that pin ≤ 6.7.9; the next ones need 6.7.10 or later
-  (pins + watch: [`dependency-watch.md`](dependency-watch.md)).
+- **Cyrius pin**: `6.7.18` (cyrius.cyml).
+- Deps: patra 1.16.6 · sigil 3.13.15 · tula 1.1.2 · cmdit 1.5.0, the latest
+  tag of each (pins + watch: [`dependency-watch.md`](dependency-watch.md)).
 - **Git first**: a default `cyrius deps` / `build` / `test` resolves the
   tags, sibling checkouts or not. `CYRIUS_LOCAL=1` / `--local` builds the
   `../<dep>` checkouts from `build/local-deps/` instead.
@@ -64,7 +68,7 @@ CLI on **cmdit** (generated help/version/errors). Exit codes: `run` = child's,
 
 ## Tests / quality
 
-- `tests/ifran.tcyr` — **120/120** on cyrius 6.7.9 (jobspec, executor incl. failure paths, keys,
+- `tests/ifran.tcyr` — **120/120** on cyrius 6.7.18 (jobspec, executor incl. failure paths, keys,
   model store incl. tamper-detection, datasets incl. dedup, sweeps incl.
   seeded-random reproducibility, evals, prefs incl. JSON-escaping round-trip).
   All against `/tmp`.

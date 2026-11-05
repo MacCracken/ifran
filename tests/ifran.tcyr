@@ -471,7 +471,7 @@ fn test_prefs(): i64 {
             if (root != 0) {
                 if (bayan_json_v_is_obj(root) == 1) {
                     parsed = parsed + 1;
-                    var pv = bayan_json_v_obj_get(root, "prompt");
+                    var pv = bayan_json_v_obj_get_by_cstr(root, "prompt");
                     if (pv != 0) {
                         var psx = bayan_json_v_str(pv);
                         if (psx != 0) {

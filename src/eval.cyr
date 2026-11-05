@@ -107,7 +107,7 @@ fn _ev_insert(db, name, run_id, gate, metric, value): i64 {
 # Run an eval spec. Exit = the GATE (the child's exit code; -1 orchestration).
 fn eval_run(path): i64 {
     var sections = bayan_toml_parse_file(path);
-    var es = bayan_toml_get_sections(sections, "eval");
+    var es = bayan_toml_get_sections_by_cstr(sections, "eval");
     if (vec_len(es) == 0) { println("ifran: eval file has no [eval] section"); return 1; }
     var pairs = bayan_toml_section_pairs(vec_get(es, 0));
     var js = jobspec_from_pairs(pairs);

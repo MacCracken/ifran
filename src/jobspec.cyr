@@ -82,10 +82,10 @@ fn _js_split_args(s, out_vec): i64 {
     return 0;
 }
 
-# toml_get returns a Str (ptr+len record), NOT a cstring — convert before any
+# bayan_toml_get_by_cstr returns a Str (ptr+len record), NOT a cstring — convert before any
 # strlen/load8 use (the takumi `_get_cstr` pattern).
 fn _js_get_cstr(pairs, key): i64 {
-    var s = toml_get(pairs, key);
+    var s = bayan_toml_get_by_cstr(pairs, key);
     if (s == 0) { return 0; }
     return str_cstr(s);
 }
@@ -98,7 +98,7 @@ fn jobspec_parse(path): i64 {
         return 0;
     }
     # get_sections returns a (possibly empty) vec of matches — never 0
-    var jsecs = bayan_toml_get_sections(sections, "job");
+    var jsecs = bayan_toml_get_sections_by_cstr(sections, "job");
     if (vec_len(jsecs) == 0) {
         println("ifran: job file has no [job] section");
         return 0;
@@ -131,10 +131,10 @@ fn jobspec_from_pairs(pairs): i64 {
     var logdir = _js_get_cstr(pairs, "logdir");
     if (logdir == 0) { logdir = "runs/logs"; }
     store64(js + 24, logdir);
-    var dsv = toml_get(pairs, "dataset");
+    var dsv = bayan_toml_get_by_cstr(pairs, "dataset");
     if (dsv != 0) { store64(js + 32, str_to_int(dsv)); }
     else { store64(js + 32, 0); }
-    var tov = toml_get(pairs, "timeout_s");
+    var tov = bayan_toml_get_by_cstr(pairs, "timeout_s");
     if (tov != 0) {
         var tosec = str_to_int(tov);
         if (tosec < 0) { println("ifran: [job] `timeout_s` must be >= 0"); return 0; }

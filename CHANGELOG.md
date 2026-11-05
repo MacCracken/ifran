@@ -7,6 +7,49 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-11-04
+
+### Changed
+
+- **Toolchain `6.7.9` → `6.7.18`.**
+- **Deps moved to their latest tags**: patra `1.16.0` → `1.16.6`, cmdit
+  `1.4.0` → `1.5.0`, tula `1.1.0` → `1.1.2`. sigil stays at `3.13.15`, its
+  newest tag. The patra and sigil versions match what the 6.7.18 toolchain
+  bundles, so the `lib/ shadows` sigil warning from 2.3.0 is gone. All three
+  moves are fixes and hardening with no API change: patra refuses and reports
+  negative or malformed BYTES/TEXT lengths and chains it used to accept as
+  `PATRA_OK`; tula 1.1.2 is an audit pass (truncated-file SIGBUS, leaked
+  mappings and over-allocation on rejected files) with byte-identical output;
+  cmdit 1.4.1–1.5.0 fixes shell completion and argv handling.
+- **`lib/` re-vendored from the 6.7.18 snapshot** (`cyrius lib sync --full`
+  + `cyrius deps`; 67 files, none added or removed).
+- **bayan's single-name TOML/JSON getters are deprecated in favor of the
+  explicit `_by_cstr` / `_by_str` forms.** ifran's 10 calls in `src/eval.cyr`,
+  `src/jobspec.cyr` and `src/sweep.cyr` (`toml_get`,
+  `bayan_toml_get_sections`) and one in `tests/ifran.tcyr`
+  (`bayan_json_v_obj_get`) now use `_by_cstr`. The deprecated names are
+  wrappers that forward to `_by_cstr` unchanged, so behavior is identical.
+  Build, test, bench and fuzz compiles are warning-free in first-party code.
+- **`ifran dataset validate` now fails a JSONL line whose object repeats a
+  top-level key** (e.g. `{"a":1,"a":2}`): it reports `bad JSONL at line N`
+  and exits 1, where 2.3.0 reported `VALID` and exited 0 (checked
+  side by side). ifran delegates the parse, and bayan 1.11.1 (folded into
+  cyrius 6.7.18) makes its flat `bayan_json_parse` refuse duplicate keys.
+
+### Notes
+
+- `cyrius deps` / `build` print one `note: cyrius.lock keeps <dep>@<old>'s
+  pin …, fail-closed` line per older tag still pinned in the lock. That is
+  cyrius's deliberate default since 6.6.20: an old tag's commit pin stays so
+  a repointed old tag is still refused. Deleting `cyrius.lock` and running
+  `cyrius deps` re-pins only the current tags and silences the notes.
+
+### Verified
+
+- Build, `tests/ifran.tcyr` **120/120**, `tests/ifran.bcyr`,
+  `tests/ifran.fcyr`, `cyrius deps --locked`, `cyrius lint` on the three
+  edited files (0 warnings), all run in the repo itself.
+
 ## [2.3.0] - 2026-11-04
 
 No API addition and no surface change: the frozen 2.x surface is exactly

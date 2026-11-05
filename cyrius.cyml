@@ -8,7 +8,7 @@ description = "ifran (عرفان) — the AGNOS training control plane: jobs, ch
 # rust-old/ under its original license.
 license = "GPL-3.0-only"
 language = "cyrius"
-cyrius = "6.7.9"
+cyrius = "6.7.18"
 
 [build]
 entry = "src/main.cyr"
@@ -28,7 +28,7 @@ stdlib = ["string", "fmt", "alloc", "freelist", "vec", "hashmap", "str", "syscal
 [deps.patra]
 git = "https://github.com/MacCracken/patra.git"
 path = "../patra"
-tag = "1.16.0"
+tag = "1.16.6"
 modules = ["dist/patra.cyr"]
 
 # sigil — the crypto boundary: ed25519_* (tula's unresolved symbols, the
@@ -46,7 +46,7 @@ modules = ["dist/sigil.cyr"]
 [deps.cmdit]
 git = "https://github.com/MacCracken/cmdit.git"
 path = "../cmdit"
-tag = "1.4.0"
+tag = "1.5.0"
 modules = ["dist/cmdit.cyr"]
 
 # tula — the sovereign weight-file format; the checkpoint store validates +
@@ -54,5 +54,5 @@ modules = ["dist/cmdit.cyr"]
 [deps.tula]
 git = "https://github.com/MacCracken/tula.git"
 path = "../tula"
-tag = "1.1.0"
+tag = "1.1.2"
 modules = ["dist/tula.cyr"]

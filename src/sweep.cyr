@@ -38,12 +38,12 @@ fn _sw_next(n): i64 {
 # packed: +0 js, +8 axes, +16 mode-cstr, +24 samples, +32 seed
 fn sweep_parse(path): i64 {
     var sections = bayan_toml_parse_file(path);
-    var ss = bayan_toml_get_sections(sections, "sweep");
+    var ss = bayan_toml_get_sections_by_cstr(sections, "sweep");
     if (vec_len(ss) == 0) { println("ifran: sweep file has no [sweep] section"); return 0; }
     var pairs = bayan_toml_section_pairs(vec_get(ss, 0));
     var js = jobspec_from_pairs(pairs);
     if (js == 0) { return 0; }
-    var gs = bayan_toml_get_sections(sections, "sweep.grid");
+    var gs = bayan_toml_get_sections_by_cstr(sections, "sweep.grid");
     if (vec_len(gs) == 0) { println("ifran: sweep file has no [sweep.grid] axes"); return 0; }
     var gpairs = bayan_toml_section_pairs(vec_get(gs, 0));
     var axes = vec_new();
@@ -66,22 +66,22 @@ fn sweep_parse(path): i64 {
     var mode = _js_get_cstr(pairs, "mode");
     if (mode == 0) { mode = "grid"; }
     var samples = 0;
-    var sv = toml_get(pairs, "samples");
+    var sv = bayan_toml_get_by_cstr(pairs, "samples");
     if (sv != 0) { samples = str_to_int(sv); }
     var seed = 1;
-    var seedv = toml_get(pairs, "seed");
+    var seedv = bayan_toml_get_by_cstr(pairs, "seed");
     if (seedv != 0) { seed = str_to_int(seedv); }
     # budgets (2.2): max_trials caps combos RUN; time_budget_s stops launching
     # new combos once the wall clock passes (the running combo finishes; the
     # per-combo half is the job template's own timeout_s)
     var maxt = 0;
-    var mtv = toml_get(pairs, "max_trials");
+    var mtv = bayan_toml_get_by_cstr(pairs, "max_trials");
     if (mtv != 0) {
         maxt = str_to_int(mtv);
         if (maxt < 0) { println("ifran: [sweep] `max_trials` must be >= 0"); return 0; }
     }
     var tbud = 0;
-    var tbv = toml_get(pairs, "time_budget_s");
+    var tbv = bayan_toml_get_by_cstr(pairs, "time_budget_s");
     if (tbv != 0) {
         tbud = str_to_int(tbv);
         if (tbud < 0) { println("ifran: [sweep] `time_budget_s` must be >= 0"); return 0; }
