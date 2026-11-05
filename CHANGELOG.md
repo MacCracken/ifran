@@ -7,6 +7,54 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-11-04
+
+No API addition and no surface change: the frozen 2.x surface is exactly
+2.2.3's. The minor bump marks the move to the cyrius 6.7 line and git-first
+dependency resolution.
+
+### Changed
+
+- **Toolchain `6.6.20` → `6.7.9`.** No first-party source change beyond the
+  version literal. The 6.7.0–6.7.9 consumer changes were checked against
+  `src/` and `tests/`. ifran uses none of the newly reserved words (`trait`,
+  `const`, `true`/`false`, `do`, `dyn`) and no lone `!`, which 6.7.3 turned
+  from a silently dropped token into a real operator. The 6.7.9 exec-family
+  signal change doesn't reach ifran's jobs either: the executor uses its own
+  `sys_fork` + `sys_execve`.
+- **Deps moved to their newest tags that pin ≤ 6.7.9**: patra `1.15.2` →
+  `1.16.0`, sigil `3.13.10` → `3.13.15`, cmdit `1.2.6` → `1.4.0`, tula
+  `1.0.3` → `1.1.0`. The next tags (patra 1.16.1, cmdit 1.4.1, tula 1.1.1)
+  pin 6.7.10 or later. tula 1.1.0 has no API or format change, and its own
+  sigil is also 3.13.15. cmdit 1.3–1.4 are additive plus internal
+  refactors. patra 1.16.0 turns five silent wrong answers into errors or
+  correct results (LIMIT 0; SUM/MIN/MAX on a non-INT column; identifiers over
+  31 bytes; ORDER BY an unknown, TEXT or BYTES column).
+- **`lib/` re-vendored from the 6.7.9 snapshot** (`cyrius lib sync --full` +
+  `cyrius deps`; 69 files, none added or removed). `cyrius deps --locked`
+  confirms `lib/` and `cyrius.lock` are exactly what the tags resolve.
+- **Git first (cyrius ≥ 6.7.6).** A default `cyrius deps` / `build` / `test`
+  now resolves each dep's tag even with the `../<dep>` checkouts present, so
+  local builds compile what CI compiles. This retires the `[2.2.2]` porting
+  note's staged-copy workaround. The `path` lines are now dev overrides, read
+  only under `CYRIUS_LOCAL=1` / `--local`. A `cyrius.cyml` comment and
+  `docs/development/README.md` say so, `.gitignore` gains `/build/local-deps/`,
+  and the roadmap's 6.7.6 note is marked applied.
+- Binary 2,064,824 → 1,853,672 B. sigil 3.13.12's smaller static buffer also
+  removes the `array local … gets STATIC storage` build warning.
+
+### Notes
+
+- Builds print `./lib/ shadows version-pinned …/versions/6.7.9/lib … sigil
+  3.13.15 (pinned: 3.13.11)`. The 6.7.9 toolchain bundles an older sigil;
+  `lib/` holds the declared tag, which is what CI builds.
+  `CYRIUS_NO_WARN_SHADOW_LIB=1` silences it.
+
+### Verified
+
+- Build, `tests/ifran.tcyr` **120/120**, `tests/ifran.bcyr`,
+  `tests/ifran.fcyr`, `cyrius deps --locked`, all run in the repo itself.
+
 ## [2.2.3] - 2026-11-04
 
 ### Changed

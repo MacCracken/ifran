@@ -8,7 +8,7 @@ description = "ifran (عرفان) — the AGNOS training control plane: jobs, ch
 # rust-old/ under its original license.
 license = "GPL-3.0-only"
 language = "cyrius"
-cyrius = "6.6.20"
+cyrius = "6.7.9"
 
 [build]
 entry = "src/main.cyr"
@@ -17,12 +17,18 @@ output = "ifran"
 [deps]
 stdlib = ["string", "fmt", "alloc", "freelist", "vec", "hashmap", "str", "syscalls", "io", "fs", "args", "assert", "result", "process", "chrono", "bayan", "flags", "tagged", "fnptr", "slice", "ct", "sync", "thread", "thread_local", "random", "keccak", "bench", "math", "ganita"]
 
+# Git first (cyrius >= 6.7.6): every default `cyrius deps` / `build` resolves the
+# git `tag` (commit pin checked), the same as CI. Each `path` below is a dev
+# override read only in local mode (`CYRIUS_LOCAL=1`, `CYRIUS_LOCAL=sigil,tula`
+# or `--local`), which builds the ../<dep> checkout from build/local-deps/ and
+# leaves lib/ + cyrius.lock untouched.
+
 # patra — the sovereign B+tree DB (run records: the `runs` table; model index:
 # the `models` table). Linux-first; the agnos story rides patra's own work.
 [deps.patra]
 git = "https://github.com/MacCracken/patra.git"
 path = "../patra"
-tag = "1.15.2"
+tag = "1.16.0"
 modules = ["dist/patra.cyr"]
 
 # sigil — the crypto boundary: ed25519_* (tula's unresolved symbols, the
@@ -31,7 +37,7 @@ modules = ["dist/patra.cyr"]
 [deps.sigil]
 git = "https://github.com/MacCracken/sigil.git"
 path = "../sigil"
-tag = "3.13.10"
+tag = "3.13.15"
 modules = ["dist/sigil.cyr"]
 
 # cmdit — the ecosystem CLI/arg lib: verb dispatch + generated help/version +
@@ -40,7 +46,7 @@ modules = ["dist/sigil.cyr"]
 [deps.cmdit]
 git = "https://github.com/MacCracken/cmdit.git"
 path = "../cmdit"
-tag = "1.2.6"
+tag = "1.4.0"
 modules = ["dist/cmdit.cyr"]
 
 # tula — the sovereign weight-file format; the checkpoint store validates +
@@ -48,5 +54,5 @@ modules = ["dist/cmdit.cyr"]
 [deps.tula]
 git = "https://github.com/MacCracken/tula.git"
 path = "../tula"
-tag = "1.0.3"
+tag = "1.1.0"
 modules = ["dist/tula.cyr"]

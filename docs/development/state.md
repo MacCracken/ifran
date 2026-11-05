@@ -6,18 +6,15 @@
 
 ## Version
 
-**2.2.3 — 2026-11-04 (dep maintenance).** tula `1.0.2` → `1.0.3` (tula's
-own 6.6.20 bump; no source change). Suite **120/120**, plus bench and fuzz.
-Detail in CHANGELOG `[2.2.3]`.
+**2.3.0 — 2026-11-04 (the cyrius 6.7 line).** cyrius `6.6.20` → `6.7.9`;
+deps moved to their newest tags that pin ≤ 6.7.9 (see below); `lib/`
+re-vendored from the 6.7.9 snapshot; git-first resolution, so local builds
+compile the tags as CI does. No surface change. Suite **120/120**, plus
+bench, fuzz and `cyrius deps --locked`. Detail in CHANGELOG `[2.3.0]`.
 
-**2.2.2 — 2026-11-04 (toolchain maintenance).** cyrius `6.6.2` → `6.6.20`;
-deps moved to their newest 6.6-line tags (see below); `lib/` re-vendored from
-the 6.6.20 snapshot. No surface change. Suite **120/120**, plus bench and
-fuzz green on the new pin. Detail in CHANGELOG `[2.2.2]`.
-
-**2.2.1 — 2026-09-11 (toolchain maintenance).** cyrius `6.4.3` → `6.6.2`
-(the `Result` value-form migration); `rust-old/` removed. Detail in CHANGELOG
-`[2.2.1]`.
+**2.2.1–2.2.3 — 2026-09-11 → 11-04 (toolchain maintenance).** cyrius
+`6.4.3` → `6.6.2` (the `Result` value form; `rust-old/` removed) → `6.6.20`,
+with the deps following each pin. Detail in CHANGELOG `[2.2.1]`–`[2.2.3]`.
 
 **2.2.0 — RELEASED 2026-07-05 (the pre-removal-audit additives).** Sweep
 leaderboard (`sweep best <id> <metric> [min|max]` — eval-extractor metrics
@@ -55,21 +52,19 @@ CLI on **cmdit** (generated help/version/errors). Exit codes: `run` = child's,
 
 ## Toolchain & deps
 
-- **Cyrius pin**: `6.6.20` (cyrius.cyml).
-- Deps: patra 1.15.2 · sigil 3.13.10 · tula 1.0.3 · cmdit 1.2.6. These are
-  the newest tags each dep has on the 6.6 line; the next ones need cyrius
-  6.7.x (pins + watch: [`dependency-watch.md`](dependency-watch.md)).
-- ⚠ **Local resolution**: on 6.6.x the `path = "../<dep>"` overrides make
-  `tag` inert, every compiling verb re-resolves first, and the sibling
-  checkouts are on 6.7.x. So a build inside `~/Repos` re-vendors the wrong
-  code. Build and test from a staged copy outside `~/Repos` (CHANGELOG
-  `[2.2.2]` porting notes). This goes away at the 6.7.6+ pin.
+- **Cyrius pin**: `6.7.9` (cyrius.cyml).
+- Deps: patra 1.16.0 · sigil 3.13.15 · tula 1.1.0 · cmdit 1.4.0. These are
+  the newest tags that pin ≤ 6.7.9; the next ones need 6.7.10 or later
+  (pins + watch: [`dependency-watch.md`](dependency-watch.md)).
+- **Git first**: a default `cyrius deps` / `build` / `test` resolves the
+  tags, sibling checkouts or not. `CYRIUS_LOCAL=1` / `--local` builds the
+  `../<dep>` checkouts from `build/local-deps/` instead.
 - License: **GPL-3.0-only** (policy: AGPL = desktop apps; the removed Rust
   line keeps its original AGPL in git history).
 
 ## Tests / quality
 
-- `tests/ifran.tcyr` — **120/120** on cyrius 6.6.20 (jobspec, executor incl. failure paths, keys,
+- `tests/ifran.tcyr` — **120/120** on cyrius 6.7.9 (jobspec, executor incl. failure paths, keys,
   model store incl. tamper-detection, datasets incl. dedup, sweeps incl.
   seeded-random reproducibility, evals, prefs incl. JSON-escaping round-trip).
   All against `/tmp`.

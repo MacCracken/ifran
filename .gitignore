@@ -47,3 +47,7 @@ Thumbs.db
 # ifran runtime artifacts (M1 run store + logs)
 ifran.db
 runs/
+
+# cyrius local mode (CYRIUS_LOCAL=1 / --local, cyrius >= 6.7.6) vendors the
+# ../<dep> checkouts here. Only this subdir: build/ifran etc. are tracked.
+/build/local-deps/

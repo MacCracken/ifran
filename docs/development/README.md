@@ -3,16 +3,18 @@
 ## Prerequisites
 
 - The **cyrius** toolchain (pin in `cyrius.cyml`; install per the cyrius repo)
-- Sibling repos checked out beside ifran for local dep resolution
-  (`../patra`, `../sigil`, `../tula`, `../cmdit` — `cyrius deps` uses
-  `path=` first, git+tag in CI)
+- Sibling repos beside ifran (`../patra`, `../sigil`, `../tula`,
+  `../cmdit`) are optional. `cyrius deps` / `build` resolve each dep's git
+  tag, the same as CI (cyrius >= 6.7.6). `CYRIUS_LOCAL=1` or `--local`
+  builds the checkouts instead, from `build/local-deps/`, leaving `lib/` and
+  `cyrius.lock` untouched.
 
 ## Loop
 
 ```sh
 cyrius deps                               # after manifest changes
 cyrius build src/main.cyr build/ifran
-cyrius test tests/ifran.tcyr              # the suite (77) — runs against /tmp
+cyrius test tests/ifran.tcyr              # the suite (120) — runs against /tmp
 cyrius lint src/<file>.cyr                # keep 0 warns; lines <= 120
 ```
 
