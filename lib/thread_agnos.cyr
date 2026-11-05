@@ -33,6 +33,7 @@ include "lib/thread_local.cyr"
 # returned 0" and "the count is exact". A test that DISCRIMINATES must be guarded by capability
 # (never by target name, never by errno — the v6.5.36 lesson), and this is that capability.
 var THREADS_CONCURRENT = 0;   # serial fallback (bodies run inline)
+var CHAN_BLOCKING = 0;        # the serial ring: nothing waits (lib/thread.cyr's header; 6.6.16)
 
 # Run the thread body INLINE (serial — there is no second thread). fp is a
 # single-i64-param fn ptr; its result is discarded, matching the spawn-and-join
@@ -127,6 +128,7 @@ fn chan_new(cap): i64 {
     var ch = alloc(56);
     if (ch == 0) { return 0; }
     var buf = alloc(cap * 8);
+    if (buf == 0) { return 0; }                                      # CHANGELOG [6.6.10]
     store64(ch, buf);          # buf
     store64(ch + 8, cap);      # cap
     store64(ch + 16, 0);       # head

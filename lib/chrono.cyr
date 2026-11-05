@@ -1,15 +1,66 @@
 # chrono.cyr — time and duration utilities
 # Usage: include "lib/chrono.cyr"
-# Requires: syscalls.cyr (for clock_gettime)
+# Includes its own definers (6.6.9): syscalls.cyr (clock_gettime; the agnos uptime/sleep
+# wrappers), alloc.cyr + string.cyr (the formatters), atomic.cyr (the init fence).
 # v6.5.39: atomic.cyr, for the aarch64 release fence on the lazy-init publish below.
 # ⚠ MEASURED ZERO COST: alloc.cyr already pulls atomic.cyr and includes are once-only, so
 # adding this changed NOTHING — A/B on tests/tcyr/stdlib/chrono.tcyr is byte-identical on
 # x86-linux, PE and the bare-metal kernel fixture. The proposal listed the include cost as
 # part of the decision; it is not.
 include "lib/atomic.cyr"
+# 6.6.9: the syscall peer (sys_uptime_us / sys_time_unix / sys_sleep_ms on agnos), alloc and
+# string were all called and none included. CHANGELOG [6.6.9]
+include "lib/syscalls.cyr"
+include "lib/alloc.cyr"
+include "lib/string.cyr"
 
 var CLOCK_REALTIME = 0;
 var CLOCK_MONOTONIC = 1;
+
+# Windows monotonic nanoseconds from QueryPerformanceCounter.
+#
+# ⛔ v6.6.5 — THE TWO ROUTES ARE SPELLED RAW HERE ON PURPOSE. The first cut of this bite
+# called `sys_qpc_ns()` from lib/syscalls_windows.cyr, which made chrono.cyr STOP BEING
+# SELF-SUFFICIENT: this file includes only atomic.cyr, every other clock arm in it is a
+# bare `syscall(...)` builtin, and a consumer whose `[deps] stdlib` lists "chrono" without
+# "syscalls" therefore stopped building for PE with `undefined function 'sys_qpc_ns'`.
+# Nothing in-repo caught it (every in-repo consumer pulls lib/syscalls.cyr) and the
+# vendoring closure cannot rescue it either — it derives its edges from
+# literal `include "lib/X.cyr"` lines, and there is no chrono→syscalls edge. Pinned by
+# tests/gates/toolchain/bench_timer_floor_measured.sh axis E, which
+# cross-builds a chrono-only consumer for PE. CHANGELOG [6.6.5].
+#
+# 0xF038 = 61496 → kernel32!QueryPerformanceCounter(LARGE_INTEGER*)
+# 0xF039 = 61497 → kernel32!QueryPerformanceFrequency(LARGE_INTEGER*)
+# Both return the Win32 BOOL and write a 64-bit count at the pointer argument.
+#
+# The ns conversion is SPLIT so it cannot overflow: a raw `count * 1e9` wraps i64 after
+# ~29 years of uptime at a 10 MHz counter. A non-positive frequency (impossible on any
+# supported Windows) falls back to GetTickCount64 × 1e6 — coarse beats wrong-scaled and
+# silent. Mirrors lib/syscalls_windows.cyr's sys_qpc_ns; the two are pinned to agree by
+# the same gate axis.
+var _chrono_qpf_hz = 0;
+#ifdef CYRIUS_TARGET_AGNOS
+var _chrono_agnos_ms40 = 0;   # 1 once #95 has answered < 0 — see clock_now_ns
+#endif
+fn _chrono_qpc_ns(): i64 {
+    #ifdef CYRIUS_TARGET_WIN
+    var c[16];
+    if (_chrono_qpf_hz == 0) {
+        store64(&c, 0);
+        syscall(61497, &c);                  # QueryPerformanceFrequency(&hz)
+        _chrono_qpf_hz = load64(&c);
+    }
+    if (_chrono_qpf_hz <= 0) {
+        return syscall(228, 1, &c) * 1000000;    # GetTickCount64 ms -> ns
+    }
+    store64(&c, 0);
+    syscall(61496, &c);                      # QueryPerformanceCounter(&count)
+    var t = load64(&c);
+    return (t / _chrono_qpf_hz) * 1000000000 + ((t % _chrono_qpf_hz) * 1000000000) / _chrono_qpf_hz;
+    #endif
+    return 0;
+}
 
 # Get current time in nanoseconds (monotonic clock).
 #
@@ -28,26 +79,64 @@ var CLOCK_MONOTONIC = 1;
 #
 # v6.2.6 bound it to #40 and that was correct WHEN WRITTEN — #95 did not exist yet.
 # Resolution improves as a side effect: µs rather than the 10 ms tick.
+#
+# ⛔ #95 ANSWERS -1 WHEN TSC CALIBRATION WAS REFUSED, and that is PERMANENT for the boot (and
+# ALWAYS under mirshi, which does not emulate #95). Multiplying the sentinel gave -1000 ns and
+# clock_now_ms truncated it to exactly 0 — a clock that stood still, so every
+# `while (clock_now_ms() - t0 < N)` wait on such a boot spun forever. So: #95 first, and on
+# the first negative answer LATCH to #40 (since agnos 1.57.7 #40 rides the calibrated TSC and
+# on a refused boot it is ticks x10, degraded but advancing). The latch, not a per-call retry:
+# one ENOSYS line under mirshi instead of one per read, one syscall per read instead of two,
+# and it cannot jump BACKWARDS from ms-since-boot to µs-since-calibration on a TSC_SELFTEST
+# kernel where #95 can turn valid mid-run. An idempotent scalar every thread computes the
+# same way, like _chrono_qpf_hz above. ⚠ On agnos <= 1.57.6 a foreground program on a
+# refused boot has NO working clock at all (#40 is frozen at IF=0). CHANGELOG [6.6.7]
 fn clock_now_ns(): i64 {
     #ifdef CYRIUS_TARGET_AGNOS
-    return sys_uptime_us() * 1000;
+    if (_chrono_agnos_ms40 == 0) {
+        var us = sys_uptime_us();
+        if (us >= 0) { return us * 1000; }
+        _chrono_agnos_ms40 = 1;
+    }
+    return sys_uptime_ms() * 1000000;
     #endif
     #ifndef CYRIUS_TARGET_AGNOS
     var ts[16];
     #ifdef CYRIUS_TARGET_MACOS
     # v6.2.13 (issue 2026-06-16): the **arm64** Mach-O backend routes syscall(228)
     # to libSystem `_clock_gettime_nsec_np(clock_id)`, which RETURNS the ns count
-    # in the return register — it does NOT fill the `&ts` timespec — and Darwin's
-    # CLOCK_MONOTONIC is **6**, not Linux's 1. So take the return value (ns) with
-    # the Darwin id; `&ts` is just the 3rd-arg placeholder the route expects.
-    # (x86-macOS does not route 228 → clock stays dead there; that arch is HELD.)
-    return syscall(228, 6, &ts);
+    # in the return register — it does NOT fill the `&ts` timespec. So take the
+    # return value (ns) with the Darwin id; `&ts` is just the 3rd-arg placeholder
+    # the route expects.
+    # x86-macOS takes this SAME arm and is not "dead": since v6.5.16 EMACHO_CLOCK_X86 issues
+    # BSD gettimeofday and returns ns in rax — the same return-value contract. For clock id 0
+    # it is the timeval composed to ns (wall time, µs resolution); for EVERY other id, since
+    # 6.6.12, it is the mach_absolute_time gettimeofday copies out through its third argument,
+    # which is ns at Intel's 1:1 timebase — so this id-4 read is monotonic there too (until
+    # 6.6.12 the id was ignored and it was the REALTIME clock). It ALSO writes a timeval into
+    # `&ts` for every id, which is why nothing may read the buffer. This line read "x86-macOS
+    # does not route 228 → clock stays dead there; HELD" until 6.6.8; lib/bench.cyr's twin was
+    # corrected at 6.6.5.
+    # ⚠ The raw-228 contract across the reroutes is "returns the value; the buffer is
+    # unspecified": ns in the return register on both Macs (ms on PE, GetTickCount64), with
+    # arm64-macOS and PE never touching the buffer and x86-macOS filling a timeval. Portable
+    # code calls clock_now_ns() rather than spelling 228. CHANGELOG [6.6.8]
+    #
+    # ⚠ v6.6.5: id **4** (CLOCK_MONOTONIC_RAW → mach_continuous_time), not 6. Darwin's
+    # CLOCK_MONOTONIC (6) is `gettimeofday - boottime` in Apple's Libc
+    # (gen/clock_gettime.c) and its `clock_getres` is NSEC_PER_USEC — MICROSECOND
+    # resolution, which is the 1,000 ns tick measured on ecb and ach. lib/sakshi.cyr and
+    # src/backend/common/runtime.cyr `_prof_clock_ns` already passed 4. CHANGELOG [6.6.5].
+    return syscall(228, 4, &ts);
     #endif
     #ifdef CYRIUS_TARGET_WIN
-    # v6.2.13: on Windows syscall(228) routes to kernel32!GetTickCount64, which
-    # RETURNS ms since boot in the return register (not `&ts`). ×1e6 = ns. This is
-    # the monotonic source (uptime; never wraps in practice).
-    return syscall(228, CLOCK_MONOTONIC, &ts) * 1000000;
+    # v6.6.5: QueryPerformanceCounter (PE reroutes 0xF038/0xF039), ~100 ns tick.
+    # v6.2.13 bound this to syscall(228) → kernel32!GetTickCount64, whose counter
+    # advances in **15 ms** steps — so every duration under 15 ms measured as 0 or as
+    # one whole tick, on every cyrius program on Windows. QPC is the monotonic source
+    # (since system start; never wraps in practice). Spelled raw in `_chrono_qpc_ns`
+    # above so this module stays self-sufficient — see the note there.
+    return _chrono_qpc_ns();
     #endif
     #ifndef CYRIUS_TARGET_MACOS
     #ifndef CYRIUS_TARGET_WIN
@@ -127,6 +216,7 @@ fn clock_epoch_ns(): i64 {
 # Duration struct: {secs: i64, nsecs: i64} = 16 bytes
 fn dur_new(secs, nsecs): i64 {
     var d = alloc(16);
+    if (d == 0) { return 0; }
     store64(d, secs);
     store64(d + 8, nsecs);
     return d;
@@ -165,10 +255,17 @@ fn dur_between(start_ns, end_ns): i64 {
 # frozen 0-33 surface" note, which made every agnos poll loop busy-spin).
 # See CHANGELOG [6.0.65]/[6.2.6], issues 2026-06-04-macos-nanosleep-syscall-35-not-in-esysxlat,
 # 2026-06-14-chrono-agnos-monotonic-sleep-stale-stubs.
+# `ms` < 0 sleeps 0 and `ms` > INT_MAX sleeps INT_MAX (~24.8 days), on EVERY arm. ⛔ Until 6.6.20
+# only agnos guarded it: poll's timeout is a C int where a negative value means "no limit", and
+# Sleep's is a DWORD, so a computed `sleep_ms(deadline - now)` that had gone negative hung for
+# ever on Linux and macOS (~49.7 days on Windows), and 2^32 + 5 slept 5 ms. CHANGELOG [6.6.20]
 fn sleep_ms(ms): i64 {
+    var t = ms;
+    if (t < 0) { t = 0; }
+    if (t > 0x7FFFFFFF) { t = 0x7FFFFFFF; }
     #ifdef CYRIUS_TARGET_AGNOS
-    if (ms <= 0) { return 0; }
-    sys_sleep_ms(ms);               # sleep_ms(ms) — #41, blocks ~ms
+    if (t <= 0) { return 0; }
+    sys_sleep_ms(t);                # sleep_ms(ms) — #41, blocks ~ms
     return 0;
     #endif
     #ifdef CYRIUS_TARGET_WIN
@@ -176,15 +273,15 @@ fn sleep_ms(ms): i64 {
     # on PE, and WaitForSingleObject on the current process/thread pseudo-handle
     # returns immediately (doesn't block) — verified on cass — so a real Sleep
     # reroute is the correct path.
-    syscall(0xF00F, ms);            # Sleep(ms)
+    syscall(0xF00F, t);             # Sleep(ms)
     return 0;
     #endif
     #ifdef CYRIUS_TARGET_MACOS
-    syscall(7, 0, 0, ms);           # poll(NULL, 0, ms) — 7→230 on Darwin
+    syscall(7, 0, 0, t);            # poll(NULL, 0, ms) — 7→230 on Darwin
     return 0;
     #endif
     #ifdef CYRIUS_TARGET_LINUX
-    syscall(7, 0, 0, ms);           # poll(NULL, 0, ms)
+    syscall(7, 0, 0, t);            # poll(NULL, 0, ms)
     return 0;
     #endif
     # cx + any other target: no-op (agnos handled above)
@@ -219,6 +316,7 @@ fn _chrono_init_mdays(): i64 {
     # Single-threaded callers see no behaviour change: the table is fully built before
     # anything can observe a non-zero pointer, which is what the guard already promised.
     var t = alloc(96);
+    if (t == 0) { return 0 - 1; }
     store64(t, 31);       # Jan
     store64(t + 8, 28);   # Feb
     store64(t + 16, 31);  # Mar
@@ -269,11 +367,13 @@ fn is_leap_year(y): i64 {
     return 1;
 }
 
-# Convert epoch seconds to date components {year, month, day, hour, min, sec}
-# Returns alloc'd 48-byte struct
-fn epoch_to_date(epoch): i64 {
+# Decode epoch seconds into the 48-byte {year, month, day, hour, min, sec} at `r`, which
+# the caller owns (a stack buffer is fine). Allocates nothing once the month table exists.
+# Returns r, or 0 when the month table could not be allocated (its first use, under a
+# refused alloc). CHANGELOG [6.6.12]
+fn _epoch_to_date_into(epoch, r): i64 {
     _chrono_init_mdays();
-    var r = alloc(48);
+    if (_chrono_mdays == 0) { return 0; }     # 6.6.10: the month table could not be allocated
     var secs = epoch;
     var days = secs / 86400;
     var rem = secs % 86400;
@@ -304,6 +404,16 @@ fn epoch_to_date(epoch): i64 {
     return r;
 }
 
+# Convert epoch seconds to date components {year, month, day, hour, min, sec}
+# Returns alloc'd 48-byte struct, or 0 when an allocation is refused.
+fn epoch_to_date(epoch): i64 {
+    _chrono_init_mdays();
+    if (_chrono_mdays == 0) { return 0; }     # 6.6.10: the month table could not be allocated
+    var r = alloc(48);
+    if (r == 0) { return 0; }
+    return _epoch_to_date_into(epoch, r);
+}
+
 # Write 2-digit zero-padded number to buffer
 fn _chrono_w2(buf, pos, val): i64 {
     store8(buf + pos, 48 + val / 10);
@@ -324,7 +434,9 @@ fn _chrono_w4(buf, pos, val): i64 {
 # Returns null-terminated string (alloc'd)
 fn iso8601(epoch): i64 {
     var d = epoch_to_date(epoch);
+    if (d == 0) { return 0; }
     var buf = alloc(24);
+    if (buf == 0) { return 0; }
     _chrono_w4(buf, 0, load64(d));       # year
     store8(buf + 4, 45);                  # -
     _chrono_w2(buf, 5, load64(d + 8));   # month
@@ -404,18 +516,30 @@ fn dt_epoch_secs(dt): i64 { return dt / 1000000000; }
 # Epoch nanoseconds of a DateTime.
 fn dt_epoch_ns(dt): i64 { return dt; }
 
-# Year (UTC). Field accessors decode via epoch_to_date, keeping its layout private.
-fn dt_year(dt): i64   { return load64(epoch_to_date(dt / 1000000000)); }
-# Month 1-12 (UTC).
-fn dt_month(dt): i64  { return load64(epoch_to_date(dt / 1000000000) + 8); }
-# Day of month 1-31 (UTC).
-fn dt_day(dt): i64    { return load64(epoch_to_date(dt / 1000000000) + 16); }
-# Hour 0-23 (UTC).
-fn dt_hour(dt): i64   { return load64(epoch_to_date(dt / 1000000000) + 24); }
-# Minute 0-59 (UTC).
-fn dt_minute(dt): i64 { return load64(epoch_to_date(dt / 1000000000) + 32); }
-# Second 0-59 (UTC).
-fn dt_second(dt): i64 { return load64(epoch_to_date(dt / 1000000000) + 40); }
+# One field of a DateTime, decoded into a STACK buffer. -1 only when the month table could
+# never be allocated (0 cannot be the sentinel: it is a valid hour, minute and second).
+#
+# ⛔ Through 6.6.11 each accessor was `load64(epoch_to_date(..) + off)`: an alloc(48) per
+# call that was never freed (48 B leaked per field read), and a SIGSEGV once 6.6.10 taught
+# epoch_to_date to return 0 on a refused allocation. CHANGELOG [6.6.12]
+fn _dt_field(dt, off): i64 {
+    var d[48];
+    if (_epoch_to_date_into(dt / 1000000000, &d) == 0) { return 0 - 1; }
+    return load64(&d + off);
+}
+
+# Year (UTC), or -1 when the month table could not be allocated.
+fn dt_year(dt): i64   { return _dt_field(dt, 0); }
+# Month 1-12 (UTC), or -1 when the month table could not be allocated.
+fn dt_month(dt): i64  { return _dt_field(dt, 8); }
+# Day of month 1-31 (UTC), or -1 when the month table could not be allocated.
+fn dt_day(dt): i64    { return _dt_field(dt, 16); }
+# Hour 0-23 (UTC), or -1 when the month table could not be allocated.
+fn dt_hour(dt): i64   { return _dt_field(dt, 24); }
+# Minute 0-59 (UTC), or -1 when the month table could not be allocated.
+fn dt_minute(dt): i64 { return _dt_field(dt, 32); }
+# Second 0-59 (UTC), or -1 when the month table could not be allocated.
+fn dt_second(dt): i64 { return _dt_field(dt, 40); }
 
 # --- Duration: Rust-chrono-style unit constructors (reuse the {secs,nsecs} dur_new) ---
 # Duration of n seconds (Duration::seconds).
@@ -509,6 +633,7 @@ fn _chrono_emit_spec(out, op, s, year, month, day, hour, minute, second): i64 {
 # Generalizes iso8601(); iso8601() is kept as the fast fixed-form path.
 fn dt_format(dt, fmt): i64 {
     var d = epoch_to_date(dt / 1000000000);
+    if (d == 0) { return 0; }
     var year = load64(d);
     var month = load64(d + 8);
     var day = load64(d + 16);
@@ -517,6 +642,7 @@ fn dt_format(dt, fmt): i64 {
     var second = load64(d + 40);
     var flen = strlen(fmt);
     var out = alloc(flen * 4 + 16);              # each spec expands to <= 4 chars
+    if (out == 0) { return 0; }
     var op = 0;
     var i = 0;
     while (i < flen) {

@@ -256,7 +256,7 @@ fn f32v4_lane3_ptr(p): i64 { return load32(p + 12); }
 # (v6.4.28):** x86 emits SSE (Phase 1, v6.4.4); aarch64 emits NEON (.4s fadd/fsub/fmul
 # via EMIT_F32V_LOOP). cx remains a stub (its SIMD pipeline is a separate slot). Gates:
 # simd_f32v4.tcyr (value + pointer forms, x86-Linux + aarch64 corpus) + the Win64-safe
-# flat-array vr01_simd_f32v4_neon.tcyr (cross-OS: ecb/cass/pi).
+# flat-array tests/tcyr/crossos/simd_f32v4_neon.tcyr (cross-OS: ecb/ach/cass/pi).
 # Packed add (pointer form) — addps over the 4 lanes. Routes f32v4_add(&x, &y) here.
 fn f32v4_add_ptr(a_ptr, b_ptr): f32v4 {
     var r: f32v4;
@@ -454,7 +454,7 @@ fn f32v4_dot_ptr(a_ptr, b_ptr): i64 {
 # add/sub are two's-complement (signed==unsigned); mul is i16/i32 only. Values are
 # plain i64s truncated to the lane width. **CROSS-ARCH as of v6.4.30:** x86 SSE
 # (padd/psub/pmull) + aarch64 NEON (add/sub/mul .16b/.8h/.4s/.2d via EMIT_IVEC_BINOP);
-# cx stub. Cross-OS-gated by vr01_simd_ints_neon.tcyr (ecb/cass/pi).
+# cx stub. Cross-OS-gated by tests/tcyr/crossos/simd_ints_neon.tcyr (ecb/ach/cass/pi).
 
 # Build an i32v4 from four i32 values.
 fn i32v4_make(a, b, c, d): i32v4 {

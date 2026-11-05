@@ -1,6 +1,9 @@
 # mmap.cyr — memory-mapped I/O via direct syscalls
 # Usage: include "lib/mmap.cyr"
-# Requires: syscalls.cyr
+# Includes nothing: it issues SYS_MMAP / SYS_MUNMAP as raw syscall() numbers, so it compiles
+# alone on every target. Its PROT_* / MAP_* values agree with the syscall peers' MmapConst in
+# EITHER include order (v6.5.15 — see below); dynlib, fdlopen and thread include this file
+# themselves, so the caller no longer controls the order and must not need to.
 #
 # Wraps SYS_MMAP (9) and SYS_MUNMAP (11) for:
 # - Dynamic library loading (dynlib.cyr)
@@ -68,9 +71,11 @@ enum MmapProt {
 # **arm64** `lib/syscalls.cyr:69` deliberately includes `syscalls_aarch64_linux.cyr` — NOT
 # `syscalls_macos.cyr`, which is the x86-only arm — so the 32 arrives from
 # `syscalls_aarch64_linux.cyr:243` regardless of what this file omits. And agnos declares
-# no MAP_* at all, so this enum is its only source. This file is included AFTER
-# syscalls.cyr (its stated requirement) and duplicates are last-wins, so declaring the
-# correct per-platform value HERE is what actually decides it.
+# no MAP_* at all, so this enum is its only source. Duplicates are last-wins, so the value
+# in whichever file comes SECOND decides it — which is why both must be right: this enum
+# declares the per-platform value, and since v6.5.15 so does every syscall peer's MmapConst
+# (syscalls_aarch64_linux.cyr, syscalls_macos.cyr, syscalls_x86_64_linux.cyr). Both include
+# orders therefore agree (CHANGELOG [6.6.9]: pinned by tests/tcyr/crossos/mmap_anon_flag.tcyr).
 #
 # ⚠ ESYSXLAT renumbers SYSCALLS, never flag VALUES — so a Linux flag whose Darwin value
 # differs is simply wrong on macOS and no translation layer will catch it. MAP_ANONYMOUS

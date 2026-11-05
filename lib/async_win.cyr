@@ -23,6 +23,14 @@
 # = 104 bytes. The OVERLAPPED + WSABUF + buffers live in the ctx (never a stack local —
 # a stack OVERLAPPED corrupts on completion after the issuing frame returns).
 #
+# INT RESULTS. WSAGetLastError (0xF024), WSAIoctl, WSARecv, WSASend, getaddrinfo and the
+# ConnectEx / AcceptEx BOOLs return a C `int`; their reroutes (and callptr) define only eax,
+# so every one is tested masked to 32 bits — dirty upper bits must not turn WSA_IO_PENDING
+# or a 0 into a failure. Pinned by tests/gates/platform/pe_wsa_lasterr_masked.sh. CHANGELOG [6.6.16]
+# 6.6.17: the kernel32 BOOLs too — SetWaitableTimer (0xF02F), RegisterWaitForSingleObject
+# (0xF02D) and CreateProcessW (0xF005 / 61445), whose emitters do not extend eax either — and the
+# connect task's bind (0xF025) is checked, not discarded. Same gate, axis 5. CHANGELOG [6.6.17]
+#
 # >>> include "lib/fnptr.cyr"
 include "lib/fnptr.cyr"
 
@@ -91,13 +99,19 @@ fn _async_win_retire(rt, t): i64 {
         # A process race-loser: drain the threadpool wait FIRST (UnregisterWaitEx before
         # CloseHandle is mandatory), then kill + reap the still-running child and close its
         # handles — so async_run_process's timeout path just returns -2 (no double cleanup).
+        # 6.6.10: the child's JOB, i.e. its whole tree — TerminateProcess on the child alone
+        # left whatever it had started running past the deadline. Its own job's handle is
+        # at ctx+96 (0 when it could not be put in one: then the child alone, as before).
         syscall(0xF030, load64(ctx + 88), 0 - 1);    # UnregisterWaitEx(wait, INVALID_HANDLE)
         var hp = load64(ctx + 72);
         if (hp != 0) {
-            syscall(61469, hp, 137);                 # TerminateProcess(hProcess, 137 = 128+SIGKILL)
+            var job = load64(ctx + 96);
+            if (job != 0) { _win_job_kill(job, 137); }          # TerminateJobObject(137 = 128+SIGKILL)
+            else { syscall(61469, hp, 137); }                   # TerminateProcess(hProcess, 137)
             syscall(61441, hp, 4294967295);          # WaitForSingleObject(INFINITE) — reap
             syscall(3, load64(ctx + 80));            # CloseHandle(hThread)
             syscall(3, hp);                          # CloseHandle(hProcess)
+            if (job != 0) { syscall(3, job); store64(ctx + 96, 0); }
         }
     }
     store64(t + 16, TASK_DONE);
@@ -141,11 +155,13 @@ fn async_spawn(rt, fp, arg): i64 {
 }
 
 # One reactor step. Run every TASK_READY task; if none ran and tasks are parked, drain
-# ONE IOCP completion and wake the owning task. Returns the count of tasks not yet DONE.
+# ONE IOCP completion and wake the owning task (without blocking when a coroutine was kept
+# READY). Returns the count of tasks not yet DONE.
 fn _async_step(rt): i64 {
     var iocp = load64(rt);
     var active = 0;
     var ran = 0;
+    var kept = 0;
     var t = load64(rt + 8);
     while (t != 0) {
         if (load64(t + 16) == TASK_READY) {
@@ -153,8 +169,17 @@ fn _async_step(rt): i64 {
             var r = fncall1(load64(t), load64(t + 8));
             ran = 1;
             if (load64(t + 16) == TASK_READY) {
-                store64(t + 40, r);
-                store64(t + 16, TASK_DONE);
+                # A coroutine suspended at an await that did not park stays READY (6.6.11 —
+                # it was finished with the 0 its suspend returned). lib/async.cyr explains.
+                var keep = 0;
+                #ifdef CYRIUS_ASYNC_FUTURES
+                keep = _async_coro_pending(t);
+                #endif
+                if (keep == 1) { kept = 1; }
+                else {
+                    store64(t + 40, r);
+                    store64(t + 16, TASK_DONE);
+                }
             }
         }
         if (load64(t + 16) != TASK_DONE) {
@@ -163,11 +188,15 @@ fn _async_step(rt): i64 {
         t = load64(t + 24);
     }
     if (active > 0) {
-        if (ran == 0) {
+        # Nothing ran: block for a completion. A coroutine kept READY: take one that is already
+        # queued without blocking, so parked tasks are not starved while it runs (6.6.11).
+        var wait_ms = 0 - 1;
+        if (ran == 1) { wait_ms = 0; }
+        if (ran == 0 || kept == 1) {
             var bytes[8]; store64(&bytes, 0);
             var key[8]; store64(&key, 0);
             var ovl[8]; store64(&ovl, 0);
-            syscall(0xF020, iocp, &bytes, &key, &ovl, 0 - 1);   # GetQueuedCompletionStatus (block)
+            syscall(0xF020, iocp, &bytes, &key, &ovl, wait_ms);   # GetQueuedCompletionStatus
             var lpov = load64(&ovl);
             if (lpov != 0) {
                 # lpov = ctx (OVERLAPPED @ ctx+0). Recover the task; wake it UNLESS it was
@@ -260,11 +289,56 @@ fn async_wait_rw(rt, fd): i64 {
 
 # v6.5.26 — one direction of a byte relay. The epoll backend parks until rfd is readable;
 # here the read itself blocks, which is the equivalent wait, so the body is the same shape
-# minus the park. Returns bytes WRITTEN, 0 on clean EOF, -1 on error.
+# minus the park. Returns bytes WRITTEN, 0 on clean EOF, a negative error otherwise
+# (-WSAGetLastError for a socket, -1 for a HANDLE).
+# ⛔ 6.6.17 — WHY recv / send. This read with sys_read and wrote with sys_write — ReadFile /
+# WriteFile — and on a Winsock SOCKET those do not work: measured on cass over two loopback pairs
+# with five bytes waiting, the read returned 0 (a false EOF) and nothing was relayed, either way
+# round. A socket now goes through recv / send (0xF048 / 0xF047, sign-extended by their emitters);
+# Winsock's WSAENOTSOCK sends a file or pipe HANDLE back to ReadFile / WriteFile (the native TLS
+# transport's _tn_os_read / _tn_os_write rule). CHANGELOG [6.6.17]
 fn async_relay_once(rt, rfd, wfd, buf, len): i64 {
-    var n = sys_read(rfd, buf, len);
+    var n = _asw_relay_read(rfd, buf, len);
     if (n <= 0) { return n; }
-    return sys_write(wfd, buf, n);
+    return _asw_relay_write(wfd, buf, n);
+}
+
+# 1 when Winsock's negated error `e` says the handle is not a socket at all: WSAENOTSOCK, or
+# WSANOTINITIALISED (no socket exists in a process that never started Winsock).
+fn _asw_notsock(e): i64 {
+    var code = (0 - e) & 0xFFFFFFFF;
+    if (code == 10038) { return 1; }                 # WSAENOTSOCK
+    if (code == 10093) { return 1; }                 # WSANOTINITIALISED
+    return 0;
+}
+
+# The calling thread's last Winsock error, negated; never 0.
+fn _asw_wsa_err(): i64 {
+    var e = syscall(0xF024) & 0xFFFFFFFF;            # WSAGetLastError
+    if (e == 0) { return 0 - 1; }
+    return 0 - e;
+}
+
+# Read up to `len` bytes from `fd`: recv on a socket, ReadFile on any other HANDLE.
+fn _asw_relay_read(fd, buf, len): i64 {
+    var n = len;
+    if (n > 0x7FFFFFFF) { n = 0x7FFFFFFF; }          # recv takes an int length
+    var r = syscall(0xF048, fd, buf, n, 0);          # recv
+    if (r >= 0) { return r; }
+    var e = _asw_wsa_err();
+    if (_asw_notsock(e) == 1) { return sys_read(fd, buf, len); }
+    return e;
+}
+
+# Write `len` bytes to `fd`: send on a socket (a short send is legal), WriteFile on any other HANDLE.
+fn _asw_relay_write(fd, buf, len): i64 {
+    var n = len;
+    if (n > 0x7FFFFFFF) { n = 0x7FFFFFFF; }
+    var w = syscall(0xF047, fd, buf, n, 0);          # send
+    if (w >= 0) { return w; }
+    var e = _asw_wsa_err();
+    if (_asw_notsock(e) == 1) { return sys_write(fd, buf, len); }
+    return e;
 }
 
 # Reactor connect task: create an overlapped socket, associate it with the IOCP, bind a
@@ -278,11 +352,13 @@ fn _async_connect_task(ctx): i64 {
         store64(ctx + 48, s);
         syscall(0xF01F, s, load64(rt), 0, 0);                # associate socket with the IOCP
         var la[16]; store16(&la, 2); store16(&la + 2, 0); store32(&la + 4, 0); store64(&la + 8, 0);
-        syscall(0xF025, s, &la, 16);                         # bind 0.0.0.0:0
+        # bind 0.0.0.0:0 — ConnectEx requires a bound socket, so a failed bind is a failed connect
+        # (it was discarded, and the ConnectEx below then failed WSAEINVAL instead). CHANGELOG [6.6.17]
+        if ((syscall(0xF025, s, &la, 16) & 0xFFFFFFFF) != 0) { syscall(0xF023, s); return 0 - 1; }
         var guid[16]; store64(&guid, 0x4660DDF325A207B9); store64(&guid + 8, 0x3E06748CE576E98E);
         var cxp[8]; store64(&cxp, 0);
         var nbf[8]; store32(&nbf, 0);
-        if (syscall(0xF027, s, 0xC8000006, &guid, 16, &cxp, 8, &nbf, 0, 0) != 0) {
+        if ((syscall(0xF027, s, 0xC8000006, &guid, 16, &cxp, 8, &nbf, 0, 0) & 0xFFFFFFFF) != 0) {
             syscall(0xF023, s); return 0 - 1;
         }
         var connectex = load64(&cxp);
@@ -297,8 +373,8 @@ fn _async_connect_task(ctx): i64 {
         var cr = callptr(connectex, s, &sa, 16, 0, 0, 0, ctx);   # ConnectEx(overlapped=ctx)
         # A synchronous failure (FALSE + last-error != WSA_IO_PENDING) queues NO completion —
         # don't park (the reactor would hang), fail the task instead.
-        if (cr == 0) {
-            if (syscall(0xF024) != 997) { syscall(0xF023, s); return 0 - 1; }   # not WSA_IO_PENDING
+        if ((cr & 0xFFFFFFFF) == 0) {   # BOOL: only eax is defined
+            if ((syscall(0xF024) & 0xFFFFFFFF) != 997) { syscall(0xF023, s); return 0 - 1; }   # not WSA_IO_PENDING
         }
         _async_win_park(rt);
         return 0;
@@ -314,6 +390,7 @@ fn _async_connect_task(ctx): i64 {
 # task_join) is the connected socket, or -1 on failure. v6.4.43 (IOCP).
 fn async_connect(rt, addr, port): i64 {
     var ctx = alloc_via(load64(rt + 32), 104);
+    if (ctx == 0) { return 0; }      # out of memory: no task (async_spawn's own OOM answer). CHANGELOG [6.6.20]
     store64(ctx + 40, 0);
     store64(ctx + 48, 0);
     store64(ctx + 56, addr);
@@ -338,7 +415,7 @@ fn _async_accept_task(ctx): i64 {
         var guid[16]; store64(&guid, 0x11CFCBACB5367DF1); store64(&guid + 8, 0x92A1485F8000CA95);
         var axp[8]; store64(&axp, 0);
         var nbf[8]; store32(&nbf, 0);
-        if (syscall(0xF027, load64(ctx + 56), 0xC8000006, &guid, 16, &axp, 8, &nbf, 0, 0) != 0) {
+        if ((syscall(0xF027, load64(ctx + 56), 0xC8000006, &guid, 16, &axp, 8, &nbf, 0, 0) & 0xFFFFFFFF) != 0) {
             syscall(0xF023, acc); return 0 - 1;
         }
         var acceptex = load64(&axp);
@@ -348,8 +425,8 @@ fn _async_accept_task(ctx): i64 {
         # AcceptEx(listen, accept, outbuf, dwRecvLen=0, localAddrLen=32, remoteAddrLen=32, &bytes,
         # overlapped=ctx). localAddrLen/remoteAddrLen = sizeof(sockaddr_in)+16 = 32; outbuf holds both.
         var ar = callptr(acceptex, load64(ctx + 56), acc, ctx + 80, 0, 32, 32, ctx + 72, ctx);
-        if (ar == 0) {
-            if (syscall(0xF024) != 997) { syscall(0xF023, acc); return 0 - 1; }   # not WSA_IO_PENDING
+        if ((ar & 0xFFFFFFFF) == 0) {   # BOOL: only eax is defined
+            if ((syscall(0xF024) & 0xFFFFFFFF) != 997) { syscall(0xF023, acc); return 0 - 1; }   # not WSA_IO_PENDING
         }
         _async_win_park(rt);
         return 0;
@@ -368,6 +445,7 @@ fn _async_accept_task(ctx): i64 {
 # with the IOCP (`syscall(0xF01F, listen_sock, load64(rt), 0, 0)`). v6.4.44 R3 (async "W"-arc server).
 fn async_accept(rt, listen_sock): i64 {
     var ctx = alloc_via(load64(rt + 32), 144);
+    if (ctx == 0) { return 0; }      # out of memory: no task (async_spawn's own OOM answer). CHANGELOG [6.6.20]
     store64(ctx + 40, 0);
     store64(ctx + 48, 0);
     store64(ctx + 56, listen_sock);
@@ -388,8 +466,8 @@ fn _async_recv_task(ctx): i64 {
         store64(ctx + 40, 1);
         # WSARecv(s, &WSABUF, 1, NULL, &flags, &overlapped=ctx, NULL)
         var rc = syscall(0xF029, load64(ctx + 48), ctx + 80, 1, 0, ctx + 96, ctx, 0);
-        if (rc != 0) {   # SOCKET_ERROR — a non-pending failure queues no completion; don't park
-            if (syscall(0xF024) != 997) { return 0 - 1; }   # not WSA_IO_PENDING
+        if ((rc & 0xFFFFFFFF) != 0) {   # SOCKET_ERROR — a non-pending failure queues no completion; don't park
+            if ((syscall(0xF024) & 0xFFFFFFFF) != 997) { return 0 - 1; }   # not WSA_IO_PENDING
         }
         _async_win_park(rt);
         return 0;
@@ -403,6 +481,7 @@ fn _async_recv_task(ctx): i64 {
 # count. v6.4.43.
 fn async_recv(rt, fd, buf, len): i64 {
     var ctx = alloc_via(load64(rt + 32), 104);
+    if (ctx == 0) { return 0; }      # out of memory: no task (async_spawn's own OOM answer). CHANGELOG [6.6.20]
     store64(ctx + 40, 0);
     store64(ctx + 48, fd);
     store64(ctx + 56, buf);
@@ -422,8 +501,8 @@ fn _async_send_task(ctx): i64 {
         store64(ctx + 40, 1);
         # WSASend(s, &WSABUF, 1, NULL, dwFlags=0, &overlapped=ctx, NULL)
         var rc = syscall(0xF02A, load64(ctx + 48), ctx + 80, 1, 0, 0, ctx, 0);
-        if (rc != 0) {   # SOCKET_ERROR — a non-pending failure queues no completion; don't park
-            if (syscall(0xF024) != 997) { return 0 - 1; }   # not WSA_IO_PENDING
+        if ((rc & 0xFFFFFFFF) != 0) {   # SOCKET_ERROR — a non-pending failure queues no completion; don't park
+            if ((syscall(0xF024) & 0xFFFFFFFF) != 997) { return 0 - 1; }   # not WSA_IO_PENDING
         }
         _async_win_park(rt);
         return 0;
@@ -436,6 +515,7 @@ fn _async_send_task(ctx): i64 {
 # Returns a task handle whose result (via task_join) is the byte count. v6.4.43.
 fn async_send(rt, fd, buf, len): i64 {
     var ctx = alloc_via(load64(rt + 32), 104);
+    if (ctx == 0) { return 0; }      # out of memory: no task (async_spawn's own OOM answer). CHANGELOG [6.6.20]
     store64(ctx + 40, 0);
     store64(ctx + 48, fd);
     store64(ctx + 56, buf);
@@ -449,7 +529,8 @@ fn async_send(rt, fd, buf, len): i64 {
 # (getaddrinfo is synchronous — acceptable for R1). ctx = { host, rt }.
 fn _async_resolve_task(ctx): i64 {
     var result[8]; store64(&result, 0);
-    if (syscall(0xF02B, load64(ctx), 0, 0, &result) != 0) { return 0 - 1; }   # getaddrinfo(host,0,0,&res)
+    var gr = syscall(0xF02B, load64(ctx), 0, 0, &result);   # getaddrinfo(host,0,0,&res)
+    if ((gr & 0xFFFFFFFF) != 0) { return 0 - 1; }
     var ai = load64(&result);
     var ipv4 = 0 - 1;
     var found = 0;
@@ -472,6 +553,7 @@ fn _async_resolve_task(ctx): i64 {
 # to async_connect — or -1. Blocking (run-to-completion) for R1. v6.4.43.
 fn async_resolve(rt, ns_addr, ns_port, host): i64 {
     var ctx = alloc_via(load64(rt + 32), 16);
+    if (ctx == 0) { return 0; }      # out of memory: no task (async_spawn's own OOM answer). CHANGELOG [6.6.20]
     store64(ctx, host);
     store64(ctx + 8, rt);
     return async_spawn(rt, &_async_resolve_task, ctx);
@@ -510,13 +592,27 @@ fn _async_timeout_sentinel(ctx): i64 {
         }
         store64(ctx + 56, timer);
         var due[8]; store64(&due, 0 - (load64(ctx + 64) * 10000));   # -(ms * 1e4) 100ns units (relative)
-        syscall(0xF02F, timer, &due, 0, 0, 0, 0);        # SetWaitableTimer(timer, &due, 0, NULL, NULL, FALSE)
         store64(ctx, 0); store64(ctx + 8, 0); store64(ctx + 16, 0); store64(ctx + 24, 0);
         store64(ctx + 32, load64(rt + 40));
         store64(ctx + 40, 1);
+        # SetWaitableTimer(timer, &due, 0, NULL, NULL, FALSE). A timer that cannot be armed — or a
+        # wait that cannot be registered on it, below — is the create failure above: the timer is
+        # closed and the sentinel parks with no completion source, i.e. NO deadline (6.6.17: both
+        # BOOLs were discarded; the outcome was the same, the timer stayed open until the retire).
+        if ((syscall(0xF02F, timer, &due, 0, 0, 0, 0) & 0xFFFFFFFF) == 0) {
+            syscall(3, timer);
+            store64(ctx + 56, 0);
+            _async_win_park(rt);
+            return 0;
+        }
         var wh[8]; store64(&wh, 0);
         # RegisterWaitForSingleObject(&wh, timer, cb, ctx, INFINITE, WT_EXECUTEONLYONCE=8)
-        syscall(0xF02D, &wh, timer, &_async_win_timer_cb, ctx, 0 - 1, 8);
+        if ((syscall(0xF02D, &wh, timer, &_async_win_timer_cb, ctx, 0 - 1, 8) & 0xFFFFFFFF) == 0) {
+            syscall(3, timer);
+            store64(ctx + 56, 0);
+            _async_win_park(rt);
+            return 0;
+        }
         store64(ctx + 72, load64(&wh));  # stash the wait registration for UnregisterWaitEx
         _async_win_park(rt);
         return 0;
@@ -533,10 +629,15 @@ fn async_with_timeout(rt, handle, ms): i64 {
     if (handle == 0) { return 0; }
     if (load64(handle + 16) == TASK_DONE) { return 1; }
     var ctx = alloc_via(load64(rt + 32), 80);   # +wait-registration @72
+    # Out of memory — for the sentinel's context or for its task — is -1, as the Linux arm
+    # answers: the context was stored through 0, and with no sentinel `_async_pump(rt, handle, 0)`
+    # waits for the handle alone, a deadline that never fires. CHANGELOG [6.6.20]
+    if (ctx == 0) { return 0 - 1; }
     store64(ctx + 40, 0);
     store64(ctx + 48, rt);
     store64(ctx + 64, ms);
     var sentinel = async_spawn(rt, &_async_timeout_sentinel, ctx);
+    if (sentinel == 0) { return 0 - 1; }
     _async_pump(rt, handle, sentinel);
     var completed = 0;
     if (load64(handle + 16) == TASK_DONE) { completed = 1; }
@@ -563,7 +664,7 @@ fn _async_interval_task(ctx): i64 {
         store64(ctx + 56, timer);
         var due[8]; store64(&due, 0 - (load64(ctx + 96) * 10000));   # first fire after `ms`
         # SetWaitableTimer(timer, &due, lPeriod=ms, NULL, NULL, FALSE) — auto-repeats every ms
-        if (syscall(0xF02F, timer, &due, load64(ctx + 96), 0, 0, 0) == 0) {
+        if ((syscall(0xF02F, timer, &due, load64(ctx + 96), 0, 0, 0) & 0xFFFFFFFF) == 0) {   # BOOL: eax only
             syscall(3, timer); return 0 - 1;          # arm failed → close timer, fail (never park)
         }
         store64(ctx, 0); store64(ctx + 8, 0); store64(ctx + 16, 0); store64(ctx + 24, 0);
@@ -574,7 +675,7 @@ fn _async_interval_task(ctx): i64 {
         # A failed registration leaves NO completion source; parking would hang the reactor's
         # GetQueuedCompletionStatus(INFINITE) forever AND leak the armed timer (no retire path,
         # unlike the sentinel) — so close the timer and fail the task instead.
-        if (syscall(0xF02D, &wh, timer, &_async_win_timer_cb, ctx, 0 - 1, 0) == 0) {
+        if ((syscall(0xF02D, &wh, timer, &_async_win_timer_cb, ctx, 0 - 1, 0) & 0xFFFFFFFF) == 0) {   # BOOL
             syscall(3, timer); return 0 - 1;
         }
         store64(ctx + 88, load64(&wh));
@@ -605,6 +706,7 @@ fn _async_interval_task(ctx): i64 {
 fn async_interval(rt, fp, arg, ms, tok): i64 {
     if (ms <= 0) { return 0; }
     var ctx = alloc_via(load64(rt + 32), 104);
+    if (ctx == 0) { return 0; }      # out of memory: no task (async_spawn's own OOM answer). CHANGELOG [6.6.20]
     store64(ctx + 40, 0);
     store64(ctx + 48, rt);
     store64(ctx + 56, 0);
@@ -644,6 +746,7 @@ fn _asw_wcmdline(argv): i64 {
         total = total + l + 1; i = i + 1;
     }
     var wbuf = alloc((total + 2) * 2);
+    if (wbuf == 0) { return 0; }                     # out of memory: a failed spawn (6.6.10)
     var o = 0; var j = 0;
     while (load64(argv + j * 8) != 0) {
         if (j > 0) { store8(wbuf + o, 32); store8(wbuf + o + 1, 0); o = o + 2; }   # space
@@ -655,7 +758,8 @@ fn _asw_wcmdline(argv): i64 {
 }
 
 # Build a UTF-16LE environment block from a NULL-terminated envp (char**): each entry
-# NUL-terminated, whole block double-NUL-terminated. 0 / empty → 0 (inherit parent env).
+# NUL-terminated, whole block double-NUL-terminated. 0 / empty → 0 (inherit parent env);
+# -1 when the heap is exhausted (6.6.10: it stored through address 0 before).
 fn _asw_wenvblock(envp): i64 {
     if (envp == 0) { return 0; }
     if (load64(envp) == 0) { return 0; }
@@ -666,6 +770,7 @@ fn _asw_wenvblock(envp): i64 {
         total = total + l + 1; i = i + 1;
     }
     var wbuf = alloc((total + 2) * 2);
+    if (wbuf == 0) { return 0 - 1; }                 # out of memory — NOT 0, which means "inherit"
     var o = 0; var j = 0;
     while (load64(envp + j * 8) != 0) {
         o = _asw_wappend(wbuf, o, load64(envp + j * 8));
@@ -677,15 +782,19 @@ fn _asw_wenvblock(envp): i64 {
 }
 
 # CreateProcessW with inherited stdio. `wcmd` = writable UTF-16LE cmdline, `wenv` = env
-# block (0 = inherit). `pi` = caller's 24-byte PROCESS_INFORMATION. Returns the BOOL.
-fn _asw_create_process(wcmd, wenv, pi): i64 {
+# block (0 = inherit). `pi` = caller's 24-byte PROCESS_INFORMATION. Returns 1, or 0 on failure.
+# 6.6.10: created CREATE_SUSPENDED, put in a KILL_ON_JOB_CLOSE Job object (lib/syscalls_windows.cyr
+# `_win_job_start`) and resumed; the job handle is stored at `job_out` (0 = none — the child
+# then runs untracked, as before). A child that could not be resumed is terminated and
+# reported as a failed spawn.
+fn _asw_create_process(wcmd, wenv, pi, job_out): i64 {
     var si[104];
     var z = 0; while (z < 104) { store8(&si + z, 0); z = z + 1; }
     store64(&si, 104);                          # cb = sizeof(STARTUPINFOW)
     var pz = 0; while (pz < 24) { store8(pi + pz, 0); pz = pz + 1; }
     var a[80];
-    var flags = 0;
-    if (wenv != 0) { flags = 1024; }            # CREATE_UNICODE_ENVIRONMENT
+    var flags = 4;                               # CREATE_SUSPENDED — resumed once in its job
+    if (wenv != 0) { flags = flags | 1024; }     # CREATE_UNICODE_ENVIRONMENT
     store64(&a + 0, 0);                          # lpApplicationName (NULL → cmdline's first token)
     store64(&a + 8, wcmd);                       # lpCommandLine (writable)
     store64(&a + 16, 0);
@@ -696,20 +805,44 @@ fn _asw_create_process(wcmd, wenv, pi): i64 {
     store64(&a + 56, 0);
     store64(&a + 64, &si);                       # lpStartupInfo
     store64(&a + 72, pi);                        # lpProcessInformation
-    return syscall(61445, &a);                   # CreateProcessW
+    store64(job_out, 0);
+    var ok = syscall(61445, &a);                 # CreateProcessW
+    if ((ok & 0xFFFFFFFF) == 0) { return 0; }    # BOOL: only eax is defined (6.6.17)
+    var job = _win_job_start(pi, 1);
+    if (job < 0) {                               # could not be resumed: it was terminated
+        syscall(3, load64(pi + 8));
+        syscall(3, load64(pi));
+        return 0;
+    }
+    store64(job_out, job);
+    return 1;
+}
+
+# Close the child's job after a NORMAL exit: KILL_ON_JOB_CLOSE is cleared first, so what the
+# child left running is left alone (the deadline path ends the job instead — see
+# `_async_win_retire`). 6.6.10, CHANGELOG [6.6.10]
+fn _asw_job_close(ctx): i64 {
+    var job = load64(ctx + 96);
+    if (job == 0) { return 0; }
+    _win_job_set_kill(job, 0);
+    syscall(3, job);
+    store64(ctx + 96, 0);
+    return 0;
 }
 
 # Reactor subprocess task: on first run CreateProcessW the child and register a one-shot
 # threadpool wait on its process HANDLE (signalled on exit → bridge posts to the IOCP);
 # on wake reap it via GetExitCodeProcess and return the exit code. ctx =
-#   +0 OVERLAPPED(32) +32 task +40 step +48 rt +56 argv +64 envp +72 hProcess +80 hThread +88 wait.
+#   +0 OVERLAPPED(32) +32 task +40 step +48 rt +56 argv +64 envp +72 hProcess +80 hThread +88 wait
+#   +96 hJob (6.6.10 — the child's Job object, so a deadline ends its whole tree).
 fn _async_process_task(ctx): i64 {
     if (load64(ctx + 40) == 0) {
         var rt = load64(ctx + 48);
         var wcmd = _asw_wcmdline(load64(ctx + 56));
         var wenv = _asw_wenvblock(load64(ctx + 64));
+        if (wcmd == 0 || wenv == 0 - 1) { return 0 - 1; }                 # out of memory
         var pi[24];
-        if (_asw_create_process(wcmd, wenv, &pi) == 0) { return 0 - 1; }   # spawn failed
+        if (_asw_create_process(wcmd, wenv, &pi, ctx + 96) == 0) { return 0 - 1; }   # spawn failed
         var hProcess = load64(&pi + 0);
         store64(ctx + 72, hProcess);
         store64(ctx + 80, load64(&pi + 8));         # hThread
@@ -719,13 +852,15 @@ fn _async_process_task(ctx): i64 {
         var wh[8]; store64(&wh, 0);
         # RegisterWaitForSingleObject(&wh, hProcess, cb, ctx, INFINITE, WT_EXECUTEONLYONCE=8) —
         # one-shot (the process handle stays signalled after exit; a persistent wait would spin).
-        if (syscall(0xF02D, &wh, hProcess, &_async_win_timer_cb, ctx, 0 - 1, 8) == 0) {
+        if ((syscall(0xF02D, &wh, hProcess, &_async_win_timer_cb, ctx, 0 - 1, 8) & 0xFFFFFFFF) == 0) {   # BOOL
             # Registration failed: don't park into a dead completion source. Degrade to a
             # blocking reap (returns the real exit code — better than a hang or a leak).
             syscall(61441, hProcess, 4294967295);   # WaitForSingleObject(INFINITE)
             var c0[8]; store64(&c0, 0);
-            syscall(61442, hProcess, &c0);           # GetExitCodeProcess
+            var g0 = syscall(61442, hProcess, &c0);  # GetExitCodeProcess (BOOL: eax only)
             syscall(3, load64(ctx + 80)); syscall(3, hProcess);
+            _asw_job_close(ctx);
+            if ((g0 & 0xFFFFFFFF) == 0) { return 0 - 1; }   # not observed: c0 is not an exit 0
             return load32(&c0);
         }
         store64(ctx + 88, load64(&wh));
@@ -734,11 +869,15 @@ fn _async_process_task(ctx): i64 {
     }
     var hProcess = load64(ctx + 72);
     syscall(0xF030, load64(ctx + 88), 0 - 1);       # UnregisterWaitEx (drain the exit callback)
+    # A failed GetExitCodeProcess leaves `code` zeroed: decoding it read as exit 0 for a child
+    # nobody observed. Not observed is -1, as on Linux and macOS. CHANGELOG [6.6.20]
     var code[8]; store64(&code, 0);
-    syscall(61442, hProcess, &code);                # GetExitCodeProcess
+    var got = syscall(61442, hProcess, &code);      # GetExitCodeProcess (BOOL: eax only)
     var ec = load32(&code);
+    if ((got & 0xFFFFFFFF) == 0) { ec = 0 - 1; }
     syscall(3, load64(ctx + 80));                   # CloseHandle(hThread)
     syscall(3, hProcess);                           # CloseHandle(hProcess)
+    _asw_job_close(ctx);
     return ec;
 }
 
@@ -747,7 +886,8 @@ fn _async_process_task(ctx): i64 {
 # command line), non-blocking (parks on the process handle until exit). Returns a task handle
 # whose result — via task_join(rt, handle) — is the child's exit code. v6.4.44 (R2).
 fn async_spawn_process(rt, path, argv, envp): i64 {
-    var ctx = alloc_via(load64(rt + 32), 96);
+    var ctx = alloc_via(load64(rt + 32), 104);
+    if (ctx == 0) { return 0; }
     store64(ctx + 40, 0);
     store64(ctx + 48, rt);
     store64(ctx + 56, argv);
@@ -755,12 +895,14 @@ fn async_spawn_process(rt, path, argv, envp): i64 {
     store64(ctx + 72, 0);
     store64(ctx + 80, 0);
     store64(ctx + 88, 0);
+    store64(ctx + 96, 0);
     return async_spawn(rt, &_async_process_task, ctx);
 }
 
 # Spawn `path` and wait, with an optional deadline (ms <= 0 = no deadline). Returns the child
 # exit code, or -2 if the deadline fired first — in which case async_with_timeout's retire has
-# already TerminateProcess'd + reaped + closed the child (no orphan, no handle leak). Does NOT
+# already ended the child's job (its whole tree, 6.6.10) + reaped + closed it (no orphan, no
+# handle leak). Does NOT
 # close the runtime. Mirror of async.cyr async_run_process. v6.4.44 (R2).
 fn async_run_process(rt, path, argv, envp, ms): i64 {
     var h = async_spawn_process(rt, path, argv, envp);
@@ -770,9 +912,12 @@ fn async_run_process(rt, path, argv, envp, ms): i64 {
     return 0 - 2;
 }
 
-# Sleep for `ms` milliseconds via the kernel32 Sleep reroute (0xF00F, exists).
+# Sleep for `ms` milliseconds via the kernel32 Sleep reroute (0xF00F, exists). Sleep takes a
+# DWORD: an ms above INT_MAX is clamped (as sleep_ms does), never truncated to its low 32 bits —
+# 2^32 + 5 slept 5 ms, and 0xFFFFFFFF is INFINITE. CHANGELOG [6.6.20]
 fn async_sleep_ms(ms): i64 {
     if (ms <= 0) { return 0; }
+    if (ms > 0x7FFFFFFF) { ms = 0x7FFFFFFF; }
     syscall(0xF00F, ms);        # Sleep(dwMilliseconds)
     return 0;
 }
@@ -782,12 +927,34 @@ fn async_read(fd, buf, len): i64 {
     return syscall(0, fd, buf, len);
 }
 
-# Wait for `fd` readable. TODO(R1-iocp): overlapped wait. Present so consumers link.
-fn async_await_readable(fd): i64 {
+# Wait for SOCKET `fd` to be readable, or until `ms` milliseconds elapse (`ms` < 0: no limit).
+# Returns 1 if it became readable — data, a hang-up, or a pending connection on a listening
+# socket — and 0 if the wait ended without it (the timeout, or an error). The Linux backend's
+# contract, over ws2_32!WSAPoll (fd_wait_ready, 0xF04A, verified on cass).
+# ⚠ SOCKETS ONLY: WSAPoll knows nothing of other HANDLEs (a pipe, a file, a console), so for
+# those this answers 0 at once rather than waiting — the Windows reactor is socket-only too.
+# CHANGELOG [6.6.19]
+fn async_await_readable_ms(fd, ms): i64 {
+    if (fd_wait_ready(fd, 0, ms) == 1) { return 1; }
     return 0;
 }
 
-# Run `fp(arg)` with a timeout. No fork on Windows; run inline (mirrors agnos). `ms` ignored.
+# Wait without limit for SOCKET `fd` to become readable; always 0 (the Linux contract). ⛔ Until
+# 6.6.19 this was a no-op that returned at once, so sandhi's cooperative accept loop spun at
+# 100 % CPU on Windows. CHANGELOG [6.6.19]
+fn async_await_readable(fd): i64 {
+    async_await_readable_ms(fd, 0 - 1);
+    return 0;
+}
+
+# Run `fp(arg)` with a timeout — REFUSED on Windows: returns -1 (the timeout value of the
+# Linux contract) and does not run `fp`.
+# ⛔ 6.6.10 — FAIL CLOSED. This ran the body INLINE and ignored `ms`, so a caller that asked
+# for "at most ms" got an unbounded call that answered as if it had been bounded. There is no
+# fork on Windows, so there is no second process to put a deadline on, and a thread cannot be
+# killed safely mid-body. -1 is what a caller of this API already handles (the body did not
+# finish in time); an answer that looks like success is not. Nothing in the tree or the
+# ecosystem calls it on Windows. CHANGELOG [6.6.10]
 fn async_timeout(fp, arg, ms): i64 {
-    return fncall1(fp, arg);
+    return 0 - 1;
 }

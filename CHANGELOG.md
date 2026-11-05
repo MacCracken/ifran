@@ -7,6 +7,39 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.2.2] - 2026-11-04
+
+### Changed
+
+- **Toolchain `6.6.2` → `6.6.20`** (the 6.6.x closeout). No first-party source
+  change was needed beyond the version literal. Re-verified on the new pin:
+  build, `tests/ifran.tcyr` **120/120**, `tests/ifran.bcyr`, `tests/ifran.fcyr`.
+- **Deps moved to their newest 6.6-line tags**: patra `1.14.1` → `1.15.2`,
+  sigil `3.12.16` → `3.13.10`, cmdit `1.2.5` → `1.2.6`. tula stays at `1.0.2`,
+  its newest tag. The patra and sigil versions are the same ones the 6.6.20
+  toolchain bundles. Their later tags (patra 1.16.x, sigil 3.13.11+,
+  cmdit 1.3+) all pin cyrius 6.7.x.
+- **`lib/` re-vendored from the 6.6.20 snapshot** (`cyrius lib sync --full` +
+  `cyrius deps`), which adds `alloc_cx`, `poison` and `tls_hostid`.
+  `cyrius.lock` now commit-pins all four git deps (`4 re-verified`).
+
+### Removed
+- `.github/workflows/dependency-update.yml`, a leftover Rust-era (cargo)
+  workflow.
+
+### Porting notes
+- **On 6.6.x a `path = "../<dep>"` next to `git`/`tag` overrides the tag.**
+  Every compiling verb (`build`, `run`, `test`, `bench`, `fuzz`, `check`,
+  `audit`, …) runs `cyrius deps` first, and when the `path` directory exists
+  it vendors the sibling's *working tree*. 6.6.20 has no switch to skip this
+  (`--no-deps` only drops the dep includes from the compile). The sibling
+  checkouts are now on 6.7.x, so any local build inside `~/Repos` overwrites
+  `lib/` with code 6.6.20 cannot compile. This cut was resolved and verified
+  from a staged copy outside `~/Repos`, where the overrides cannot resolve
+  (`4 commit-pinned (4 re-verified)`), which matches what CI does since CI
+  has no siblings. It goes away at the 6.7.6+ pin, where `path` becomes an
+  opt-in dev override (roadmap note).
+
 ## [2.2.1] - 2026-09-11
 
 ### Changed

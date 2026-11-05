@@ -1,9 +1,16 @@
 # regex.cyr — Thompson NFA / Pike matcher (v5.7.18) + glob helpers.
 # Usage: include "lib/regex.cyr"
-# Requires: string.cyr, alloc.cyr, str.cyr
+# Includes its own definers (6.6.9): string.cyr, alloc.cyr, str.cyr, vec.cyr.
 #
 # Glob helpers (top): glob_match, str_glob, find_all, str_replace, str_replace_all.
 # Full regex engine (below): regex_compile, regex_match, regex_search, regex_group_*.
+
+# 6.6.9: str_replace / find_all / the regex groups call string, alloc, str and vec helpers; a
+# bare include left ten of them undefined. CHANGELOG [6.6.9]
+include "lib/alloc.cyr"
+include "lib/string.cyr"
+include "lib/str.cyr"
+include "lib/vec.cyr"
 
 # Match a glob pattern against a string
 # Supports: * (zero or more chars), ? (exactly one char)
@@ -20,6 +27,7 @@
 # and fuzz/.
 private
 
+# Match C string `text` against glob `pattern` (`*` any run, `?` any one byte); 1 or 0.
 public fn glob_match(pattern, text): i64 {
     var pi = 0;
     var ti = 0;
@@ -79,6 +87,7 @@ public fn str_glob(s, pattern): i64 {
     # Need null-terminated version of Str data
     var slen = str_len(s);
     var buf = alloc(slen + 1);
+    if (buf == 0) { return 0; }
     memcpy(buf, str_data(s), slen);
     store8(buf + slen, 0);
     return glob_match(pattern, buf);
@@ -117,6 +126,7 @@ public fn str_replace(s, old, new_str): i64 {
             # Found — build replacement
             var newlen = slen - olen + nlen;
             var buf = alloc(newlen + 1);
+            if (buf == 0) { return 0; }
             memcpy(buf, sdata, fi);
             memcpy(buf + fi, ndata, nlen);
             memcpy(buf + fi + nlen, sdata + fi + olen, slen - fi - olen);
@@ -214,8 +224,11 @@ var _re_m_gen = 0;
 fn _re_m_lazy_init(): i64 {
     if (_re_m_init == 1) { return 0; }
     _re_m_cur     = alloc(8 + REGEX_MAX_INSTRS * 168);
+    if (_re_m_cur == 0) { return 0 - 1; }
     _re_m_next    = alloc(8 + REGEX_MAX_INSTRS * 168);
+    if (_re_m_next == 0) { return 0 - 1; }
     _re_m_lastgen = alloc(REGEX_MAX_INSTRS * 8);
+    if (_re_m_lastgen == 0) { return 0 - 1; }
     var i = 0;
     while (i < REGEX_MAX_INSTRS) {
         store64(_re_m_lastgen + i * 8, 0);
@@ -867,6 +880,7 @@ public fn regex_compile(pat): i64 {
     var instr_bytes = REGEX_MAX_INSTRS * 16;
     var class_bytes = REGEX_MAX_CLASSES * 32;
     var nfa = alloc(REGEX_NFA_HEADER_SIZE + instr_bytes + class_bytes);
+    if (nfa == 0) { return 0; }
     var instrs = nfa + REGEX_NFA_HEADER_SIZE;
     var classes = instrs + instr_bytes;
     store64(nfa + REGEX_OFF_INSTRS_OFF,  REGEX_NFA_HEADER_SIZE);
@@ -1020,18 +1034,20 @@ fn _re_add_thread(list_base, pc, input, input_len, pos, saves, instrs): i64 {
 # capture saves into nfa's header and return the match-end position.
 # Returns -1 on no match.
 fn _re_pike_run(nfa, input, input_len, start_pos): i64 {
-    _re_m_lazy_init();
+    if (_re_m_lazy_init() != 0) { return 0 - 1; }   # 6.6.10: its buffers could not be allocated
     var instrs = nfa + load64(nfa + REGEX_OFF_INSTRS_OFF);
     var instr_count = load64(nfa + REGEX_OFF_INSTR_COUNT);
     var class_base = nfa + load64(nfa + REGEX_OFF_CLASSES_OFF);
     var matched = 0 - 1;
     var saves_scratch = alloc(REGEX_MAX_SAVES * 8);
+    if (saves_scratch == 0) { return 0 - 1; }
     var k = 0;
     while (k < REGEX_MAX_SAVES) {
         store64(saves_scratch + k * 8, 0 - 1);
         k = k + 1;
     }
     var match_saves = alloc(REGEX_MAX_SAVES * 8);
+    if (match_saves == 0) { return 0 - 1; }
     var k2 = 0;
     while (k2 < REGEX_MAX_SAVES) {
         store64(match_saves + k2 * 8, 0 - 1);

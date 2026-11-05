@@ -1,6 +1,15 @@
 # freelist.cyr — allocator with individual free
 # Usage: include "lib/freelist.cyr"
-# Requires: syscalls.cyr (for SYS_MMAP, SYS_MUNMAP), mmap.cyr (PROT_*)
+# Includes its own definers: syscalls.cyr (SYS_MMAP, SYS_MUNMAP), mmap.cyr (PROT_*),
+# atomic.cyr (the lock), and since 6.6.18 poison.cyr (the poison core: fill, redzones, the
+# fl live list), which itself includes alloc.cyr. `include "lib/freelist.cyr"` alone
+# compiles (6.6.7).
+#
+# ⛔ FAILURE IS 0, NEVER A FAULT (6.6.7). `fl_alloc` / `fl_calloc` return 0 when the
+# request is <= 0 or the kernel refuses the mapping, like `alloc()`. Before 6.6.7 the
+# raw `_fl_mmap` result (-ENOMEM on Linux/Darwin, 0 on agnos/PE) was stored through,
+# so a refused mapping SIGSEGV'd at 0xfffffffffffffff4 and every consumer's `== 0`
+# guard (sigil's argon2 wrappers, its policy reader) was dead code. CHANGELOG [6.6.7]
 #
 # Segregated free-list allocator. Allocations are rounded up to
 # size classes (16, 32, 64, 128, 256, 512, 1024, 2048, 4096).
@@ -61,6 +70,11 @@
 #
 # >>> include "lib/mmap.cyr"
 
+# 6.6.7: SYS_MMAP / SYS_MUNMAP come from the syscall peer. Without this include a bare
+# `include "lib/freelist.cyr"` was a HARD compile error (`undefined variable 'SYS_MMAP'`);
+# every consumer had been including syscalls.cyr first. include-once dedupes.
+include "lib/syscalls.cyr"
+
 # v6.0.52: explicit include of mmap.cyr for the PROT_READ/PROT_WRITE enum used
 # in the large-allocation mmap path below. Previously free-rode on the Linux
 # closure pulling mmap.cyr transitively, which broke under CYRIUS_TARGET_WIN
@@ -76,6 +90,12 @@ include "lib/mmap.cyr"
 # per contended alloc/free pair against the spinlock's 166-315. Same conclusion
 # alloc.cyr reached at v6.0.64, for the same reasons.
 include "lib/atomic.cyr"
+
+# 6.6.18: the poison core — the settable fill byte, the shared fill / check helpers and the
+# report. Poison mode used to be a freelist-only feature with its fill a constant in three
+# places here; every poisoning allocator now shares one core. It is NOT compiler source and
+# costs nothing until poison mode is on. CHANGELOG [6.6.18]
+include "lib/poison.cyr"
 
 # Size classes: 16 32 64 128 256 512 1024 2048 4096
 var _fl_heads[72];
@@ -228,12 +248,17 @@ fn _fl_mmap(length): i64 {
 # widest windows in the file. The mmap runs inside the lock: peers spin for ~2 µs,
 # which is the same trade alloc.cyr's `_linux_new_chunk` makes, and the kernel
 # serialises concurrent mmap on the process anyway.
+# Returns 0 when a refill mapping is refused. ⚠ The arena globals are assigned only AFTER
+# the mapping is checked (`<= 0`: -errno on Linux/Darwin, 0 on agnos/PE), so a failed
+# refill leaves the old arena untouched and a later call can retry. CHANGELOG [6.6.7]
 fn _fl_arena_alloc(bsize): i64 {
     if (_fl_arena_pos + bsize > _fl_arena_end) {
         # Need new arena chunk
-        _fl_arena = _fl_mmap(FL_ARENA_SIZE);
-        _fl_arena_pos = _fl_arena;
-        _fl_arena_end = _fl_arena + FL_ARENA_SIZE;
+        var na = _fl_mmap(FL_ARENA_SIZE);
+        if (na <= 0) { return 0; }
+        _fl_arena = na;
+        _fl_arena_pos = na;
+        _fl_arena_end = na + FL_ARENA_SIZE;
     }
     var ptr = _fl_arena_pos;
     _fl_arena_pos = _fl_arena_pos + bsize;
@@ -255,23 +280,25 @@ fn _fl_arena_alloc(bsize): i64 {
 # harness asserting 'output contains no poison bytes' turns an invisible overread into a loud
 # one." That is exactly what this implements.
 #
-# ⚠ SCOPE, STATED HONESTLY: this is the ALLOC-SIDE FILL only. Quarantine-on-free
-# (use-after-free) and redzone bounds-checking are NOT here — a free-side poison needs the
-# block's original size, and the size-class path stores only its class, so doing it properly
-# means a layout change this release should not carry. The fill alone closes the filed defect.
+# ⚠ SCOPE (6.6.18): this file's blocks — the alloc-side fill, both redzones, the live list and
+# quarantine-on-free. Under CYRIUS_POISON lib/alloc.cyr's alloc() and arenas are redzoned too
+# (Linux, macOS, Windows; not agnos / cx), and a consumer's own allocation seam can adopt
+# lib/poison.cyr's poison_alloc / poison_allocator(). Under the compile flag a redzone
+# overWRITE is FATAL (report line, exit 86); with only a run-time fl_poison_enable() it is
+# COUNTED — assert `fl_poison_violations() == 0` or `poison_sweep() == 0` to see it.
 #
-# ⚠ NOT env-gated. `lib/freelist.cyr` deliberately depends on `mmap` + `atomic` only, and
-# reading an env var would drag in a syscall+parse dependency an allocator should not have.
-# A harness or driver calls `fl_poison_enable()` explicitly instead.
+# ⚠ NEVER READS THE ENVIRONMENT AT RUN TIME. An allocator reading an env var would drag in a
+# parse dependency it should not have. It is switched on at COMPILE time by the
+# `CYRIUS_POISON` predefine (below), or by a harness calling `fl_poison_enable()`.
 var _fl_poison = 0;
 
 # v6.5.29 — `CYRIUS_POISON=1` at COMPILE time turns the mode on for the whole program, which
 # is what `cyrius fuzz --poison` sets. Without it a harness has to call `fl_poison_enable()`
 # itself, and the filed gap is precisely that every consumer's existing harnesses do not.
-# ⚠ Spelled as a top-level initializer rather than `#ifdef` / `#else` around the declaration
-# because this parser has NO `#else` and NO `#ifndef` — a two-branch declaration cannot be
-# written here. A top-level `var` initialised by a call runs at startup in declaration order,
-# after `_fl_poison = 0` above and before any consumer statement that follows the include.
+# Spelled as a top-level initializer: a top-level `var` initialised by a call runs at startup
+# in declaration order, after `_fl_poison = 0` above and before any consumer statement that
+# follows the include. (This comment used to say the parser has no `#else` / `#ifndef`; it
+# has had both since v5.6.1.)
 #ifdef CYRIUS_POISON
 var _fl_poison_default_on = fl_poison_enable();
 #endif
@@ -283,9 +310,9 @@ fn fl_poison_disable(): i64 { _fl_poison = 0; return 0; }
 # 1 when poison fill is active.
 fn fl_poison_active(): i64 { return _fl_poison; }
 # The fill byte. Exposed so a harness can assert "the output contains no poison bytes"
-# without hardcoding the constant. 0xA5 is deliberately not 0x00 and not 0xFF: both of those
-# occur naturally in real data, so either would produce false negatives.
-fn fl_poison_byte(): i64 { return 165; }
+# without hardcoding the constant. 6.6.18: it is the poison core's CURRENT fill
+# (`poison_fill_set` changes it; default 0xA5), no longer a constant.
+fn fl_poison_byte(): i64 { return poison_fill(); }
 
 # v6.5.29 — REDZONE + QUARANTINE. `.28` shipped the alloc-side FILL and deferred these two,
 # stating that a free-side poison "needs the block's original size, and the size-class path
@@ -297,20 +324,30 @@ fn fl_poison_byte(): i64 { return 165; }
 #
 # The redzone genuinely does need the requested size, and the class table has ZERO slack
 # (`_fl_class(16) = 0`, capacity exactly 16), so poison mode BUMPS THE CLASS: it classifies
-# `size + _FL_RZ` instead of `size`. That costs a class step per allocation in a fuzz-only
-# mode and buys a real detection window, with no header change and therefore no heap-layout
-# change and no two-step bootstrap.
+# `size + _FL_POVH` instead of `size`. That costs a class step or two per allocation in a
+# fuzz-only mode, with no change to the plain layout and therefore no heap-layout change.
 #
-# Poison-mode block layout (size-class and large paths alike):
-#     blk+0                    next / 0
-#     blk+8                    cls  / total
-#     blk+16                   [ user data — `size` bytes ]
-#     blk+16+size              [ redzone — poison, up to cap-8 ]   <- overflow detector
-#     blk+16+cap-8             [ the requested size, stored ]      <- read back at free
-# An overWRITE past `size` corrupts poison and `fl_free` reports it. An overREAD returns the
-# poison pattern instead of live heap, which is what the filed sit defect needed: the leaked
-# bytes become recognisable rather than plausible.
-var _FL_RZ = 32;
+# 6.6.18 — the poisoned layout gained a LEADING redzone and a live list, so an underwrite is
+# seen and a block that is never freed is checked by poison_sweep() (the v6.5.29 layout had a
+# trailing redzone only, checked only at fl_free, and `load8(p - 1)` read the cls header):
+#     blk+0     free-list next (0 while allocated)
+#     blk+8     cls / total — unchanged, so capacity and the free path work as before
+#     blk+16    prev on the fl live list  ┐ lib/poison.cyr owns the list, under _poison_lock
+#     blk+24    next on the fl live list  ┘
+#     blk+32    meta: size | kind 3 << 48 | REPORTED bit 54 | fill << 56 (the fill it was ARMED with)
+#     blk+40    leading redzone, _POISON_RZ bytes of fill
+#     u = blk+40+RZ   the user's `size` bytes
+#     u+size    trailing redzone, fill to the end of the capacity (>= RZ bytes)
+#
+# ⛔ POISONED-NESS IS DECODED FROM THE BLOCK, NEVER FROM `_fl_poison`. The mode can be toggled
+# at run time, so a block can be allocated in one mode and freed in the other; deciding the
+# layout from the current flag would push a poisoned block at the wrong header (or a plain one
+# at a fake one) and corrupt the free list. The byte just below the user pointer tells them
+# apart: in a poisoned block it is the last leading-redzone byte, a NONZERO fill; in a plain
+# block it is the top byte of the cls/total word, which is ZERO (cls 0..8, total < 2^56).
+# That is why poison_fill_set() refuses 0.
+var _FL_POVH = 88;     # prev + next + meta (24) + leading RZ + trailing RZ (2 x _POISON_RZ)
+var _FL_PHDR = 40;     # blk -> leading redzone: free-next, cls, prev, next, meta
 
 # Count of redzone violations observed at free. A harness asserts this is 0.
 var _fl_poison_viol = 0;
@@ -326,48 +363,56 @@ fn _fl_capacity(blk): i64 {
     return _fl_block_size(cls) - 16;
 }
 
-# Verify the redzone of a poison-mode block. Returns the number of corrupted bytes found
-# (0 = intact). The stored size lives in the last 8 bytes of capacity; anything between the
-# end of the user data and that slot must still read as poison.
-fn _fl_redzone_check(blk): i64 {
-    var cap = _fl_capacity(blk);
-    if (cap < _FL_RZ) { return 0; }
-    var size = load64(blk + 16 + cap - 8);
-    if (size < 0) { return 0; }
-    if (size > cap - 8) { return 0; }
-    var bad = 0;
-    var i = blk + 16 + size;
-    var e = blk + 16 + cap - 8;
-    while (i < e) {
-        if (load8(i) != 165) { bad = bad + 1; }
-        i = i + 1;
-    }
-    return bad;
-}
-
-# Arm a freshly-handed-out poison-mode block: poison the tail and record the requested size.
+# Arm a freshly-handed-out block in the poisoned layout: record size + fill, write both
+# redzones, publish it on the fl live list. The capacity has already been filled. Returns the
+# user pointer.
 fn _fl_redzone_arm(blk, size): i64 {
-    var cap = _fl_capacity(blk);
-    if (cap < _FL_RZ) { return 0; }
-    if (size > cap - 8) { return 0; }
-    _fl_poison_fill(blk + 16 + size, cap - 8 - size);
-    store64(blk + 16 + cap - 8, size);
-    return 0;
+    var fill = poison_fill();
+    store64(blk + 32, size | (3 << 48) | (fill << 56));
+    _poison_set(blk + _FL_PHDR, _POISON_RZ, fill);
+    var u = blk + _FL_PHDR + _POISON_RZ;
+    _poison_set(u + size, blk + 16 + _fl_capacity(blk) - u - size, fill);
+    _poison_lock_acquire();
+    _poison_fl_link(blk);
+    var sw = _poison_tick();
+    _poison_lock_release();
+    if (sw == 1) { poison_sweep(); }
+    return u;
 }
 
-# Fill `n` bytes at `p` with the poison pattern. 8-byte stores with a byte tail, same shape as
-# fl_calloc's zero loop — a byte loop here would reintroduce the 369x cost this release just
-# removed, in the mode that is already the slow one.
+# Fill `n` bytes at `p` with the current poison fill (the core's 8-byte-store fill — a byte
+# loop here would reintroduce the 369x cost v6.5.28 removed, in the mode that is already slow).
 fn _fl_poison_fill(p, n): i64 {
-    var w = 11936128518282651045;      # 0xA5A5A5A5A5A5A5A5
-    var n8 = (n / 8) * 8;
-    var i = 0;
-    while (i < n8) { store64(p + i, w); i = i + 8; }
-    while (i < n) { store8(p + i, 165); i = i + 1; }
+    return _poison_set(p, n, poison_fill());
+}
+
+# Free a block whose header decoded as POISONED (the byte below `ptr` is nonzero). It must
+# be on the fl live list — a header that is not (a double free, a plain block whose header an
+# underwrite smashed) is reported and NOT recycled: pushing it would corrupt the free list.
+fn _fl_free_poisoned(ptr): i64 {
+    var blk = ptr - _FL_PHDR - _POISON_RZ;
+    _poison_lock_acquire();
+    var ok = _poison_fl_owns(blk);
+    if (ok == 1) { _poison_fl_unlink(blk); }
+    _poison_lock_release();
+    if (ok == 0) {
+        _fl_poison_viol = _fl_poison_viol + 1;
+        _poison_report(3, 4, ptr, 0, 8);
+        return 0;
+    }
+    if (_poison_fl_check(blk) > 0) { _fl_poison_viol = _fl_poison_viol + 1; }
+    var cls = load64(blk + 8);
+    if (cls > 8) { return _fl_unmap(blk, cls); }
+    if (_fl_poison == 1) { _fl_poison_fill(blk + 16, _fl_capacity(blk)); }
+    if (_threads_active != 0) { _fl_lock_acquire(); }
+    store64(blk, load64(&_fl_heads + cls * 8));
+    store64(&_fl_heads + cls * 8, blk);
+    if (_threads_active != 0) { _fl_lock_release(); }
     return 0;
 }
 
-# Allocate size bytes. Returns pointer to usable memory. Thread-safe (v6.5.19).
+# Allocate size bytes. Returns a pointer to usable memory, or 0 when size <= 0 or the mapping
+# is refused (6.6.7). Thread-safe (v6.5.19).
 #
 # ⚠ THE `if (_threads_active != 0)` AROUND EACH LOCK CALL IS DELIBERATE and is not
 # duplicated inside the helpers. The helpers are real out-of-line calls (cyrius does
@@ -391,22 +436,27 @@ fn _fl_poison_fill(p, n): i64 {
 # calls. Forgetting the LOCK is the bug this closes; forgetting the GATE is a
 # deadlock.
 fn fl_alloc(size): i64 {
-    # v6.5.29 — in poison mode classify `size + _FL_RZ` so the block has room for a redzone
-    # and the stored size. The class table has zero slack, so without this bump a request that
-    # exactly fills its class has nowhere to put a guard band. Fuzz-only cost.
+    # 6.6.7: a size <= 0 is refused, as alloc() refuses it. It used to land in class 0 and
+    # hand back a 16-byte block for a negative request.
+    if (size <= 0) { return 0; }
+    # v6.5.29 — in poison mode classify `size + _FL_POVH` so the block has room for the list
+    # links, the meta word and both redzones. The class table has zero slack, so without this
+    # bump a request that exactly fills its class has nowhere to put a guard band. Fuzz-only.
     var csize = size;
-    if (_fl_poison == 1) { csize = size + _FL_RZ; }
+    if (_fl_poison == 1) { csize = size + _FL_POVH; }
     var cls = _fl_class(csize);
     if (cls < 0) {
         # Large allocation: mmap directly. Touches NO shared allocator state — its
         # own fresh mapping, its own header — so it stays OUTSIDE the lock.
         var total = csize + 16;
         var blk = _fl_mmap(total);
+        # -errno on Linux/Darwin, 0 on agnos/PE — hence `<= 0`, before any store.
+        if (blk <= 0) { return 0; }
         store64(blk, 0);
         store64(blk + 8, total);
         if (_fl_poison == 1) {
             _fl_poison_fill(blk + 16, total - 16);
-            _fl_redzone_arm(blk, size);
+            return _fl_redzone_arm(blk, size);
         }
         return blk + 16;
     }
@@ -423,7 +473,7 @@ fn fl_alloc(size): i64 {
         # filling inside the critical section would lengthen it for a fuzz-only mode.
         if (_fl_poison == 1) {
             _fl_poison_fill(head + 16, _fl_capacity(head));
-            _fl_redzone_arm(head, size);
+            return _fl_redzone_arm(head, size);
         }
         return head + 16;
     }
@@ -436,35 +486,56 @@ fn fl_alloc(size): i64 {
     var bsize = _fl_block_size(cls);
     var blk = _fl_arena_alloc(bsize);
     if (_threads_active != 0) { _fl_lock_release(); }
+    if (blk == 0) { return 0; }      # refill refused — nothing was taken
     # The block is exclusively ours once the bump pointer has advanced, so its
     # header is written outside the lock — shorter critical section, same result.
     store64(blk, 0);
     store64(blk + 8, cls);
     if (_fl_poison == 1) {
         _fl_poison_fill(blk + 16, _fl_capacity(blk));
-        _fl_redzone_arm(blk, size);
+        return _fl_redzone_arm(blk, size);
     }
     return blk + 16;
 }
 
-# Free a pointer returned by fl_alloc. Thread-safe (v6.5.19).
+# Release a large block's own mapping: 0, or the kernel's -errno when it REFUSED — the mapping
+# is then still there (leaked), and the caller is told rather than handed a silent 0.
+# ⛔ Until 6.6.20 both large-block frees ran `syscall(SYS_MUNMAP, blk, cls); return 0;`, so a
+# refused munmap — on Windows EVERY one, munmap having no PE route before 6.6.20 (-38), which
+# leaked the whole mapping of every block over 4 KiB, sigil's argon2 arenas included — read as
+# a successful free. CHANGELOG [6.6.20]
+fn _fl_unmap(blk, cls): i64 {
+    var r = syscall(SYS_MUNMAP, blk, cls);
+    if (r < 0) { return r; }
+    return 0;
+}
+
+# Free a pointer returned by fl_alloc. Thread-safe (v6.5.19). Returns 0, or a negative errno
+# when a large (> 4096) block's mapping could not be released (`_fl_unmap`).
 fn fl_free(ptr): i64 {
     if (ptr == 0) { return 0; }
+    # 6.6.18 — the layout is decoded FROM THE BLOCK (see the poison-mode header above): a
+    # nonzero byte below `ptr` is a poisoned block's leading redzone. That path checks both
+    # redzones, unlinks the block from the live list and quarantines it. With poison off this
+    # is the one extra branch the plain path pays — it replaced the `_fl_poison` test here.
+    if (load8(ptr - 1) != 0) { return _fl_free_poisoned(ptr); }
     var blk = ptr - 16;
-    # v6.5.29 — redzone check BEFORE anything else touches the block, and quarantine after.
-    # The check turns a silent heap overWRITE into a counted, reportable event; the quarantine
-    # makes a use-after-free read the poison pattern instead of the block's old contents.
-    # Both are free-side, so neither costs anything when poison mode is off.
-    if (_fl_poison == 1) {
-        var bad = _fl_redzone_check(blk);
-        if (bad > 0) { _fl_poison_viol = _fl_poison_viol + 1; }
-    }
     var cls = load64(blk + 8);
     if (cls > 8) {
         # Large allocation: munmap. No shared state — outside the lock, like its
-        # counterpart in fl_alloc.
-        syscall(SYS_MUNMAP, blk, cls);
-        return 0;
+        # counterpart in fl_alloc. A large block is a fresh mapping, so its header is
+        # page-aligned; one that is not was never a large block (a header an underwrite
+        # smashed) and munmap'ing `cls` bytes from it would unmap a neighbour.
+        if ((blk & 4095) != 0) {
+            # A poisoned block whose last leading-redzone byte was ZEROED (`p[-1] = 0`, the
+            # off-by-one NUL) decodes as plain and lands here; if `ptr - 72` is a listed block it
+            # is that block — [leading] damage, freed. CHANGELOG [6.6.20]
+            if (_poison_fl_listed(ptr - _FL_PHDR - _POISON_RZ) == 1) { return _fl_free_poisoned(ptr); }
+            _fl_poison_viol = _fl_poison_viol + 1;
+            _poison_report(3, 4, ptr, 0, 8);
+            return 0;
+        }
+        return _fl_unmap(blk, cls);
     }
     # QUARANTINE (v6.5.29) — poison the whole capacity before the block re-enters the free
     # list, so a use-after-free reads the pattern rather than its own stale contents. Only the
@@ -497,9 +568,10 @@ fn fl_calloc(size): i64 {
     # read the same answer, but computing it up front documents that the decision is about
     # WHICH PATH fl_alloc will take, not about the pointer it returned.
     # ⚠ No `memset` here on purpose. It lives in `lib/string.cyr`, which this module does not
-    # include — freelist deliberately depends on `mmap` + `atomic` only, and an allocator
-    # reaching into the string library to zero memory is a dependency edge worth not adding.
-    # The 8-byte loop gets the same order-of-magnitude win self-contained.
+    # include — freelist depends on `syscalls` + `mmap` + `atomic` + `poison` (and through
+    # poison, `alloc`), never on the string library, and an allocator reaching into it to zero
+    # memory is a dependency edge worth not adding. The 8-byte loop gets the same
+    # order-of-magnitude win self-contained. CHANGELOG [6.6.18]
     var cls = _fl_class(size);
     var ptr = fl_alloc(size);
     if (ptr == 0) { return 0; }

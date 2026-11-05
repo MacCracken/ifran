@@ -43,6 +43,7 @@
 fn mutex_new(): i64 {
     alloc_init();
     var m = alloc(MUTEX_SIZE);
+    if (m == 0) { return 0; }
     store64(m, 0);
     return m;
 }

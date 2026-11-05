@@ -1,10 +1,28 @@
 # thread.cyr — thread creation, joining, and synchronization
 # Usage: include "lib/thread.cyr"
-# Requires: syscalls.cyr, alloc.cyr, mmap.cyr (PROT_*), atomic.cyr (via mutex)
+# Includes its own definers (6.6.9): syscalls.cyr, alloc.cyr, mmap.cyr (PROT_*), sync.cyr, atomic.cyr.
 #
 # Threads share the process address space (CLONE_VM).
 # Each thread gets its own stack via mmap.
 # Join waits via futex on the thread's tid.
+#
+# CAPABILITIES. Every backend exports these two vars, so a consumer picks a strategy by
+# asking, never by testing a target name (the v6.5.36 lesson):
+#   THREADS_CONCURRENT  1 = thread_create starts a SECOND thread; 0 = the body runs INLINE
+#                       at create, on a serial peer (v6.5.44).
+#   CHAN_BLOCKING       1 = the channel is a locked ring that any number of producer and
+#                       consumer threads may share. chan_recv BLOCKS until a value arrives,
+#                       and returns 0 once the channel is closed and empty. chan_send BLOCKS
+#                       while the ring is full, and returns -1 once the channel is closed.
+#                       0 = no second thread exists to end a wait, so do not rely on one.
+#                       On agnos chan_recv answers 0 when empty and chan_send fails when
+#                       full. On cx a wait that only another thread could end spins for
+#                       ever, as it always has (6.6.16).
+#     THREADS_CONCURRENT and CHAN_BLOCKING, equal on every backend:
+#                     Linux 1 · macOS 1 (arm64 and x86) · Windows 1 · agnos 0 · cx 0
+#                     (x86 macOS was 0 until 6.6.19 started real bsdthread threads there)
+#   chan_try_send / chan_try_recv / chan_close keep one contract on every target. A pool of
+#   workers that loop on chan_recv needs CHAN_BLOCKING == 1. CHANGELOG [6.6.16]
 #
 # >>> include "lib/syscalls.cyr"
 # >>> include "lib/alloc.cyr"
@@ -19,10 +37,15 @@
 # sync (sync arrives transitively via alloc/atomic/patra) got 3 `duplicate fn`
 # warnings — and if the two impls ever drifted, link order silently picked the
 # winner. Delegating here makes sync the single owner: sync's own #ifdef routing
-# selects the backend (Linux futex / Windows SRWLOCK / macOS spinlock / agnos
+# selects the backend (Linux futex / Windows SRWLOCK / macOS __ulock lock / agnos
 # no-op) and include-once dedup collapses the both-included case to one definition.
 # The channel code below (and in thread_win/thread_agnos) uses these symbols;
-# sync.cyr needs alloc + atomic, which thread.cyr's Requires line already mandates.
+# sync.cyr includes its own definers (6.6.9); so does this file — the syscall peer, alloc and
+# mmap.cyr were a Requires line for the caller, and a bare include was a hard error.
+# CHANGELOG [6.6.9]
+include "lib/syscalls.cyr"
+include "lib/alloc.cyr"
+include "lib/mmap.cyr"
 include "lib/sync.cyr"
 
 # v6.0.53: Win32 has no clone/futex — the Linux thread body below (SYS_CLONE +
@@ -50,10 +73,18 @@ include "lib/thread_agnos.cyr"
 # mmap_stack FAIL on Darwin, so thread_create bailed at `sbase < 0` and looked like a
 # harmless no-op. Fixing MAP_ANONYMOUS removed the accidental net and the call reached
 # the clone → SIGSYS on real ach (exit 140), bisected against only mmap.cyr swapped.
-# Routed here to the same serial fallback Windows (v6.0.53) and agnos (v6.2.3) use, so
-# the thread body ACTUALLY RUNS — which is the symptom
-# 2026-07-03-macos-threading-workers-dont-run reports. A real concurrent Darwin backend
-# (bsdthread_create / __ulock_wait) is still the roadmapped Slot 11 item.
+# Routed here to a serial fallback at first, so the thread body ACTUALLY RAN — the symptom
+# 2026-07-03-macos-threading-workers-dont-run reported. Both Mach-O arches now start REAL
+# threads there (arm64 libSystem pthread_create since v6.5.44; x86 raw bsdthread_create since
+# 6.6.19) and park on __ulock; lib/thread_macos.cyr's header has the split.
+#
+# cx (6.6.11): no peer file. cx compiles the body below with THREADS_CONCURRENT = 0 and
+# thread_create / thread_create_detached returning 0 (failure) — cxvm has one guest thread and
+# no clone; mutex_* come from sync.cyr's cx no-op arm; gettid() is 1; the channel ring works
+# single-threaded. _CX_NO_FUTEX: no SYS_FUTEX is ever issued on cx — cxvm hands an unknown
+# syscall to the HOST kernel with guest offsets for pointers, and a Darwin host kills the VM
+# with SIGSYS for it (measured on ecb and ach). A blocking chan_send/chan_recv that would wait
+# for another thread therefore spins forever, as it would block forever on any single thread.
 #ifdef CYRIUS_TARGET_MACOS
 include "lib/thread_macos.cyr"
 #endif
@@ -80,7 +111,16 @@ include "lib/atomic.cyr"
 # passed on macOS while bodies ran inline — a serial backend satisfies "the worker ran", "join
 # returned 0" and "the count is exact". A test that DISCRIMINATES must be guarded by capability
 # (never by target name, never by errno — the v6.5.36 lesson), and this is that capability.
+#ifndef CYRIUS_TARGET_CX
 var THREADS_CONCURRENT = 1;   # REAL clone(2) threads
+var CHAN_BLOCKING = 1;        # futex-parked channel (see the header; 6.6.16)
+#endif
+# cx: cxvm is one guest thread — thread_create FAILS there (below), so no second thread exists.
+# Its channel never parks (no futex on cx), so it is not a blocking channel either.
+#ifdef CYRIUS_TARGET_CX
+var THREADS_CONCURRENT = 0;
+var CHAN_BLOCKING = 0;
+#endif
 
 # Stack size per thread. v6.3.13: bumped 64KB → 2MB so that `var arr[N]` LOCALS —
 # now per-thread STACK-allocated (thread-safe; previously a shared global/BSS buffer,
@@ -104,8 +144,8 @@ var THREAD_SIZE = 24;
 # DOWN, so an overflow runs off the LOW end; without a guard it silently
 # scribbles whatever the allocator handed out just below (the global
 # 256 MB chunk arena) instead of faulting. 4096 = one page on x86_64 +
-# aarch64 (16 KB on some Apple-arm64, but threading there is the serial
-# fallback, so this path is Linux-only). See CHANGELOG [6.2.44].
+# aarch64 (16 KB on Apple arm64, whose threads come from lib/thread_macos.cyr,
+# so this path is Linux-only). See CHANGELOG [6.2.44].
 var THREAD_GUARD_SIZE = 4096;
 
 # Allocate stack via mmap (returns USABLE base, or <0 on failure).
@@ -143,7 +183,7 @@ fn munmap_stack(addr, size): i64 {
 # the parent has already overwritten on its way through
 # `store64(t, r); return t;`. The race crashed every
 # `thread_create + thread_join` (filed by majra in
-# docs/development/issues/majra-cbarrier-arrive-and-wait-crash.md;
+# docs/development/issues/archived/majra-cbarrier-arrive-and-wait-crash.md;
 # investigated v5.4.9, fixed v5.4.10).
 #
 # The fix: do the entire clone + child-trampoline in one inline
@@ -325,9 +365,18 @@ fn _thread_spawn_detached(flags, child_stack, t, tls): i64 {
 # Returns pointer to thread struct, or 0 on failure.
 # The function pointer must be obtained via &fn_name.
 fn thread_create(fp, arg): i64 {
+    # 6.6.11 — cx: cxvm runs ONE guest thread and has no clone. This Linux body is what cx
+    # compiles (it predefines CYRIUS_TARGET_CX only), and _thread_spawn has no cx asm, so fail
+    # HONESTLY with the documented 0 before the mmap / clone path: cxvm hands a guest mmap to
+    # the HOST kernel, which succeeds, and the stores below then go through a host address as
+    # if it were a guest offset — cxvm SIGSEGVs. CHANGELOG [6.6.11]
+    #ifdef CYRIUS_TARGET_CX
+    return 0;
+    #endif
     alloc_init();
     _threads_active = 1;   # v6.3.17 PF-02: arm the shared-heap lock BEFORE the clone below
     var t = alloc(THREAD_SIZE);
+    if (t == 0) { return 0; }
     var ssize = THREAD_STACK_SIZE;
     var sbase = mmap_stack(ssize);
     if (sbase < 0) { return 0; }
@@ -410,6 +459,9 @@ fn thread_create(fp, arg): i64 {
 # Fixing only the 2 MiB and leaving 4 KB behind would be the same half-fix shape that cost
 # 6.5.7 seven found-by-ports defects.
 fn thread_create_detached(fp, arg): i64 {
+    #ifdef CYRIUS_TARGET_CX
+    return 0;   # cx: no second thread (see thread_create). CHANGELOG [6.6.11]
+    #endif
     alloc_init();
     _threads_active = 1;   # v6.3.17 PF-02: arm the shared-heap lock BEFORE the clone
     var ssize = THREAD_STACK_SIZE;
@@ -477,6 +529,13 @@ fn thread_is_done(t): i64 {
 # FUTEX_WAIT (= 0) wakes correctly, FUTEX_WAIT|FUTEX_PRIVATE_FLAG
 # (= 128) hangs.
 fn thread_join(t): i64 {
+    # 6.6.12 — cx: no thread can exist (thread_create returns 0 there), so there is nothing to
+    # join and no SYS_FUTEX may be issued (the _CX_NO_FUTEX note above). This was the one futex
+    # site 6.6.11 left unguarded: a nonzero handle made the loop below hand the host kernel a
+    # guest offset — a spin on Linux, SIGSYS on a Darwin host. CHANGELOG [6.6.12]
+    #ifdef CYRIUS_TARGET_CX
+    return 0 - 1;
+    #endif
     if (t == 0) { return 0 - 1; }
     # CLONE_CHILD_CLEARTID: kernel sets tid to 0 and does futex_wake on exit.
     #
@@ -501,8 +560,8 @@ fn thread_join(t): i64 {
     # szal-filed 2026-07-29; CHANGELOG [6.5.8].
     #
     # The sibling futex waiters in this file already follow this discipline and
-    # must keep it: chan_send loads `count` once under the mutex, chan_recv and
-    # sync.cyr's mutex_lock pass constants.
+    # must keep it: chan_send and chan_recv park on a seq value they read ONCE under
+    # the mutex (6.6.16), and sync.cyr's mutex_lock passes a constant.
     var tid = load64(t);
     while (tid != 0) {
         syscall(SYS_FUTEX, t, FUTEX_WAIT, tid, 0, 0, 0);
@@ -515,6 +574,9 @@ fn thread_join(t): i64 {
 
 # Get current thread ID
 fn gettid(): i64 {
+    #ifdef CYRIUS_TARGET_CX
+    return 1;   # cx: the one guest thread; cxvm has no tids (and no host syscall is asked)
+    #endif
     return syscall(SYS_GETTID);
 }
 
@@ -524,74 +586,154 @@ fn gettid(): i64 {
 # it was moved to sync so there is exactly one owner per platform. The channel
 # code below uses mutex_* and MUTEX_SIZE unchanged.
 
-# Channel: bounded MPSC channel using mutex + futex
-# Layout: { buf, cap, head, tail, count, mutex, closed } = 56 bytes
+# Channel: a bounded MPMC FIFO — a mutex-protected ring whose waiters park on futex words.
+# Header, 56 B and unchanged (consumers read closed@48):
+#   { buf@0, cap@8, head@16, tail@24, count@32, mutex@40, closed@48 }
+# `buf` holds the cap 8-byte slots, then a 32-byte WAIT BLOCK (6.6.16):
+#   { rseq@0, sseq@8, rwait@16, swait@24 }
+# Receivers park on rseq and senders on sseq; rwait / swait count the threads registered to
+# park on each. Every field is read and written under the mutex.
+#
+# ⛔ WHY THE WAITERS NO LONGER PARK ON count@32 (6.6.16). Until 6.6.15 receivers AND senders
+# parked on that one word, and every send and receive woke ONE thread on it. With several
+# producers and several consumers that wake could reach a waiter of the wrong kind: a receive
+# woke a receiver parked on "empty", which re-parked, while the sender parked on "full" slept
+# on with room in the ring. Measured: four producers and four consumers on a cap-3 channel
+# deadlocked on EVERY run on x86_64, the mutex free and count either 0 (producers parked) or
+# 3 (consumers parked); on pi, one producer feeding three consumers through a cap-1 channel
+# (a saturated worker pool) hung the same way. And `closed` was not in the futex word at all,
+# so a receiver that saw "open and empty", unlocked, and lost the CPU before its FUTEX_WAIT
+# slept through chan_close's wake for good.
+#
+# THE PROTOCOL (an eventcount; lib/thread_macos.cyr runs the same one over __ulock):
+#   - A waiter finds, UNDER THE LOCK, that it must wait. It registers (+1 on its count),
+#     reads its seq word, unlocks, and parks on that seq value.
+#   - A waker changes the state UNDER THE LOCK. If a thread of the other kind is registered,
+#     it advances that kind's seq word, and after unlocking it wakes one of them
+#     (chan_close wakes all of them).
+#   - A woken waiter re-locks, deregisters and re-tests.
+#   No wake-up is lost. A waker that runs after the waiter's unlock sees the registration and
+#   advances the seq first, so either the park finds the value already changed and returns at
+#   once, or the waiter is already parked and the wake reaches it. Senders and receivers park
+#   on DIFFERENT words, so a wake only ever reaches a thread that can use it. A spurious
+#   return, or a wake whose value another thread took first, just re-tests under the lock.
+#   The seq words wrap at 32 bits because FUTEX_WAIT compares 32 bits.
+#   With nobody registered there is no syscall, so an uncontended send or receive never
+#   enters the kernel. (Until 6.6.15 every send and every receive made a FUTEX_WAKE.)
+# cx: no futex (the _CX_NO_FUTEX note at the top of this file). The park and the wake compile no
+# futex call there, so a wait that only another thread could end spins, as it always has, and
+# tests/gates/toolchain/stdlib_modules_self_sufficient.sh axis 7 pins that (CHAN_BLOCKING = 0).
+# CHANGELOG [6.6.16]
 var CHAN_SIZE = 56;
+var _CHAN_WAITBLK = 32;
 
-# Create a channel with given capacity
+# The wait block sits after the ring's cap slots.
+fn _chan_wb(ch): i64 { return load64(ch) + load64(ch + 8) * 8; }
+
+# Under the lock: register to park on the seq word at wb + seqoff, counted at wb + cntoff.
+# Returns the seq value to park on.
+fn _chan_enlist(wb, seqoff, cntoff): i64 {
+    store64(wb + cntoff, load64(wb + cntoff) + 1);
+    return load64(wb + seqoff);
+}
+
+# Under the lock, on re-locking after a park: drop that registration.
+fn _chan_delist(wb, cntoff): i64 {
+    store64(wb + cntoff, load64(wb + cntoff) - 1);
+    return 0;
+}
+
+# Under the lock: if anyone is registered at wb + cntoff, advance their seq word and return 1
+# (a wake is owed once the lock is dropped); otherwise return 0, and no syscall follows.
+fn _chan_signal(wb, seqoff, cntoff): i64 {
+    if (load64(wb + cntoff) == 0) { return 0; }
+    store64(wb + seqoff, (load64(wb + seqoff) + 1) & 0xFFFFFFFF);
+    return 1;
+}
+
+# Park on `word` while it still holds `seq`; returns at once if it does not.
+fn _chan_park(word, seq): i64 {
+    #ifndef CYRIUS_TARGET_CX
+    syscall(SYS_FUTEX, word, FUTEX_WAIT | FUTEX_PRIVATE_FLAG, seq, 0, 0, 0);
+    #endif
+    return 0;
+}
+
+# Wake up to `n` threads parked on `word`.
+fn _chan_wake(word, n): i64 {
+    #ifndef CYRIUS_TARGET_CX
+    syscall(SYS_FUTEX, word, FUTEX_WAKE | FUTEX_PRIVATE_FLAG, n, 0, 0, 0);
+    #endif
+    return 0;
+}
+
+# Under the lock: append val. The caller checked count < cap.
+fn _chan_put(ch, val): i64 {
+    var cap = load64(ch + 8);
+    var tail = load64(ch + 24);
+    store64(load64(ch) + tail * 8, val);
+    store64(ch + 24, (tail + 1) % cap);
+    store64(ch + 32, load64(ch + 32) + 1);
+    return 0;
+}
+
+# Under the lock: remove and return the oldest value. The caller checked count > 0.
+fn _chan_take(ch): i64 {
+    var cap = load64(ch + 8);
+    var head = load64(ch + 16);
+    var v = load64(load64(ch) + head * 8);
+    store64(ch + 16, (head + 1) % cap);
+    store64(ch + 32, load64(ch + 32) - 1);
+    return v;
+}
+
+# Create a channel with given capacity. Returns 0 if an allocation fails.
 fn chan_new(cap): i64 {
     alloc_init();
     var ch = alloc(CHAN_SIZE);
-    var buf = alloc(cap * 8);
+    if (ch == 0) { return 0; }
+    var buf = alloc(cap * 8 + _CHAN_WAITBLK);
+    if (buf == 0) { return 0; }
+    var mtx = mutex_new();
+    if (mtx == 0) { return 0; }
     store64(ch, buf);
     store64(ch + 8, cap);
     store64(ch + 16, 0);
     store64(ch + 24, 0);
     store64(ch + 32, 0);
-    store64(ch + 40, mutex_new());
+    store64(ch + 40, mtx);
     store64(ch + 48, 0);
+    var wb = buf + cap * 8;
+    store64(wb, 0);         # rseq
+    store64(wb + 8, 0);     # sseq
+    store64(wb + 16, 0);    # rwait
+    store64(wb + 24, 0);    # swait
     return ch;
 }
 
-# Send a value to the channel. Blocks if full. Returns 0 on success, -1 if closed.
+# Send a value. Blocks while the ring is full. Returns 0 on success, or -1 if the channel is
+# closed. `closed` is tested first and again after every wait, so a sender parked on a full
+# ring returns -1 when the channel is closed under it.
 fn chan_send(ch, val): i64 {
     var mtx = load64(ch + 40);
-    var go = 1;
-    while (go == 1) {
+    var wb = _chan_wb(ch);
+    var waited = 0;
+    while (1 == 1) {
         mutex_lock(mtx);
+        if (waited == 1) { _chan_delist(wb, 24); waited = 0; }
         if (load64(ch + 48) != 0) { mutex_unlock(mtx); return 0 - 1; }
-        var count = load64(ch + 32);
-        var cap = load64(ch + 8);
-        if (count < cap) {
-            var buf = load64(ch);
-            var tail = load64(ch + 24);
-            store64(buf + tail * 8, val);
-            store64(ch + 24, (tail + 1) % cap);
-            store64(ch + 32, count + 1);
+        if (load64(ch + 32) < load64(ch + 8)) {
+            _chan_put(ch, val);
+            var w = _chan_signal(wb, 0, 16);    # a receiver registered on rseq?
             mutex_unlock(mtx);
-            # Wake one receiver
-            syscall(SYS_FUTEX, ch + 32, FUTEX_WAKE | FUTEX_PRIVATE_FLAG, 1, 0, 0, 0);
-            go = 0;
-        } else {
-            mutex_unlock(mtx);
-            # Wait for space
-            syscall(SYS_FUTEX, ch + 32, FUTEX_WAIT | FUTEX_PRIVATE_FLAG, count, 0, 0, 0);
+            if (w == 1) { _chan_wake(wb, 1); }
+            return 0;
         }
+        var seq = _chan_enlist(wb, 8, 24);     # full: register on sseq / swait
+        waited = 1;
+        mutex_unlock(mtx);
+        _chan_park(wb + 8, seq);
     }
-    return 0;
-}
-
-# Wake `n` waiters parked on the channel's count word (v6.4.84).
-#
-# On Linux/aarch64 this is FUTEX_WAKE. On **macOS there is no futex**: a raw
-# `syscall(SYS_FUTEX, ...)` raises **SIGSYS (bad system call)** and kills the process
-# outright — exit 140 on Darwin. `lib/sync.cyr` already routes `mutex_*` through a
-# real macOS backend (`lib/sync_macos.cyr`), but these channel fns called SYS_FUTEX
-# DIRECTLY, bypassing that abstraction. Caught by the cross-OS gate on ach, because
-# `vr01_chan_try_send` is the first `vr01_` test ever to exercise channels on macOS.
-#
-# The no-op on macOS is CORRECT, not a stub: the only thing this wake can release is a
-# waiter parked in `chan_send`/`chan_recv`'s FUTEX_WAIT, and those are equally
-# unavailable on macOS — so there can be no waiter to wake. That makes the NON-BLOCKING
-# pair (`chan_try_send` / `chan_try_recv`) fully correct on macOS as plain
-# mutex-protected ring operations, which is exactly what a non-blocking API needs.
-#
-# The BLOCKING paths remain macOS-broken and are NOT fixed here — they need a real
-# condvar backend, which is issue 2026-07-03 (macOS threading), pinned to v6.5.x.
-fn _chan_wake(ch, n): i64 {
-    #ifndef CYRIUS_TARGET_MACOS
-    syscall(SYS_FUTEX, ch + 32, FUTEX_WAKE | FUTEX_PRIVATE_FLAG, n, 0, 0, 0);
-    #endif
     return 0;
 }
 
@@ -612,7 +754,7 @@ fn _chan_wake(ch, n): i64 {
 # WHAT THIS EXISTS FOR: a producer could not express "deliver this if the consumer is
 # keeping up, otherwise drop it and carry on" — the normal contract for telemetry,
 # progress events and pub/sub fan-out, where one slow consumer must never stall a
-# producer. `chan_send` blocks on FUTEX_WAIT until the buffer drains, which turns
+# producer. `chan_send` blocks until the buffer drains, which turns
 # backpressure into head-of-line blocking across unrelated work. Live instance:
 # `majra/src/pubsub.cyr` holds the hub mutex across its whole fan-out and calls
 # blocking `chan_send` inside it, so ONE full subscriber channel stalls publishes to
@@ -620,70 +762,57 @@ fn _chan_wake(ch, n): i64 {
 # was no non-blocking send to reach for. (Narrowing that lock scope is still majra's
 # to do; this only removes the unbounded stall.)
 #
-# The wake is unconditional-on-success and targets the same word as `chan_send`'s, so
-# a receiver parked in `chan_recv`'s FUTEX_WAIT is released identically.
+# A receiver parked in `chan_recv` is woken exactly as `chan_send` wakes it.
 fn chan_try_send(ch, val): i64 {
     var mtx = load64(ch + 40);
+    var wb = _chan_wb(ch);
     mutex_lock(mtx);
     if (load64(ch + 48) != 0) { mutex_unlock(mtx); return 0 - 1; }
-    var count = load64(ch + 32);
-    var cap = load64(ch + 8);
-    if (count >= cap) { mutex_unlock(mtx); return 0 - 2; }
-    var buf = load64(ch);
-    var tail = load64(ch + 24);
-    store64(buf + tail * 8, val);
-    store64(ch + 24, (tail + 1) % cap);
-    store64(ch + 32, count + 1);
+    if (load64(ch + 32) >= load64(ch + 8)) { mutex_unlock(mtx); return 0 - 2; }
+    _chan_put(ch, val);
+    var w = _chan_signal(wb, 0, 16);
     mutex_unlock(mtx);
-    # Wake one receiver (mirrors chan_send's wake on the same count word).
-    # Routed through _chan_wake: a raw SYS_FUTEX here SIGSYS-es on macOS.
-    _chan_wake(ch, 1);
+    if (w == 1) { _chan_wake(wb, 1); }
     return 0;
 }
 
-# Receive a value from the channel. Blocks if empty. Returns value, or 0 if closed.
+# Receive a value. Blocks while the ring is empty and open. Returns the oldest value, or 0 once
+# the channel is closed AND empty: a closed channel still drains what was queued before close.
 fn chan_recv(ch): i64 {
     var mtx = load64(ch + 40);
-    var go = 1;
-    var result = 0;
-    while (go == 1) {
+    var wb = _chan_wb(ch);
+    var waited = 0;
+    while (1 == 1) {
         mutex_lock(mtx);
-        var count = load64(ch + 32);
-        if (count > 0) {
-            var buf = load64(ch);
-            var head = load64(ch + 16);
-            var cap = load64(ch + 8);
-            result = load64(buf + head * 8);
-            store64(ch + 16, (head + 1) % cap);
-            store64(ch + 32, count - 1);
+        if (waited == 1) { _chan_delist(wb, 16); waited = 0; }
+        if (load64(ch + 32) > 0) {
+            var v = _chan_take(ch);
+            var w = _chan_signal(wb, 8, 24);    # a sender registered on sseq?
             mutex_unlock(mtx);
-            # Wake one sender
-            syscall(SYS_FUTEX, ch + 32, FUTEX_WAKE | FUTEX_PRIVATE_FLAG, 1, 0, 0, 0);
-            go = 0;
-        } else {
-            if (load64(ch + 48) != 0) { mutex_unlock(mtx); return 0; }
-            mutex_unlock(mtx);
-            syscall(SYS_FUTEX, ch + 32, FUTEX_WAIT | FUTEX_PRIVATE_FLAG, 0, 0, 0, 0);
+            if (w == 1) { _chan_wake(wb + 8, 1); }
+            return v;
         }
+        if (load64(ch + 48) != 0) { mutex_unlock(mtx); return 0; }
+        var seq = _chan_enlist(wb, 0, 16);     # empty and open: register on rseq / rwait
+        waited = 1;
+        mutex_unlock(mtx);
+        _chan_park(wb, seq);
     }
-    return result;
+    return 0;
 }
 
-# Close the channel (no more sends, receivers get 0)
+# Close the channel: sends fail with -1 from now on, receivers drain what is queued and then
+# get 0. Wakes EVERY parked sender and receiver, so each one re-tests and sees `closed`.
 fn chan_close(ch): i64 {
     var mtx = load64(ch + 40);
+    var wb = _chan_wb(ch);
     mutex_lock(mtx);
     store64(ch + 48, 1);
+    var wr = _chan_signal(wb, 0, 16);
+    var ws = _chan_signal(wb, 8, 24);
     mutex_unlock(mtx);
-    # Wake all waiters. Routed through _chan_wake (v6.4.84): a raw SYS_FUTEX here
-    # SIGSYS-es on macOS. `chan_close` is reachable from the purely NON-BLOCKING
-    # surface — closing is how a producer signals "stop", and `chan_try_send`
-    # returns -1 for it — so it must not kill the process on a platform whose
-    # blocking paths are unavailable. This was the second raw wake on that path;
-    # the first (in chan_try_send) was found by the cross-OS gate on ach, and this
-    # one only surfaced after fixing that, because the SIGSYS discarded the buffered
-    # stdout that would have shown how far the test actually got.
-    _chan_wake(ch, 1000);
+    if (wr == 1) { _chan_wake(wb, 2147483647); }        # INT_MAX: every receiver
+    if (ws == 1) { _chan_wake(wb + 8, 2147483647); }    # every sender
     return 0;
 }
 
@@ -701,25 +830,14 @@ fn chan_close(ch): i64 {
 #   # ... go do other transport work, come back later ...
 fn chan_try_recv(ch): i64 {
     var mtx = load64(ch + 40);
+    var wb = _chan_wb(ch);
     mutex_lock(mtx);
-    var count = load64(ch + 32);
-    if (count == 0) {
-        mutex_unlock(mtx);
-        return 0;
-    }
-    var buf = load64(ch);
-    var head = load64(ch + 16);
-    var cap = load64(ch + 8);
-    var result = load64(buf + head * 8);
-    store64(ch + 16, (head + 1) % cap);
-    store64(ch + 32, count - 1);
+    if (load64(ch + 32) == 0) { mutex_unlock(mtx); return 0; }
+    var v = _chan_take(ch);
+    var w = _chan_signal(wb, 8, 24);
     mutex_unlock(mtx);
-    # Wake one sender (if it was waiting on full-buffer condition).
-    # Routed through _chan_wake: a raw SYS_FUTEX here SIGSYS-es on macOS. This fn is
-    # advertised as non-blocking, so it must not kill the process on a platform whose
-    # blocking paths are unavailable.
-    _chan_wake(ch, 1);
-    return result;
+    if (w == 1) { _chan_wake(wb + 8, 1); }
+    return v;
 }
 
 #endif

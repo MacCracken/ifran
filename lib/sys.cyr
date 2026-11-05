@@ -14,7 +14,7 @@
 # buffers handed back are the same Linux-shaped ones, so every accessor in this
 # file works unchanged there. Windows (GetVersionEx / GlobalMemoryStatusEx) is
 # still unwired and returns -ENOSYS rather than mis-issuing a Linux number.
-# Requires: lib/syscalls.cyr. See CHANGELOG [6.1.28], [6.5.16].
+# Includes its own definer, lib/syscalls.cyr. See CHANGELOG [6.1.28], [6.5.16].
 
 include "lib/syscalls.cyr"
 
@@ -118,9 +118,14 @@ fn _uts_field(a, b, dst, scratch, cap): i64 {
 
 # Wall clock into a 16-byte struct timeval (tv_sec i64 @ +0, tv_usec i32 @ +8
 # with 4 bytes of tail pad — byte layout measured identically on ecb and ach).
-# clock_gettime is deliberately NOT used here: syscall(228) is unrouted on
-# x86-macOS (lib/chrono.cyr:27, "that arch is HELD"), so it would work on ecb and
-# be silently dead on ach — the exact "fixed one fork, not the other" shape.
+# clock_gettime is deliberately NOT used here: Darwin has no clock_gettime syscall, and
+# syscall(228)'s two Mach-O reroutes RETURN nanoseconds rather than filling a timespec
+# (arm64 binds _clock_gettime_nsec_np and never touches the buffer; x86 issues this same
+# gettimeofday — EMACHO_CLOCK_X86, routed since v6.5.16 — and returns the timeval composed
+# to ns for clock id 0, or for any other id the mach time the kernel copies out through the
+# third argument, which is ns at Intel's 1:1 timebase; 6.6.12). This note said 228 was
+# "unrouted on x86-macOS" until 6.6.10; gettimeofday is still the one source that fills a
+# struct timeval identically on both Macs.
 #
 # ⚠⚠ THE THIRD ARGUMENT IS NOT OPTIONAL AND MUST BE AN EXPLICIT NULL.
 # Darwin's gettimeofday syscall is
@@ -137,6 +142,11 @@ fn _uts_field(a, b, dst, scratch, cap): i64 {
 # third arg at a sentinel: ecb wrote 0x3AFC14FB55 (÷24 MHz timebase = 10523 s =
 # the box's uptime), ach wrote 0x35568623C86E1 ns (= 938 ks, likewise its
 # uptime); with the third arg 0, the sentinel was untouched on both.
+# ⚠ The compiler's own x86 reroute of syscall(228) (EMACHO_CLOCK_X86) made exactly this
+# mistake from v6.5.16 to 6.6.9 — it set rdi and rsi and never zeroed rdx — so every
+# clock_now_* on Intel-Mac wrote mach time through a stale rdx. CVE-51, CHANGELOG [6.6.10].
+# Since 6.6.12 it points rdx at its own 8-byte stack slot and returns that mach time for
+# every clock id but 0 (the monotonic read); this wrapper wants only the timeval, so NULL.
 fn _macos_gettimeofday(tv): i64 {
     #ifdef CYRIUS_TARGET_MACOS
     return syscall(SYS_GETTIMEOFDAY, tv, 0, 0);
@@ -195,6 +205,13 @@ fn sys_uname(out): i64 {
     #ifdef CYRIUS_TARGET_WIN
     return 0 - 38;   # ENOSYS — Windows has no uname (GetVersionEx)
     #endif
+    # DEFAULT ARM — see the note on sys_utimensat in syscalls_linux_common.cyr:
+    # this preprocessor has no `#else`, so a chain naming only some targets falls
+    # off the end on every other one and returns the register's leftovers. This
+    # file COMPILES for cx (v6.6.6 gave the cx driver a target predefine), so
+    # without this a cx consumer got garbage from a call it had every reason to
+    # trust. CHANGELOG [6.6.6]
+    return 0 - 38;
 }
 
 # Pointer to the nodename (hostname) field of a filled utsname buffer.
@@ -213,23 +230,27 @@ fn uname_machine(uts): i64 { return uts + UTS_MACHINE; }
 # §4.4): uptime@0, totalram@8, freeram@16, procs@24, cpus@32 (byte counts
 # direct — no mem_unit scaling).
 #ifdef CYRIUS_TARGET_AGNOS
-# v6.5.45: AGNOS `sysinfo`#35 grew a TAIL at 1.56.59 and is now 200 bytes / 25 u64
-# (agnos-userland-abi.md §4.4). The syscall's documented rule is that future fields append at
-# the tail and bump the minimum len, while existing offsets are frozen ABI the moment a
-# consumer reads them — so the base 40-byte layout below is unchanged and everything new is
-# additive.
+# v6.5.45: AGNOS `sysinfo`#35 grew a TAIL at 1.56.59 (200 bytes) and again at 1.57.9, and is
+# now 208 bytes / 26 u64 (agnos-userland-abi.md §4.4). The syscall's documented rule is that
+# future fields append at the tail and bump the minimum len, while existing offsets are frozen
+# ABI the moment a consumer reads them — so the base 40-byte layout below is unchanged and
+# everything new is additive.
 #
-# ⛔ THE LENGTH TIERS ARE 40 / 104 / 200 AND EACH GATES ITS BAND INDEPENDENTLY. A caller
+# ⛔ THE LENGTH TIERS ARE 40 / 104 / 200 / 208 AND EACH GATES ITS BAND INDEPENDENTLY. A caller
 # passing 40..103 gets exactly the base struct; 104..199 gets the per-core band and NOT the
-# disk band; 200+ gets both. That is why `sys_sysinfo` (arity 1) can keep asking for 40
-# forever without breaking, and why reading a tail field requires `sys_sysinfo_n` with a
-# length that actually covers it — a short buffer does not error, it just leaves your band
-# unwritten, so a caller who forgets reads whatever was on its stack.
+# disk band; 200..207 gets both; 208+ also gets `sched_kicks` (1.57.9). That is why
+# `sys_sysinfo` (arity 1) can keep asking for 40 forever without breaking, and why reading a
+# tail field requires `sys_sysinfo_n` with a length that actually covers it — a short buffer
+# does not error, it just leaves your band unwritten, so a caller who forgets reads whatever
+# was on its stack. (A kernel OLDER than the band does the same: it accepts the longer length
+# and never writes the new field.) SYSINFO_SIZE_FULL is the WHOLE struct — it moved 200 -> 208
+# at 6.6.7, and SYSINFO_SIZE_BLK keeps the name for the old 200 tier. CHANGELOG [6.6.7]
 enum SysInfoOffset { SI_UPTIME = 0; SI_TOTALRAM = 8; SI_FREERAM = 16; SI_PROCS = 24; SI_CPUS = 32;
-    SI_CPU_BASE = 40; SI_BLK_BASE = 104; }
+    SI_CPU_BASE = 40; SI_BLK_BASE = 104; SI_SCHED_KICKS = 200; }
 enum SysInfoConst { SYSINFO_SIZE = 40;          # base band — uptime/ram/procs/cpus
     SYSINFO_SIZE_CPU = 104;     # + per-core CPU ticks (agnos 1.56.59)
-    SYSINFO_SIZE_FULL = 200;    # + per-device block counters (agnos 1.56.59)
+    SYSINFO_SIZE_BLK = 200;     # + per-device block counters (agnos 1.56.59)
+    SYSINFO_SIZE_FULL = 208;    # + sched_kicks — the whole struct (agnos 1.57.9)
     SYSINFO_BAND_STRIDE = 16;   # both tail bands are {read/user, write/kern} u64 pairs
     SYSINFO_MAX_CPUS = 4;       # the hard kernel-wide cap pcpu_cpu() enforces
     SYSINFO_MAX_BLK_TAGS = 6; } # BLK_NONE(0) + the 5-value device enum
@@ -319,6 +340,8 @@ fn sys_sysinfo(out): i64 {
     #ifdef CYRIUS_TARGET_WIN
     return 0 - 38;   # ENOSYS — Windows uses GlobalMemoryStatusEx / GetTickCount64
     #endif
+    # DEFAULT ARM — ENOSYS on any target this chain does not name. CHANGELOG [6.6.6]
+    return 0 - 38;
 }
 
 # Fill a caller-provided sysinfo buffer, asking for `len` bytes. Returns 0 / -errno.
@@ -326,8 +349,9 @@ fn sys_sysinfo(out): i64 {
 # ⭐ THIS IS HOW YOU REACH AGNOS'S TAIL BANDS. `sys_sysinfo(out)` hardcodes 40, so every
 # wrapper consumer saw exactly the base struct no matter how much the kernel had to offer —
 # chakshu, the system monitor this was built for, reads #35 only through lib/mihi.cyr and so
-# could not see the per-core or block fields at all. Pass SYSINFO_SIZE_CPU for the CPU band or
-# SYSINFO_SIZE_FULL for both, and size `out` to match.
+# could not see the per-core or block fields at all. Pass SYSINFO_SIZE_CPU for the CPU band,
+# SYSINFO_SIZE_BLK for CPU + block, or SYSINFO_SIZE_FULL for the whole struct, and size `out`
+# to match.
 #
 # ⚠ NO NEW SYSCALL NUMBER IS INVOLVED, and that is the point of the change. agnos appended to
 # #35's tail precisely so new capability costs no number; the previous attempt minted
@@ -384,6 +408,30 @@ fn sysinfo_blk_write(buf, tag): i64 {
     return load64(buf + SI_BLK_BASE + tag * SYSINFO_BAND_STRIDE + 8);
 }
 #endif
+
+# Reschedule kicks (0xE1 IPIs) SENT since boot, all CPUs — agnos `sysinfo`#35 +200, 1.57.9.
+# Wakes plus `sched_yield_to`#108's directed kicks; a racy diagnostic counter that may
+# under-count and never over-counts, monotonic, never reset. Returns the count, -1 when the
+# kernel did not report it (agnos < 1.57.9 accepts the 208-byte length and leaves +200
+# unwritten, so the slot is pre-filled with -1 and comes back unchanged), or -errno.
+# Not wired off agnos (-ENOSYS): Linux's nearest figure, /proc/interrupts' RES row, counts
+# kicks RECEIVED per CPU, which is a different number. CHANGELOG [6.6.7]
+fn sys_sched_kicks(): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    # Sized by the same constant as the length passed below: the kernel writes that many. (6.6.7
+    # spelled it as the literal 208 because an enum constant past var index 1024 did not fold,
+    # and a program with the folded stdlibs in scope reaches that index before this line — fixed
+    # at 6.6.8, so the constant is back.) agnos_sysinfo_tail_parity pins FULL at 208. CHANGELOG [6.6.8]
+    var buf[SYSINFO_SIZE_FULL];
+    store64(&buf + SI_SCHED_KICKS, 0 - 1);
+    var r = sys_sysinfo_n(&buf, SYSINFO_SIZE_FULL);
+    if (r < 0) { return r; }
+    return load64(&buf + SI_SCHED_KICKS);
+    #endif
+    #ifndef CYRIUS_TARGET_AGNOS
+    return 0 - 38;
+    #endif
+}
 
 # Uptime in seconds from a filled sysinfo buffer.
 fn sysinfo_uptime(info): i64 { return load64(info + SI_UPTIME); }
@@ -479,6 +527,8 @@ fn sys_gettid(): i64 {
     #ifdef CYRIUS_TARGET_WIN
     return 0 - 38;   # ENOSYS — Windows GetCurrentThreadId not yet wired
     #endif
+    # DEFAULT ARM — ENOSYS on any target this chain does not name. CHANGELOG [6.6.6]
+    return 0 - 38;
 }
 
 # ================================================================
@@ -512,4 +562,11 @@ fn is_root(): i64 {
     #ifdef CYRIUS_TARGET_WIN
     return 0;
     #endif
+    # DEFAULT ARM — 0, and deliberately NOT the -38/ENOSYS the rest of this file
+    # uses for "not wired": this fn is a BOOLEAN read as `if (is_root())`, so any
+    # non-zero "error" is indistinguishable from "yes, root". Falling off the end
+    # returned the register's leftovers, which is the same coin flip with worse
+    # odds — on a target this chain does not name (cx today), answer "not root".
+    # CHANGELOG [6.6.6]
+    return 0;
 }

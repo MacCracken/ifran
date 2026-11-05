@@ -1,5 +1,5 @@
 # sync.cyr — portable process-internal mutex.
-# Usage: include "lib/atomic.cyr", "lib/alloc.cyr", then "lib/sync.cyr".
+# Usage: include "lib/sync.cyr" (it includes syscalls.cyr, alloc.cyr and atomic.cyr itself, 6.6.9).
 #
 # WHY THIS EXISTS (issue 2026-06-09-no-portable-mutex-stdlib.md, from patra):
 # the only stdlib mutex used to live inside lib/thread.cyr, bundled with the
@@ -20,19 +20,29 @@
 #   pointer (heap cell); callers may null-check it.
 #
 # BACKENDS (one active per build — selected like alloc.cyr, no #else in cyrius):
-#   Linux x86_64 / aarch64 : SYS_FUTEX 2-state lock, BLOCKS on contention
-#                            (mirrors lib/thread.cyr's proven mutex).
+#   Linux x86_64 / aarch64 : SYS_FUTEX 3-state lock (below, v6.5.9), BLOCKS on
+#                            contention; the uncontended path makes no syscall.
 #   Windows                : SRWLOCK — lib/sync_windows.cyr (blocks, fair-ish).
-#   macOS                  : atomic_cas SPINLOCK — lib/sync_macos.cyr. macOS has
-#                            no routed futex/__ulock/os_unfair_lock primitive
-#                            (see lib/alloc.cyr:37 + _macho_arm_routes), so the
-#                            macOS lock SPINS. Correct for short, low-contention
-#                            critical sections (the portable-lock use case); a
-#                            blocking macOS lock awaits __ulock backend routing.
+#   macOS                  : the same 3-state lock parked on Darwin `__ulock` —
+#                            lib/sync_macos.cyr (v6.5.44; it was an atomic_cas
+#                            spinlock until the Mach-O backends routed __ulock).
+#   agnos                  : no-op (single-core, threads run serially; below).
+#   cx (cxvm bytecode)     : no-op (cxvm is one thread and thread_create fails
+#                            there; below, 6.6.11).
+# The "no syscall when uncontended" property is asserted on every crossos host by
+# tests/tcyr/crossos/sync_mutex_contended.tcyr, relative to a syscall timed in the
+# same run (CHANGELOG [6.6.6]).
 #
 # Provides: MUTEX_SIZE, mutex_new(), mutex_lock(m), mutex_unlock(m).
 # (No trylock: Windows SRWLOCK has no routed TryAcquire, so a non-blocking
 # acquire isn't portable yet — keep the surface to what every backend supports.)
+
+# 6.6.9: the usage line used to tell the caller to include atomic.cyr and alloc.cyr first; a
+# bare include was a hard error on Linux (`undefined variable 'SYS_FUTEX'` — the syscall peer
+# was never named at all) and left alloc / atomic_* undefined everywhere. CHANGELOG [6.6.9]
+include "lib/syscalls.cyr"
+include "lib/alloc.cyr"
+include "lib/atomic.cyr"
 
 var MUTEX_SIZE = 8;
 
@@ -81,6 +91,7 @@ include "lib/sync_macos.cyr"
 fn mutex_new(): i64 {
     alloc_init();
     var m = alloc(MUTEX_SIZE);
+    if (m == 0) { return 0; }
     store64(m, 0);
     return m;
 }
@@ -141,5 +152,26 @@ fn mutex_new(): i64 {
 fn mutex_lock(m): i64 { return 0; }
 
 # Release — pairs with mutex_lock; no-op (single-threaded).
+fn mutex_unlock(m): i64 { return 0; }
+#endif
+
+#ifdef CYRIUS_TARGET_CX
+# cx bytecode: cxvm runs ONE guest thread and lib/thread.cyr's thread_create fails there, so a
+# contender never exists — the agnos contract, and the same reasoning as thread_local.cyr's cx
+# arms. Before 6.6.11 no arm matched cx (it predefines CYRIUS_TARGET_CX only, not LINUX), so
+# mutex_* were undefined and lib/thread.cyr — and every module that locks — refused to compile
+# for cx. The cell is still allocated so a caller's null check behaves. CHANGELOG [6.6.11]
+fn mutex_new(): i64 {
+    alloc_init();
+    var m = alloc(MUTEX_SIZE);
+    if (m == 0) { return 0; }
+    store64(m, 0);
+    return m;
+}
+
+# Acquire — no-op on cx (single guest thread, no contender).
+fn mutex_lock(m): i64 { return 0; }
+
+# Release — pairs with mutex_lock; no-op on cx.
 fn mutex_unlock(m): i64 { return 0; }
 #endif
