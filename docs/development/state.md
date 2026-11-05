@@ -6,6 +6,10 @@
 
 ## Version
 
+**2.3.2 — 2026-11-04 (sweep fix).** Sweep combos honor the template's
+`timeout_s` again; the combo spec was one slot short of the 2.1 job record
+(broken since 2.1.0). Suite **128/128**. Detail in CHANGELOG `[2.3.2]`.
+
 **2.3.1 — 2026-11-04 (toolchain maintenance).** cyrius `6.7.9` → `6.7.18`;
 deps moved to their latest tags (see below); `lib/` re-vendored; bayan's
 deprecated getters replaced with their `_by_cstr` equivalents (no behavior
@@ -68,7 +72,7 @@ CLI on **cmdit** (generated help/version/errors). Exit codes: `run` = child's,
 
 ## Tests / quality
 
-- `tests/ifran.tcyr` — **120/120** on cyrius 6.7.18 (jobspec, executor incl. failure paths, keys,
+- `tests/ifran.tcyr` — **128/128** on cyrius 6.7.18 (jobspec, executor incl. failure paths, keys,
   model store incl. tamper-detection, datasets incl. dedup, sweeps incl.
   seeded-random reproducibility, evals, prefs incl. JSON-escaping round-trip).
   All against `/tmp`.

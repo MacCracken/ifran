@@ -165,12 +165,15 @@ fn _sw_combo_spec(js, axes, idx, k): i64 {
     str_builder_add_cstr(sb, jobspec_name(js));
     str_builder_add_cstr(sb, "#");
     str_builder_add_int(sb, k);
-    var cjs = alloc(40);
+    # the full jobspec record (src/jobspec.cyr layout): every slot is carried,
+    # timeout_s included — the per-combo time limit IS the template's
+    var cjs = alloc(48);
     store64(cjs, str_cstr(str_builder_build(sb)));
     store64(cjs + 8, jobspec_bin(js));
     store64(cjs + 16, nv);
     store64(cjs + 24, jobspec_logdir(js));
     store64(cjs + 32, jobspec_dataset(js));
+    store64(cjs + 40, jobspec_timeout(js));
     return cjs;
 }
 

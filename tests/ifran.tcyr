@@ -396,6 +396,44 @@ fn test_sweeps(): i64 {
     assert_eq(sweep_best(lsid, "nosuchmetric", 0), 1, "missing metric fails loud");
     assert_eq(sweep_best(99999, "v", 0), 1, "unknown sweep id fails loud");
 
+    # ---- 2.3.2: every combo inherits the template's timeout_s ------------------
+    # (the per-combo spec was allocated one slot short of the 2.1 jobspec, so
+    # +40 read past it and combos never got the template's timeout)
+    var cspec = "[sweep]\nname = \"c\"\nbin = \"/bin/echo\"\ntimeout_s = 7\n[sweep.grid]\nv = \"1\"\n";
+    file_write_all("/tmp/ifran_t_sweep.cyml", cspec, strlen(cspec));
+    var csw = sweep_parse("/tmp/ifran_t_sweep.cyml");
+    assert_nonnull(csw, "timeout_s sweep parses");
+    var cidx = vec_new();
+    var c0 = alloc(8);
+    store64(c0, 0);
+    vec_push(cidx, c0);
+    var cjs = _sw_combo_spec(load64(csw), load64(csw + 8), cidx, 0);
+    assert_eq(jobspec_timeout(cjs), 7, "combo spec inherits template timeout_s");
+    var c2spec = "[sweep]\nname = \"c\"\nbin = \"/bin/echo\"\n[sweep.grid]\nv = \"1\"\n";
+    file_write_all("/tmp/ifran_t_sweep.cyml", c2spec, strlen(c2spec));
+    var csw2 = sweep_parse("/tmp/ifran_t_sweep.cyml");
+    var cjs2 = _sw_combo_spec(load64(csw2), load64(csw2 + 8), cidx, 0);
+    assert_eq(jobspec_timeout(cjs2), 0, "combo spec without timeout_s -> 0");
+    # end to end: timeout_s = 1 kills a 30 s sleep combo
+    var tspec1 = "[sweep]\nname = \"slow\"\nbin = \"/usr/bin/sleep\"\nargs = \"{s}\"\n";
+    var tspec2 = "logdir = \"/tmp/ifran_test_logs\"\ntimeout_s = 1\n[sweep.grid]\ns = \"30\"\n";
+    var tsb = str_builder_new();
+    str_builder_add_cstr(tsb, tspec1);
+    str_builder_add_cstr(tsb, tspec2);
+    var tspec = str_cstr(str_builder_build(tsb));
+    file_write_all("/tmp/ifran_t_sweep.cyml", tspec, strlen(tspec));
+    var st0 = clock_now_ms();
+    assert_eq(sweep_run("/tmp/ifran_t_sweep.cyml"), 1, "timed-out combo fails the sweep");
+    assert(clock_now_ms() - st0 < 5000, "combo timeout enforced well before the 30 s sleep");
+    var tst = patra_prepare(db, "SELECT status FROM runs WHERE id = ?");
+    patra_bind_int(tst, 0, run_last_id());
+    var trs = patra_query_prepared(db, tst);
+    patra_finalize(tst);
+    assert_nonnull(trs, "timed-out combo row queried");
+    assert_eq(patra_result_get_str_len(trs, 0, 0), 9, "combo status len = timed-out");
+    assert_eq(load8(patra_result_get_str(trs, 0, 0)), 116, "combo status starts 't' (timed-out)");
+    patra_result_free(trs);
+
     return 0;
 }
 

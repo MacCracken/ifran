@@ -7,6 +7,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.3.2] - 2026-11-04
+
+### Fixed
+
+- **Sweep combos now honor the template's `timeout_s`**, as documented since
+  2.2.0 ("the per-combo half is the job template's own `timeout_s`").
+  `_sw_combo_spec` (`src/sweep.cyr`) still built the 40-byte, five-slot job
+  record from before 2.1.0, while `run_job` reads `timeout_s` from the sixth
+  slot at +40. Every combo read 8 bytes past its record: in practice the
+  start of its own name string (`c#0` read as 3,154,787). A templated limit
+  was never applied. A sweep over `sleep 30` with `timeout_s = 1` ran the full
+  30 s and recorded `done` on 2.3.1; on 2.3.2 it is killed at 1 s, recorded
+  `timed-out` (exit 137), and the sweep exits 1. Introduced in 2.1.0.
+  Plain `run` and `eval` jobs were never affected, because they build the
+  record through `jobspec_from_pairs`.
+
+### Tests
+
+- `tests/ifran.tcyr` 120 → **128**: a combo spec carries the template's
+  `timeout_s` (and 0 without one), and end to end a `timeout_s = 1` sweep
+  combo over a 30 s sleep is killed in under 5 s and recorded `timed-out`.
+  Six of the eight new assertions fail on 2.3.1.
+
 ## [2.3.1] - 2026-11-04
 
 ### Changed
