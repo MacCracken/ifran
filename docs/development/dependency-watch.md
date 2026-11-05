@@ -10,7 +10,7 @@ watch — redis/tokio/axum — retired with the port; see `rust-old/`.)
 | cyrius | 6.7.18 | toolchain | bump opportunistically per release discipline; check its CHANGELOG + `docs/development/ecosystem-migration.md` first |
 | patra | 1.16.6 | run/model/dataset/pref tables | dialect gotchas recorded in CHANGELOG porting notes (0-based binds, no implicit rowid, type-keyword column names). Latest tag; pins 6.7.10; the version the 6.7.18 toolchain bundles |
 | sigil | 3.13.15 | ed25519 (keys, tula verify) + sha256 (content addressing) | tula's unresolved-symbol supplier — include BEFORE tula. Latest tag; pins 6.7.9; the version the 6.7.18 toolchain bundles |
-| tula | 1.4.0 | artifact format (validate/verify) | format v1 frozen. Latest tag; pins 6.7.18, with the same sigil (3.13.15) as ifran. ifran uses `tula_validate_strict` (the recorded `canonical` layout, `--strict`), `tula_has_long_names` (the 1.3.0 names table is not counted as a tensor) and `tula_write_file_atomic` (the store's copy). Signing and verifying big files is bound by sigil's SHA-512 (~18 MB/s, tula 1.4.0 notes) |
+| tula | 1.6.1 | artifact format (validate/verify) | format v1 frozen. Latest tag; pins 6.7.18, with the same sigil (3.13.15) as ifran. ifran uses `tula_validate_strict` (the recorded `canonical` layout, `--strict`), `tula_has_long_names` + `tula_meta_count` (the reserved names table, 1.3.0, and metadata table, 1.6.0, are not counted as tensors) and `tula_write_file_atomic` (the store's copy). Signing and verifying big files is bound by sigil's SHA-512 (~18 MB/s, tula 1.4.0 notes) |
 | cmdit | 1.5.0 | CLI (verbs/help/version/exit codes) | API frozen at 1.0; append-only. Latest tag; pins 6.7.18 |
 
 bayan (stdlib) deprecates its single-name getters (`toml_get`,

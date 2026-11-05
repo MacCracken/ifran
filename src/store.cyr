@@ -46,6 +46,16 @@ fn _store_open_table(): i64 {
     return db;
 }
 
+# The tensors a file holds, without tula's reserved bookkeeping entries: the
+# names table (1.3.0+, `__tula.names__`, for names over 47 chars) and the
+# metadata table (1.6.0+, `__tula.meta__`). A malformed reserved-named entry is
+# an ordinary tensor to tula, so it is counted.
+fn _store_tensor_count(r): i64 {
+    var n = tula_count(r) - tula_has_long_names(r);
+    if (tula_meta_count(r) > 0) { n = n - 1; }
+    return n;
+}
+
 fn _store_layout_name(canon): i64 {
     if (canon == 1) { return "canonical"; }
     if (canon < 0) { return "non-canonical"; }
@@ -126,9 +136,7 @@ fn store_add_policy(path, name, strict, require_signed): i64 {
             return 0 - 1;
         }
     }
-    # tula 1.3.0+ stores names over 47 chars in a reserved `__tula.names__`
-    # entry, the last one; it is bookkeeping, not a tensor
-    var ntensors = tula_count(r) - tula_has_long_names(r);
+    var ntensors = _store_tensor_count(r);
     var digest = alloc(32);
     sha256(buf, size, digest);
     var hex = _keys_hex(digest, 32);

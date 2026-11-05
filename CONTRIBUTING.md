@@ -166,8 +166,13 @@ ifran uses **Semantic Versioning**: `MAJOR.MINOR.PATCH`, or
    then commits and tags).
 2. Write the CHANGELOG entry and refresh `docs/development/state.md`.
 3. Pushing the tag runs `.github/workflows/release.yml`: the CI gate, a
-   version-consistency check, the build, a source tarball + `SHA256SUMS`, and
-   the GitHub release.
+   version-consistency check, the x86_64 and aarch64 builds (the aarch64 one
+   run under qemu), a source tarball + `SHA256SUMS`, the GitHub release, and
+   the multi-arch image `ghcr.io/maccracken/ifran:<tag>` (+ `latest` unless the
+   tag is a pre-release).
+4. Sync zugot's `ai/ifran.cyml` (from `deploy/agnosticos/ifran.cyml`) and
+   `marketplace/ifran.cyml` to the tag: the version, and each `sha256` from
+   the release's `SHA256SUMS` (the tarball line and the `build/ifran` line).
 
 ## License
 

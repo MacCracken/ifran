@@ -12,6 +12,7 @@ commit	3cded05e9c731eda52aeb86c26b7d371728fe2cd	tula	https://github.com/MacCrack
 commit	40e2658ebb67b32a8ad915ce9cd859fc561e9263	tula	https://github.com/MacCracken/tula.git	1.1.2
 commit	7b04ab0063dacb05e0468b96dc180174b7b45055	tula	https://github.com/MacCracken/tula.git	1.2.0
 commit	cb220673af9ea454912cb81eeabfc257d16c4f43	tula	https://github.com/MacCracken/tula.git	1.4.0
+commit	09d469b755c9dedc8a035e06dd4a27cbde9ea851	tula	https://github.com/MacCracken/tula.git	1.6.1
 346716377b00f36e58eb16cf7fe1dd62dd8fe577930d0d0429f822795b35817c  lib/alloc.cyr
 5afd5bb7cba4e49fee331f6a2838f4e01d9781defaf531403f6616f42ac7151b  lib/alloc_agnos.cyr
 57af1877c5082793ecfcfb2bf358c81cda79eaaae4feaa12eb7b963c4cbdf739  lib/alloc_cx.cyr
@@ -113,7 +114,7 @@ bba9ef25848dac7619c9f787de5717c3fd633c41a4d0499b690bdfa020c35bbe  lib/tls_native
 551ccf55d547a7f48c7cec49dfa9918c118f3046e4fc68a829e3f9007bd369e9  lib/tls_native_keysched.cyr
 7e491418abddd5780c41354ff9873f2bb94a16083e4bc62be8a6b65b3d3c890f  lib/tls_native_lowlevel.cyr
 75a3a766dea6b310403ee28bb9186c4eceb81ef12e21087de39b775c3211a603  lib/trait.cyr
-34a02b3e764a3a3baff10971a4a07b19723794a0c3b3d9024eb3a9269ff0a441  lib/tula.cyr
+40e29661828475479159d834d8839a0474c5fac0fc01211434a361627a668365  lib/tula.cyr
 8e45d3b594e31609051e958acac2f84cc102e0cd2264b0cbfdeaae8aaffda557  lib/unicode/_casefold_data.cyr
 490ce31f13069637ada2eec85c16f1e5ef942160892f32c07b572286fa4f9912  lib/unicode/_categories_data.cyr
 aeeba5627b78ffca6a34ebcbe318f50726a87d4f19713bf9ed070bbbec7ded74  lib/unicode/_decode.cyr

@@ -7,6 +7,67 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.5.1] - 2026-11-05
+
+The roadmap's 2.5.x packaging work: releases now ship an aarch64 binary and a
+multi-arch image on GHCR, CI tests the aarch64 build, and zugot's recipes
+package the Cyrius line. Plus tula 1.6.1.
+
+### Added
+
+- **aarch64.** CI cross-builds the static aarch64 binary
+  (`cyrius build --aarch64`) and runs the whole suite as aarch64 code under
+  qemu (`cyrius test --aarch64`, via Ubuntu's `qemu-user`). The release builds
+  it too, checks that exact binary under qemu, lists it in `SHA256SUMS` and
+  attaches it as `ifran-aarch64`.
+- **Release images on GHCR.** `release.yml` pushes `docker/Dockerfile.release`
+  for `linux/amd64` and `linux/arm64` as `ghcr.io/maccracken/ifran:<tag>`, plus
+  `:latest` unless the tag is a pre-release (one with a `-`). It uses the
+  workflow's `GITHUB_TOKEN` (`packages: write`) and the latest stable Docker
+  actions, SHA-pinned (CVE-21): `setup-buildx-action` v4.4.1, `login-action`
+  v4.7.0, `build-push-action` v7.4.0. CI builds the same image for both
+  platforms on every push without pushing it.
+
+### Changed
+
+- **`docker/Dockerfile.release` builds multi-arch without emulation.**
+  Everything that runs a command happens in a stage on the build platform
+  (the same AGNOS base, whose account files are identical across arches,
+  checked). The target stage only copies the binary, the `ifran` account and
+  the state directory in, so building arm64 never executes arm64 code. Checked
+  here:
+  - amd64: built and run (a job, `keys init`, `ifran` user, `/var/lib/ifran`
+    0750 `ifran:ifran`, `IFRAN_HOME`).
+  - arm64: built with no emulation, exported, binary confirmed aarch64 and
+    run under qemu, ownership and modes as on amd64.
+  - Both platforms in one build: an OCI image index.
+- **tula `1.4.0` → `1.6.1`**: a name index for lookups at scale (1.5.0), file
+  metadata (1.6.0), and big-file fixes on macOS plus nameless temp files on
+  Linux (1.6.1). Every earlier call behaves the same.
+- **zugot's recipes package the Cyrius line** (in the zugot repo):
+  - `ai/ifran.cyml` builds 2.5.0 from its release tarball with cyrius.
+  - `marketplace/ifran.cyml` installs the prebuilt 2.5.0 binary. It was the Rust
+    1.3.0 crate packaged as a library.
+  - Both pin a `sha256` from the 2.5.0 release's `SHA256SUMS`, and both were
+    run against the downloaded assets: the hashes match, the source recipe
+    builds, passes the suite and installs (units verified), and the
+    marketplace one installs a working binary.
+  - A stale "used by ifran" line in `base/protobuf.cyml` is corrected.
+  - The release process (CONTRIBUTING) gains the zugot sync as a step.
+
+### Fixed
+
+- **A file with tula metadata recorded one tensor too many.** tula 1.6.0's
+  reserved `__tula.meta__` entry was counted, as the names table was before
+  2.5.0. `store add` now subtracts both reserved entries (when tula recognizes
+  them), and such a file is canonical.
+
+### Tests
+
+- `tests/ifran.tcyr` 183 → **186**: a long-named file with metadata ingests,
+  records 2 tensors, and is canonical. The count assertion fails on 2.5.0. The
+  suite also passes as aarch64 code (186/186 under qemu).
+
 ## [2.5.0] - 2026-11-04
 
 **The experiment auto-loop, strict checkpoint ingestion, and `IFRAN_HOME`.**

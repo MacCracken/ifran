@@ -52,6 +52,34 @@ jobs:
         # tests/${proj}.tcyr.
         run: cyrius test
 
+      - name: Build + test aarch64 (under qemu)
+        # cyrius cross-builds the static aarch64 binary, and
+        # `cyrius test --aarch64` runs the whole suite as aarch64 code through
+        # /usr/bin/qemu-aarch64 (Ubuntu's qemu-user package)
+        run: |
+          set -e
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends qemu-user
+          cyrius build --aarch64 src/main.cyr build/${{ github.event.repository.name }}-aarch64
+          qemu-aarch64 build/${{ github.event.repository.name }}-aarch64 --version
+          cyrius test --aarch64 tests/ifran.tcyr
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1 (pinned — CVE-21)
+
+      - name: Release image (dry run, amd64 + arm64)
+        # The image release.yml publishes, built from these two binaries but not
+        # pushed. Dockerfile.release runs nothing on the target platform, so
+        # arm64 needs no emulation.
+        run: |
+          set -e
+          NAME="${{ github.event.repository.name }}"
+          mkdir -p bin/amd64 bin/arm64
+          cp "build/$NAME" bin/amd64/ifran
+          cp "build/$NAME-aarch64" bin/arm64/ifran
+          docker buildx build -f docker/Dockerfile.release --platform linux/amd64,linux/arm64 \
+            --build-arg VERSION="$(cat VERSION)" .
+
   docker:
     name: Docker image (smoke)
     runs-on: ubuntu-latest

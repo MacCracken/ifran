@@ -9,7 +9,7 @@ datasets, sweeps, evals, preferences. It never does the math.
 ```sh
 cyrius deps                              # resolve patra/sigil/tula/cmdit + stdlib
 cyrius build src/main.cyr build/ifran
-cyrius test tests/ifran.tcyr             # 183 checks
+cyrius test tests/ifran.tcyr             # 186 checks
 ```
 
 ## The workspace
@@ -78,7 +78,10 @@ start is one command against the state in `/var/lib/ifran` (`ifran.db`, run
 logs, keys under `.ifran/`).
 
 ```sh
-# image from source (docker/Dockerfile), state on a named volume
+# the published image (amd64 + arm64, from 2.5.1), state on a named volume
+docker run --rm -v ifran-data:/var/lib/ifran ghcr.io/maccracken/ifran:latest runs
+
+# or build it from source (docker/Dockerfile)
 docker build -f docker/Dockerfile --build-arg VERSION="$(cat VERSION)" -t ifran .
 docker run --rm -v ifran-data:/var/lib/ifran ifran runs
 

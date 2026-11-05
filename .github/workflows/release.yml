@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  packages: write   # the release image on GHCR
 
 jobs:
   ci:
@@ -50,10 +51,22 @@ jobs:
         # --locked: see ci.yml. A release builds exactly the committed lib/.
         run: cyrius deps --locked
 
-      - name: Build
+      - name: Build (x86_64 + aarch64)
         run: |
+          set -e
+          NAME="${{ github.event.repository.name }}"
           mkdir -p build
-          cyrius build src/main.cyr build/${{ github.event.repository.name }}
+          cyrius build src/main.cyr "build/$NAME"
+          cyrius build --aarch64 src/main.cyr "build/$NAME-aarch64"
+
+      - name: Check the aarch64 binary runs (qemu)
+        # The CI gate above ran the whole suite as aarch64 code; this checks
+        # the exact binary being released.
+        run: |
+          set -e
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends qemu-user
+          qemu-aarch64 "build/${{ github.event.repository.name }}-aarch64" --version
 
       - name: Extract changelog
         # Pull the tagged section out of CHANGELOG.md for the release body.
@@ -72,8 +85,7 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           NAME="${{ github.event.repository.name }}"
           git archive --format=tar.gz --prefix="$NAME-$TAG/" -o "$NAME-$TAG.tar.gz" HEAD
-          sha256sum "$NAME-$TAG.tar.gz" build/"$NAME" > SHA256SUMS 2>/dev/null \
-            || sha256sum "$NAME-$TAG.tar.gz" > SHA256SUMS
+          sha256sum "$NAME-$TAG.tar.gz" build/"$NAME" build/"$NAME-aarch64" > SHA256SUMS
 
       - name: Create release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3 (pinned — CVE-21)
@@ -84,3 +96,45 @@ jobs:
             ${{ github.event.repository.name }}-${{ github.ref_name }}.tar.gz
             SHA256SUMS
             build/${{ github.event.repository.name }}
+            build/${{ github.event.repository.name }}-aarch64
+
+      - name: Stage the binaries for the image
+        run: |
+          NAME="${{ github.event.repository.name }}"
+          mkdir -p bin/amd64 bin/arm64
+          cp "build/$NAME" bin/amd64/ifran
+          cp "build/$NAME-aarch64" bin/arm64/ifran
+
+      - name: Image name and tags
+        # GHCR names are lowercase. A pre-release tag (one with a '-') does not
+        # move `latest`.
+        id: image
+        run: |
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ github.event.repository.name }}"
+          TAGS="$IMAGE:${GITHUB_REF_NAME}"
+          case "${GITHUB_REF_NAME}" in
+            *-*) ;;
+            *) TAGS="$TAGS,$IMAGE:latest" ;;
+          esac
+          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
+          echo "Publishing: $TAGS"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1 (pinned — CVE-21)
+
+      - name: Log in to GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0 (pinned — CVE-21)
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the release image (amd64 + arm64)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0 (pinned — CVE-21)
+        with:
+          context: .
+          file: docker/Dockerfile.release
+          platforms: linux/amd64,linux/arm64
+          build-args: VERSION=${{ github.ref_name }}
+          tags: ${{ steps.image.outputs.tags }}
+          push: true

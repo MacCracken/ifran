@@ -10,24 +10,6 @@ Everything here is additive on the frozen 2.x surface. Nothing is calendared:
 an item opens when its trigger fires or the maintainer pulls it forward. A
 release line is the earliest an item could land, not a promise that it will.
 
-## 2.5.x — packaging follow-ups
-
-2.4.1 converted `docker/` and `deploy/` to the Cyrius CLI and verified each
-piece by hand; CI builds and smokes only `docker/Dockerfile`. 2.5.0 set
-`IFRAN_HOME` in the images and units. What is left:
-
-- **Publish release images.** `release.yml` would stage `build/ifran` as
-  `bin/amd64/ifran`, build `docker/Dockerfile.release` and push it to GHCR
-  (`packages: write`, a SHA-pinned login action). *Decision*: the image name and
-  tags (e.g. `ghcr.io/maccracken/ifran:<tag>` + `latest`).
-- **arm64.** Build `cyrius build --aarch64` in the release job, publish the
-  binary, and make the image multi-arch (`bin/arm64/ifran`). Check that the
-  cyrius installer ships an aarch64 toolchain for the source-build images too.
-- **Sync the zugot recipe at a tag.** Copy `deploy/agnosticos/ifran.cyml` into
-  zugot's `ai/ifran.cyml`, fill `[source] sha256` from the release's
-  `SHA256SUMS`, and update or retire `marketplace/ifran.cyml`, which still
-  describes the Rust crate.
-
 ## 2.6.x — cross-repo triggers
 
 - **Lane 4 — the bote-MCP interface** (*trigger*: SecureYeoman re-wires off
@@ -68,6 +50,10 @@ piece by hand; CI builds and smokes only `docker/Dockerfile`. 2.5.0 set
   tanur consumes it as its backend. The 4-state preference store is ready.
 - **agnos-side story.** Linux-first today (fork/exec and patra are Linux); an
   on-agnos control plane rides patra's and the kernel's own arcs, not ifran's.
+- **aarch64 packages.** Releases publish `ifran-aarch64` and an arm64 image
+  (2.5.1), but zugot's recipes are `arch = "x86_64"`. Add aarch64 variants when
+  an arm64 AGNOS target wants them, and test the source-build images on an
+  arm64 runner then (they install cyrius's aarch64 toolchain, untested here).
 
 ## Standing rules
 
@@ -79,3 +65,7 @@ piece by hand; CI builds and smokes only `docker/Dockerfile`. 2.5.0 set
   that consumer.
 - **Toolchain pins** move per [`dependency-watch.md`](dependency-watch.md):
   `cyrius lib sync --full`, `cyrius deps`, then `cyrius deps --locked`.
+- **At each release tag, sync zugot**: `ai/ifran.cyml` (from
+  `deploy/agnosticos/ifran.cyml`) and `marketplace/ifran.cyml` take the tag's
+  version and the `sha256` lines from its `SHA256SUMS` (CONTRIBUTING, release
+  step 4). Synced at 2.5.0.

@@ -197,6 +197,23 @@ fn _t_make_tula_long(path, seed): i64 {
     return total;
 }
 
+# the same two LoRA tensors plus file metadata (tula 1.6.0), so the file holds
+# both reserved entries: `__tula.meta__` and the names table
+fn _t_make_tula_meta(path, seed): i64 {
+    var data = t_zeroes(64);
+    store8(data, seed);
+    var na = "base_model.model.model.layers.0.self_attn.q_proj.lora_A.weight";
+    var nb = "base_model.model.model.layers.0.self_attn.q_proj.lora_B.weight";
+    var b = tula_builder_new();
+    tula_builder_add_long(b, na, TULA_DT_F64, _t_shp1(4), 1, data, 32);
+    tula_builder_add_long(b, nb, TULA_DT_F64, _t_shp1(4), 1, data + 32, 32);
+    tula_builder_set_meta(b, "model.arch", "lora");
+    var buf = tula_builder_finish(b);
+    var total = tula_total_len(buf);
+    tula_write_file(path, buf, total);
+    return total;
+}
+
 fn _t_models_count(db): i64 {
     var rs = patra_query(db, "SELECT id FROM models");
     if (rs == 0) { return 0; }
@@ -272,6 +289,12 @@ fn test_model_store(): i64 {
     var idl = store_add("/tmp/ifran_t_long.tula", "lora");
     assert_gt(idl, 0, "long-name artifact ingests");
     assert_eq(_t_model_int(db, idl, "tensors"), 2, "2 tensors recorded (the names table is not counted)");
+    # 2.5.1: tula 1.6.0's metadata entry is not a tensor either
+    _t_make_tula_meta("/tmp/ifran_t_meta.tula", 1);
+    var idm2 = store_add("/tmp/ifran_t_meta.tula", "lora+meta");
+    assert_gt(idm2, 0, "an artifact with metadata ingests");
+    assert_eq(_t_model_int(db, idm2, "tensors"), 2, "2 tensors recorded (the metadata table is not counted)");
+    assert_eq(_t_model_int(db, idm2, "canonical"), 1, "and a tula-built file with metadata is canonical");
 
     # ---- 2.5: the stored copy is checked — a failed copy indexes nothing ------
     file_write_all("/tmp/ifran_t_notadir", "x", 1);

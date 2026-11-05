@@ -1,15 +1,16 @@
 # ifran — the AGNOS training control plane (Cyrius)
 # System package recipe for building from source via takumi, in the zugot
-# recipe format. This is the upstream draft for zugot's ai/ifran.cyml, which
-# still packages the Rust 1.3.0 line. Copy it there at a release tag and fill
-# [source] sha256 from that release's SHA256SUMS.
+# recipe format. This is the upstream draft for zugot's ai/ifran.cyml (synced
+# there at 2.5.0). At each release tag, copy it there and fill [source] sha256
+# from that release's SHA256SUMS (the ifran-<tag>.tar.gz line); zugot's
+# marketplace/ifran.cyml takes the build/ifran line for the prebuilt binary.
 #
 # Name: ifran (عرفان — gnosis)
 # Lang: Cyrius; one static binary, no runtime libraries.
 
 [package]
 name = "ifran"
-version = "2.5.0"
+version = "2.5.1"
 description = "ifran — the AGNOS training control plane: jobs, signed checkpoint store, datasets, sweeps, evals, preference data"
 license = "GPL-3.0-only"
 groups = ["ai", "ml", "cyrius"]

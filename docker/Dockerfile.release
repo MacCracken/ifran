@@ -1,18 +1,42 @@
-# Runtime-only image from a prebuilt ifran binary (the release job's
-# build/ifran), so a release image never recompiles. The binary is static, so
-# any Linux base runs it; the AGNOS base supplies tini and the ecosystem's
-# runtime conventions.
+# syntax=docker/dockerfile:1
+# Runtime-only image from prebuilt ifran binaries (the release job's
+# build/ifran and build/ifran-aarch64), so a release image never recompiles.
+# The binaries are static, so any Linux base runs them; the AGNOS base supplies
+# tini and the ecosystem's runtime conventions.
 #
-# Expects the binary staged per architecture in the build context:
-#   bin/amd64/ifran      (build/ifran from `cyrius build src/main.cyr build/ifran`)
-#   bin/arm64/ifran      (from `cyrius build --aarch64 …`, when published)
+# Multi-arch without emulation: everything that runs a command happens in a
+# stage on the BUILD platform, and the target-arch stage only copies files in.
+# So `--platform linux/amd64,linux/arm64` builds anywhere.
 #
-#   mkdir -p bin/amd64 && cp build/ifran bin/amd64/ifran
-#   docker build -f docker/Dockerfile.release --build-arg VERSION="$(cat VERSION)" -t ifran .
+# Expects the binaries staged per architecture in the build context:
+#   bin/amd64/ifran      (cyrius build src/main.cyr …)
+#   bin/arm64/ifran      (cyrius build --aarch64 src/main.cyr …)
+#
+#   mkdir -p bin/amd64 bin/arm64 && cp build/ifran bin/amd64/ifran && cp build/ifran-aarch64 bin/arm64/ifran
+#   docker buildx build -f docker/Dockerfile.release --platform linux/amd64,linux/arm64 \
+#       --build-arg VERSION="$(cat VERSION)" -t ifran .
+
+# Build-platform stage: the same AGNOS base (its /etc/passwd and group are
+# identical across architectures), so the ifran user is added here and its
+# account files are copied into the target image.
+FROM --platform=$BUILDPLATFORM ghcr.io/maccracken/agnosticos:latest AS stage
+ARG TARGETARCH
+ARG BUILDARCH
+USER root
+COPY bin/${TARGETARCH}/ifran /out/usr/local/bin/ifran
+# A native build also checks the binary runs; a cross build can't run it here
+# (the release job runs the aarch64 binary under qemu before staging it).
+RUN groupadd -g 1002 ifran \
+    && useradd -u 1002 -g ifran -d /var/lib/ifran -M -s /usr/sbin/nologin ifran \
+    && chmod 0755 /out/usr/local/bin/ifran \
+    && mkdir -p /out/var/lib/ifran \
+    && chown 1002:1002 /out/var/lib/ifran \
+    && chmod 0750 /out/var/lib/ifran \
+    && if [ "$TARGETARCH" = "$BUILDARCH" ]; then /out/usr/local/bin/ifran --version; fi
+
 FROM ghcr.io/maccracken/agnosticos:latest
 
 ARG VERSION=dev
-ARG TARGETARCH
 
 LABEL org.opencontainers.image.title="ifran"
 LABEL org.opencontainers.image.description="The AGNOS training control plane: jobs, signed checkpoint store, datasets, sweeps, evals, preference data"
@@ -21,15 +45,9 @@ LABEL org.opencontainers.image.source="https://github.com/MacCracken/ifran"
 LABEL org.opencontainers.image.licenses="GPL-3.0-only"
 LABEL org.opencontainers.image.base.name="ghcr.io/maccracken/agnosticos:latest"
 
-USER root
-RUN groupadd -g 1002 ifran \
-    && useradd -u 1002 -g ifran -d /var/lib/ifran -M -s /usr/sbin/nologin ifran \
-    && mkdir -p /var/lib/ifran \
-    && chown ifran:ifran /var/lib/ifran \
-    && chmod 0750 /var/lib/ifran
-
-COPY bin/${TARGETARCH}/ifran /usr/local/bin/ifran
-RUN chmod 0755 /usr/local/bin/ifran && /usr/local/bin/ifran --version
+COPY --from=stage /etc/passwd /etc/group /etc/shadow /etc/gshadow /etc/
+COPY --from=stage --chmod=0755 /out/usr/local/bin/ifran /usr/local/bin/ifran
+COPY --from=stage --chown=1002:1002 --chmod=0750 /out/var/lib/ifran /var/lib/ifran
 
 USER ifran
 # IFRAN_HOME roots ifran.db, ifran-store/, ifran-data/ and the keys (.ifran/);

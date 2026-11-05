@@ -6,6 +6,12 @@
 
 ## Version
 
+**2.5.1 — 2026-11-05 (packaging).** Releases ship an aarch64 binary and a
+multi-arch image (`ghcr.io/maccracken/ifran`, amd64 + arm64); CI runs the
+suite as aarch64 code under qemu and dry-runs the image; zugot's `ai/` and
+`marketplace/` recipes package 2.5.0. tula `1.6.1`; the metadata table is not
+counted as a tensor. Suite **186/186**. Detail in CHANGELOG `[2.5.1]`.
+
 **2.5.0 — 2026-11-04 (the experiment auto-loop).** `[sweep.eval]` runs a
 recorded eval per combo and ranks the combos by it (`sweep best <id>`
 re-ranks); `store add` records tula's strict canonical-layout check, with
@@ -81,7 +87,7 @@ CLI on **cmdit** (generated help/version/errors). Exit codes: `run` = child's,
 ## Toolchain & deps
 
 - **Cyrius pin**: `6.7.18` (cyrius.cyml).
-- Deps: patra 1.16.6 · sigil 3.13.15 · tula 1.4.0 · cmdit 1.5.0, the latest
+- Deps: patra 1.16.6 · sigil 3.13.15 · tula 1.6.1 · cmdit 1.5.0, the latest
   tag of each (pins + watch: [`dependency-watch.md`](dependency-watch.md)).
 - **Git first**: a default `cyrius deps` / `build` / `test` resolves the
   tags, sibling checkouts or not. `CYRIUS_LOCAL=1` / `--local` builds the
@@ -91,16 +97,19 @@ CLI on **cmdit** (generated help/version/errors). Exit codes: `run` = child's,
 
 ## Tests / quality
 
-- `tests/ifran.tcyr` — **183/183** on cyrius 6.7.18 (jobspec, executor incl. failure paths, keys,
+- `tests/ifran.tcyr` — **186/186** on cyrius 6.7.18, x86_64 and aarch64 (jobspec, executor incl. failure paths, keys,
   model store incl. tamper-detection, datasets incl. dedup, sweeps incl.
   seeded-random reproducibility, evals, prefs incl. JSON-escaping round-trip).
   All against `/tmp`.
 - Audit PASS (`docs/audit/2026-07-05-audit.md`, 0 changes) · benchmarks
   captured (`docs/benchmarks.md` — orchestration overhead ~0.6 ms/job).
-- Packaging (2.4.1): CI's `docker` job builds `docker/Dockerfile` and runs a
-  job inside it. The release/dev/trainer images, compose, the systemd units
-  (`systemd-analyze verify` + a sandboxed `systemd-run`) and the package
-  recipe's build/install steps were verified by hand at 2.4.1, not in CI.
+- Packaging: CI's `docker` job builds `docker/Dockerfile` and runs a job
+  inside it; CI's build job also builds `docker/Dockerfile.release` for amd64
+  and arm64 (not pushed). The dev/trainer images, compose, the systemd units
+  (`systemd-analyze verify` + a sandboxed `systemd-run`) and the recipes'
+  build/install steps were verified by hand (2.4.1, 2.5.1), not in CI. The
+  source-build images on an arm64 host are untested (the installer has an
+  aarch64 toolchain; nothing here can run arm64 build steps).
 
 ## Consumers / proof
 
@@ -113,12 +122,11 @@ trigger.
 
 ## In flight / next
 
-Nothing in flight. The next work is in [`roadmap.md`](roadmap.md): **2.5.x**
-packaging follow-ups (publishing release images, an arm64 build, syncing the
-zugot recipe at a tag); 2.6.x waits on cross-repo triggers (Lane 4 bote-MCP
-on the SY re-wire, the benchmark harness on a serving path); 2.7.x is the
-server stage (Lane 6, the priority queue); later 2.x is demand- or
-platform-gated (Lane 5, Lane 7, annotation sessions on tanur, agnos). Closed
-so far: Lanes 1–3, the `rust-old/` removal and its audit triage, and the
-2.5.0 minor (auto-loop, strict ingestion, `IFRAN_HOME`) — history in the
-CHANGELOG.
+Nothing in flight. The next work is in [`roadmap.md`](roadmap.md), and none of
+it is ready without a trigger: 2.6.x waits on cross-repo triggers (Lane 4
+bote-MCP on the SY re-wire, the benchmark harness on a serving path); 2.7.x
+is the server stage (Lane 6, the priority queue); later 2.x is demand- or
+platform-gated (Lane 5, Lane 7, annotation sessions on tanur, agnos). Each
+release tag also needs the zugot recipe sync (CONTRIBUTING, release step 4).
+Closed so far: Lanes 1–3, the `rust-old/` removal and its audit triage, the
+2.5.0 minor and the 2.5.x packaging work — history in the CHANGELOG.
