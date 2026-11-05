@@ -7,6 +7,76 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.3.3] - 2026-11-04
+
+Housekeeping: the Rust-era tooling the port left behind now drives the Cyrius
+project, CI guards the lock, and the roadmap is forward-looking only. No
+change to ifran itself beyond the version literal.
+
+### Changed
+
+- **`scripts/` ported from cargo to cyrius.**
+  - `version-set.sh` sets `VERSION` and the `src/main.cyr` `IFRAN_VERSION()`
+    literal, verifies that they agree, and refuses a bad version (or a missing
+    literal) before writing anything. It wrote `Cargo.toml` before.
+  - `build.sh` is `cyrius deps` + `cyrius build src/main.cyr build/ifran`, the
+    same as CI.
+  - `test.sh` is the full local gate: `cyrius deps --locked`, the suite, the
+    bench harness, the fuzz harness.
+  - `setup-dev.sh` checks that the active cyrius matches the `cyrius.cyml` pin
+    (printing the install command when it doesn't), then runs
+    `cyrius deps --locked`. It installed protoc and cargo-watch before.
+  - `bench-history.sh` parses `cyrius bench tests/ifran.bcyr` into
+    `benchmarks/history.csv`, converting to ns. The Rust criterion rows stay
+    as history.
+  - The Claude Code hooks: `hook-quality.sh` (PostToolUse) format-checks an
+    edited `.cyr`/`.tcyr`/`.bcyr`/`.fcyr` file, and lints it under `src/`. It
+    skips `lib/` and files outside the repo, rewrites nothing, and reports with
+    exit 2. `hook-release-gate.sh` (PreToolUse) blocks `git commit` unless
+    every first-party file is cyrfmt-clean, `src/` is lint-clean,
+    `cyrius deps --locked` passes, ifran builds and the suite passes. Both read
+    the hook JSON with jq when it is installed and python3 otherwise. Neither is
+    wired by default. The hardcoded `/home/macro/Repos/ifran` path is gone:
+    every script finds the repo from its own location.
+- **CI lock guard**: `ci.yml` and `release.yml` resolve with
+  `cyrius deps --locked`, which fails, naming each difference, if the committed
+  `lib/` or `cyrius.lock` isn't exactly what the pinned tags resolve.
+- **`release-automation.yml`** sets the version through
+  `scripts/version-set.sh` and commits `VERSION` + `src/main.cyr`. It edited
+  `Cargo.toml` and ran `cargo generate-lockfile` before. Its checkout is
+  pinned by SHA like the other workflows (CVE-21).
+- **`CONTRIBUTING.md` rewritten for the Cyrius project**: the source layout,
+  setup through the scripts, `main`-based branching (there is no `develop`),
+  ifran's commit scopes, cyrfmt/lint standards, the dependency-pin procedure,
+  and the release steps. It described the 8-crate Cargo workspace before.
+- **The roadmap is forward-looking only.** Completed lanes and notes are
+  removed (their history is here and in the port ledger). Open items are
+  grouped by release line: 2.4.x ready to pick up, 2.5.x cross-repo triggers,
+  2.6.x server stage, later 2.x demand- or platform-gated. New since the last
+  version: corrupt-DB length hardening, porting or retiring the Rust-era
+  `docker/` + `deploy/` packaging, the `[test]` manifest scope, and CI
+  leftovers.
+
+### Removed
+
+- `.github/actions/setup-rust-env/`, an unused composite action (its one user,
+  the Rust `dependency-update.yml`, went in 2.2.2).
+
+### Tests
+
+- `tests/ifran.tcyr` 128 → **129**: a JSONL dataset whose line repeats a
+  top-level key fails `dataset validate`, pinning 2.3.1's behavior change.
+
+### Verified
+
+- Every script was run: `version-set.sh` refused `2.3` and no argument with
+  nothing written, then made this bump. `build.sh` and `bench-history.sh`
+  were run in a staged copy, since they write tracked files. Both hooks were
+  fed hook JSON for every branch: clean, unformatted, `lib/`, outside the
+  repo, a non-commit command, and a tree that doesn't compile. All four
+  workflows parse as YAML.
+- Build, `tests/ifran.tcyr` **129/129**, bench, fuzz, `cyrius deps --locked`.
+
 ## [2.3.2] - 2026-11-04
 
 ### Fixed

@@ -1,21 +1,28 @@
 #!/usr/bin/env bash
+# Check the cyrius toolchain against the cyrius.cyml pin, then confirm the
+# vendored lib/ + cyrius.lock match the pinned dependency tags.
 set -euo pipefail
+cd "$(dirname "$0")/.."
 
-echo "Setting up Ifran development environment..."
+echo "Setting up the ifran development environment..."
 
-# Install protobuf compiler
-if ! command -v protoc &>/dev/null; then
-    echo "Installing protobuf compiler..."
-    if command -v pacman &>/dev/null; then
-        sudo pacman -S --noconfirm protobuf
-    elif command -v apt-get &>/dev/null; then
-        sudo apt-get install -y protobuf-compiler
-    fi
+PIN=$(grep '^cyrius = ' cyrius.cyml | head -1 | sed 's/cyrius = "\(.*\)"/\1/')
+INSTALL="curl -sSf https://raw.githubusercontent.com/MacCracken/cyrius/main/scripts/install.sh | CYRIUS_VERSION=$PIN sh"
+
+if ! command -v cyrius &>/dev/null; then
+    echo "cyrius is not on PATH. Install the pinned toolchain ($PIN):"
+    echo "  $INSTALL"
+    exit 1
 fi
 
-# Install cargo-watch for development
-if ! command -v cargo-watch &>/dev/null; then
-    cargo install cargo-watch
+HAVE=$(cyrius version | head -1 | awk '{print $2}')
+if [[ "$HAVE" != "$PIN" ]]; then
+    echo "cyrius $HAVE is active, but cyrius.cyml pins $PIN. Install the pin:"
+    echo "  $INSTALL"
+    exit 1
 fi
+echo "cyrius $HAVE matches the pin."
 
-echo "Setup complete."
+cyrius deps --locked
+
+echo "Setup complete. Next: ./scripts/build.sh and ./scripts/test.sh"

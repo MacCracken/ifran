@@ -14,14 +14,15 @@
 ```sh
 cyrius deps                               # after manifest changes
 cyrius build src/main.cyr build/ifran
-cyrius test tests/ifran.tcyr              # the suite (128) — runs against /tmp
+cyrius test tests/ifran.tcyr              # the suite (129) — runs against /tmp
 cyrius lint src/<file>.cyr                # keep 0 warns; lines <= 120
 ```
 
 Definition of done per bite: suite green · lint/fmt clean · CHANGELOG
 `[Unreleased]` entry · `state.md` refreshed. Version bumps are the
 maintainer's (cut mechanics: `VERSION` + the `IFRAN_VERSION` literal in
-`src/main.cyr`).
+`src/main.cyr`, both set by `./scripts/version-set.sh X.Y.Z`).
+`./scripts/test.sh` runs the full gate (lock guard, suite, bench, fuzz).
 
 ## Where things live
 

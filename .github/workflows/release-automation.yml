@@ -27,7 +27,7 @@ jobs:
           echo "Version '${VERSION}' is valid semver format"
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4 (pinned — CVE-21)
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -41,12 +41,10 @@ jobs:
           fi
           echo "Tag '${VERSION}' does not exist, proceeding"
 
-      - name: Update VERSION file and Cargo.toml
-        run: |
-          echo "${{ inputs.version }}" > VERSION
-          sed -i 's/^version = ".*"/version = "${{ inputs.version }}"/' Cargo.toml
-          cargo generate-lockfile
-          echo "Updated VERSION and Cargo.toml to: $(cat VERSION)"
+      - name: Update VERSION and the src/main.cyr version literal
+        # scripts/version-set.sh writes both and verifies they agree
+        # (cyrius.cyml reads VERSION through ${file:VERSION}).
+        run: ./scripts/version-set.sh "${{ inputs.version }}"
 
       - name: Configure git
         run: |
@@ -55,7 +53,7 @@ jobs:
 
       - name: Commit version update
         run: |
-          git add VERSION Cargo.toml Cargo.lock
+          git add VERSION src/main.cyr
           git commit -m "release: ${{ inputs.version }}"
 
       - name: Create annotated tag

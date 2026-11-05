@@ -266,6 +266,11 @@ fn test_datasets(): i64 {
     file_write_all("/tmp/ifran_t_bad.jsonl", bj, strlen(bj));
     var bid = dataset_add("/tmp/ifran_t_bad.jsonl", "badjsonl");
     assert_eq(dataset_validate(bid), 1, "junk JSONL line fails validation");
+    # 2.3.1+: a repeated top-level key fails too (bayan 1.11.1's flat parser)
+    var kj = "{\"a\":1,\"b\":2}\n{\"a\":1,\"a\":2}\n";
+    file_write_all("/tmp/ifran_t_dupkey.jsonl", kj, strlen(kj));
+    var kid = dataset_add("/tmp/ifran_t_dupkey.jsonl", "dupkeyjsonl");
+    assert_eq(dataset_validate(kid), 1, "duplicate-key JSONL line fails validation");
 
     # real line-dedup: 6 lines with 2 exact dups -> 4 kept, parent recorded
     var did = dataset_dedup(id);

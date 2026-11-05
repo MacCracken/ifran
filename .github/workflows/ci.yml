@@ -33,8 +33,11 @@ jobs:
             CYRIUS_VERSION="$CYRIUS_VERSION" sh
           echo "$HOME/.cyrius/bin" >> "$GITHUB_PATH"
 
-      - name: Resolve dependencies
-        run: cyrius deps
+      - name: Resolve dependencies (lock guard)
+        # --locked (cyrius >= 6.7.6) resolves the pinned tags, writes nothing,
+        # and fails naming each difference if the committed lib/ or
+        # cyrius.lock is not exactly what the tags resolve.
+        run: cyrius deps --locked
 
       - name: Build
         run: |

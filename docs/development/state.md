@@ -6,20 +6,17 @@
 
 ## Version
 
-**2.3.2 — 2026-11-04 (sweep fix).** Sweep combos honor the template's
-`timeout_s` again; the combo spec was one slot short of the 2.1 job record
-(broken since 2.1.0). Suite **128/128**. Detail in CHANGELOG `[2.3.2]`.
+**2.3.3 — 2026-11-04 (housekeeping).** `scripts/` and
+`release-automation.yml` ported from cargo to cyrius; CI resolves with
+`cyrius deps --locked`; CONTRIBUTING rewritten for the Cyrius project; the
+roadmap is forward-looking only, by release line. Suite **129/129**. Detail in
+CHANGELOG `[2.3.3]`.
 
-**2.3.1 — 2026-11-04 (toolchain maintenance).** cyrius `6.7.9` → `6.7.18`;
-deps moved to their latest tags (see below); `lib/` re-vendored; bayan's
-deprecated getters replaced with their `_by_cstr` equivalents (no behavior
-change). No surface change, but `dataset validate` now fails JSONL lines
-with a duplicate top-level key (bayan 1.11.1). Suite **120/120**, plus
-bench, fuzz and `cyrius deps --locked`. Detail in CHANGELOG `[2.3.1]`.
-
-**2.3.0 — 2026-11-04 (the cyrius 6.7 line).** cyrius `6.6.20` → `6.7.9`;
-git-first resolution, so local builds compile the tags as CI does. No
-surface change. Detail in CHANGELOG `[2.3.0]`.
+**2.3.0–2.3.2 — 2026-11-04.** cyrius `6.6.20` → `6.7.9` (git-first resolution)
+→ `6.7.18`, with the deps following each pin; bayan's deprecated getters
+replaced (no behavior change), and `dataset validate` now fails duplicate-key
+JSONL lines (bayan 1.11.1); sweep combos honor the template's `timeout_s`
+again (broken since 2.1.0). Detail in CHANGELOG `[2.3.0]`–`[2.3.2]`.
 
 **2.2.1–2.2.3 — 2026-09-11 → 11-04 (toolchain maintenance).** cyrius
 `6.4.3` → `6.6.2` (the `Result` value form; `rust-old/` removed) → `6.6.20`,
@@ -32,7 +29,7 @@ ranked by direction) · sweep budgets (`max_trials` announced cap +
 checks) · 4-state preferences (`pref tie|bothbad`, exported with `a`/`b`
 fields) + pair `conf 0-100` (new column, migrated). Suite **120**; all proven
 live incl. tarka `--pref` skipping the new kinds loudly. The other 4 audit
-items are roadmapped with blockers (roadmap § audit triage). Detail in
+items are roadmapped with blockers ([`roadmap.md`](roadmap.md)). Detail in
 CHANGELOG `[2.2.0]`.
 
 **2.1.0 — RELEASED 2026-07-05 (Lane 1 executor hardening).** `timeout_s`
@@ -72,7 +69,7 @@ CLI on **cmdit** (generated help/version/errors). Exit codes: `run` = child's,
 
 ## Tests / quality
 
-- `tests/ifran.tcyr` — **128/128** on cyrius 6.7.18 (jobspec, executor incl. failure paths, keys,
+- `tests/ifran.tcyr` — **129/129** on cyrius 6.7.18 (jobspec, executor incl. failure paths, keys,
   model store incl. tamper-detection, datasets incl. dedup, sweeps incl.
   seeded-random reproducibility, evals, prefs incl. JSON-escaping round-trip).
   All against `/tmp`.
@@ -90,20 +87,12 @@ trigger.
 
 ## In flight / next
 
-Nothing in flight — the audit-triage additives shipped as 2.2.0 (see Version
-above); the other 4 audit items are roadmapped with blockers (roadmap § audit
-triage; annotation sessions = **tanur**, the broken-out desktop model-studio
-— ifran stays CLI-only, tanur consumes it; desktop-stage, BACKLOGGED). Remaining lanes with their triggers
-live in [`roadmap.md`](roadmap.md). **`rust-old/` REMOVED 2026-07-05**
-(post-2.2.0): the pre-removal audit is DONE
-([`../audit/2026-07-05-rust-old-preremoval.md`](../audit/2026-07-05-rust-old-preremoval.md)):
-zero business-logic loss; one ledger gap fixed (`lifecycle` → hoosh/murti-seam
-reference); the 3 SY-contract docs (`sy-integration`/`bridge-protocol`/`api-reference` —
-the Lane-4 parity target) are preserved at
-[`reference/`](reference/); the 8-item triage is DONE (4 landed in 2.2.0,
-4 roadmapped); the tree survives in git history. **Lane 2 CLOSED 2026-07-05**
-(anukūlana 1.1.1 `--sk` — operator-key
-producer signing; `store add` records `verified` end-to-end, proven on the
-real checkpoint). **Lane 3 CLOSED same day** (tarka **1.1.2** `--pref` JSONL
-ingestion — DPO/IPO/KTO train from an ifran-curated export; e2e proven).
-Remaining cross-repo lane (bote-MCP) waits on the SY re-wire trigger.
+Nothing in flight. The next work is in [`roadmap.md`](roadmap.md), by
+release line: **2.4.x** is ready to pick up (the experiment auto-loop once its
+spec shape is chosen, corrupt-DB length hardening, porting or retiring the
+Rust-era `docker/` + `deploy/` packaging, the `[test]` manifest scope, CI
+leftovers); 2.5.x waits on cross-repo triggers (Lane 4 bote-MCP on the SY
+re-wire, the benchmark harness on a serving path); 2.6.x is the server stage
+(Lane 6, the priority queue); later 2.x is demand- or platform-gated (Lane 5,
+Lane 7, annotation sessions on tanur, agnos). Closed so far: Lanes 1–3, the
+`rust-old/` removal and its audit triage — history in the CHANGELOG.

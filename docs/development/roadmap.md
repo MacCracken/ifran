@@ -1,135 +1,95 @@
 # ifran — Roadmap
 
-> Sequencing for the shipped control plane. Live state →
-> [`state.md`](state.md); the Rust→Cyrius port record →
-> [`port-ledger.md`](port-ledger.md); the frozen surface →
+> What comes next, by release line. Shipped work lives in the
+> [CHANGELOG](../../CHANGELOG.md) (the port record in
+> [`port-ledger.md`](port-ledger.md)); live state →
+> [`state.md`](state.md); the frozen surface →
 > [`../api.md`](../api.md) + [`STABILITY.md`](../../STABILITY.md).
 
-## Shipped — 2.0.0 (2026-07-05): the Cyrius port
+Everything here is additive on the frozen 2.x surface. Nothing is calendared:
+an item opens when its trigger fires or the maintainer pulls it forward. A
+release line is the earliest an item could land, not a promise that it will.
 
-The full arc ran 2026-07-04 → 05: `cyrius port` (M0) → job core (M1) → signed
-model store + operator keys (M2) → datasets + real dedup (M3) → sweeps (M4) →
-eval runner + benchmark store (M5) → preference store (M6) → stabilization
-(api freeze, audit, benchmarks, GPL relicense) → CLI on cmdit → **2.0.0**.
-Acceptance proof: attn11 trained (job + sweep), anukūlana's fidelity oracle
-gated + benchmarked, its artifacts in the signed store, tarka ALL-GATES-PASS —
-entirely as recorded ifran jobs. Detail: CHANGELOG `[2.0.0]` +
-[`port-ledger.md`](port-ledger.md).
+## 2.4.x — ready to pick up (no external blocker)
 
-## Post-2.0 lanes (all additive on the frozen 2.x surface)
+- **Experiment auto-loop** (train → eval → compare per combo, as one
+  orchestration). *Blocked on a spec decision*: how an eval template sits inside
+  `[sweep]` — which metric, which gate, per combo or post hoc. Its query half
+  (`sweep best`) shipped in 2.2.0. This is the natural 2.4.0 headline once the
+  spec shape is chosen.
+- **Corrupt-DB hardening of text lengths.** Since patra 1.16.5/1.16.6, a
+  malformed or negative stored BYTES/TEXT length reads back as −1
+  (`PATRA_ERR_PAGE`). `src/dataset.cyr:154` and `src/store.cyr:186`/`:191` use
+  the length unguarded (`alloc(len + 1)`, `memcpy`, `store8(p + len)`), so a
+  corrupt DB writes one byte before the buffer. Refuse `len < 0` loudly. Needs
+  a corrupt-DB fixture to test (patra's `fuzz_bytes` harness shows how to build
+  one). DBs patra wrote itself are unaffected.
+- **Packaging: port or retire `docker/` and `deploy/`.** Both still describe
+  the Rust product: an `ifran-server` with REST/gRPC ports 8420/8421, a
+  Python trainer image, an `ifran serve` systemd unit with `RUST_LOG`, and
+  `deploy/agnosticos/ifran.pkg.toml` with `type = "cargo"` and
+  `license = "MIT"`. The Cyrius ifran is a GPL-3.0-only CLI with no server.
+  Decide between a runtime image plus an agnosticos package carrying the Cyrius
+  binary (the `Dockerfile.release` pattern on the agnosticos base) and removing
+  them.
+- **Test scope in the manifest** (cyrius 6.7.6's `[test]` section). Move
+  `assert` and `bench` from `[deps] stdlib` to `[test] stdlib`, so they reach
+  only test/bench/fuzz compiles. Confirm the binary builds and the suite passes.
+- **CI and tooling leftovers.** `sbom.yml` runs GitHub's dependency review,
+  which does not read `cyrius.cyml`, so it checks nothing (and its actions are
+  unpinned): retire it, or replace it with a check that sees cyrius deps. The
+  remote branch `chore/dependency-update`, left by the deleted Rust workflow,
+  can go. Bringing `tests/` to 0 lint warnings (4 lines over 120 characters)
+  would let the hooks lint tests as well as `src/`.
 
-Ordered by expected pull, each with its trigger. None is calendared; a lane
-opens when its trigger fires or the maintainer pulls it forward.
+## 2.5.x — cross-repo triggers
 
-### Lane 1 — executor hardening — ✅ SHIPPED as 2.1.0 (2026-07-05)
-- **Job timeout + reaper** — `timeout_s` enforced (poll-paced capture,
-  SIGKILL + `timed-out`/exit-137; the audit's one named limitation closed);
-  child PID recorded on the row at fork, and `ifran reap` orphans `running`
-  rows whose PID is definitely gone (signal-0 probe; live rows left alone).
-- **Quoted args** — `"double quotes"` group spaced args (escapes; unterminated
-  rejects loud). Carry through CYML with `'''…'''`.
-- **`ifran show <run-id>`** — full record (incl. pid) + 4 KB line-aligned log
-  tail. Suite 77→100; all proven live (printf-grouping, 1 s kill of a 30 s
-  sleep, kill-ifran-mid-job → reap).
+- **Lane 4 — the bote-MCP interface** (*trigger*: SecureYeoman re-wires off
+  its Rust-ifran HTTP proxy). Expose the run/store/dataset/eval verbs as MCP
+  tools via **bote**. The CLI stays the primary surface; the Rust REST boundary
+  is not carried over. Parity target:
+  [`reference/`](reference/) (`sy-integration`, `bridge-protocol`,
+  `api-reference`). `proto/` still holds the Rust line's gRPC definitions
+  (`bridge`, `ifran`, `training`): keep them as part of that reference, or
+  retire them once Lane 4 picks its transport.
+- **Structured benchmark harness** (MMLU/HellaSwag/HumanEval formatters and
+  scorers). *Blocked on a serving path*: the harness scores inference results,
+  so it needs hoosh serving (or the Lane 4 re-wire) to have something to score.
+  The exit-code gate + metric extraction stays the default.
 
-### Pre-removal audit triage — the four additives ✅ SHIPPED as 2.2.0 (2026-07-05)
+## 2.6.x — server stage
 
-The `rust-old/` pre-removal audit
-([`../audit/2026-07-05-rust-old-preremoval.md`](../audit/2026-07-05-rust-old-preremoval.md))
-surfaced 8 real features with no Cyrius home. Triage (user 2026-07-05):
+- **Lane 6 — approval, quotas, journal depth.** Job approval gates, per-set
+  quotas, and a **libro**-backed run journal (an audit chain), with the
+  aegis/kavach seams. A single-operator box doesn't need them; multi-user,
+  server-stage deployments do.
+- **Job priority queue** (Low/Normal/High/Critical). *Blocked on a scheduler or
+  daemon existing*: fork-per-invocation ifran has no queue to prioritize. Lands
+  with Lane 6 or Lane 7.
 
-**Landed (the four small additives):**
-- ✅ Sweep leaderboard — `sweep best <id> <metric> [min|max]`
-- ✅ Sweep budgets — `max_trials` + `time_budget_s`
-- ✅ `dataset validate <id>` — NUL/line/JSONL format checks
-- ✅ 4-state preferences (`pref tie|bothbad`) + pair `conf 0-100`
+## Later 2.x — demand- or platform-gated
 
-**Roadmapped (each with its blocker; do not start without the trigger):**
-- **Experiment auto-loop** (train → eval → compare per combo, one
-  orchestration) — *blocked on a spec design decision*: an eval template
-  inside `[sweep]` (which metric, which gate, per-combo or post-hoc). The
-  leaderboard just landed as its query half; natural next 2.x once the spec
-  shape is chosen.
-- **Job priority queue** (Low/Normal/High/Critical) — *blocked on a
-  scheduler/daemon existing*: fork-per-invocation ifran has no queue to
-  prioritize. Revisit with Lane 6 (approval/quotas) / Lane 7 (distributed).
-- **Annotation sessions** (lifecycle, next-unannotated cursor, stats) —
-  *blocked on **tanur*** (the broken-out desktop model-studio app —
-  agnosticos `planning/tanur.md`; desktop-stage, on the windowing substrate
-  puka pioneered). **ifran itself never grows a GUI** — it stays the CLI
-  control plane; tanur consumes it as the backend when the desktop stage
-  arrives. BACKLOGGED until then. The 4-state store side (above) is ready
-  for it.
-- **Structured benchmark harness** (MMLU/HellaSwag/HumanEval formatters +
-  scorers) — *blocked on a serving/inference path*: the harness consumes
-  inference results; needs hoosh serving (or the Lane 4 re-wire) to have
-  something to score. The exit-code-gate + metric-extraction design stays
-  the deliberate default.
+- **Lane 5 — black-box optimization sweeps** (GP-BO / CMA-ES over job
+  templates; *trigger*: a sibling sweep actually needs it). The one unmapped gap
+  from the 2026-06-25 mining (agnosticos `planning/ml-product-mining.md`).
+  Prototype on rosnet + tyche. Grid and seeded-random stay the honest default.
+- **Lane 7 — distributed execution** (*rides the seema port*). Multi-node job
+  placement is seema's work, not ifran-local; the model store is already the
+  shared substrate seema's fleet distribution needs.
+- **Annotation sessions** (lifecycle, next-unannotated cursor, stats). *Blocked
+  on **tanur***, the desktop model-studio app (agnosticos `planning/tanur.md`;
+  desktop stage). ifran never grows a GUI: it stays the CLI control plane, and
+  tanur consumes it as its backend. The 4-state preference store is ready.
+- **agnos-side story.** Linux-first today (fork/exec and patra are Linux); an
+  on-agnos control plane rides patra's and the kernel's own arcs, not ifran's.
 
-### Lane 2 — operator-key producer signing (cross-repo) — ✅ DONE 2026-07-05
-- Shipped as **anukūlana 1.1.1**: `gpt2-tula … --sk <operator.sk>` signs with
-  the operator key (64 B seed||pk, exactly `keys init`'s layout; loader
-  `anuk_sk_load`, pk = sk+32). Proven end-to-end: fresh `keys init` →
-  `gpt2-tula --sk` on the real checkpoint → `store add` records **`verified`**
-  for both artifacts → `store verify` sig-verified.
+## Standing rules
 
-### Lane 3 — tarka preference ingestion (cross-repo) — ✅ DONE 2026-07-05
-- Shipped as **tarka 1.1.2** (additive): `tarka --pref <prefs.jsonl>`
-  ingests the `pref export` JSONL (bayan parse + akshara byte vocab) and trains
-  DPO/IPO/KTO full-batch via the existing FD-gated primitives. Proven
-  end-to-end on a real ifran-curated set (3 pairs + 4 thumbs): DPO/IPO rank
-  3/3 with loss to ~0, KTO gap 0→238 — the curate→export→align loop is closed.
-
-### Lane 4 — the bote-MCP interface (trigger: SY re-wires)
-- The agnos-native control surface: expose run/store/dataset/eval verbs as
-  MCP tools via **bote** when SecureYeoman re-wires off its Rust-ifran HTTP
-  proxy. CLI-first remains the primary surface; the Rust REST boundary stays
-  un-carried.
-
-### Lane 5 — black-box optimization sweeps (trigger: real demand)
-- GP-BO / CMA-ES over job templates — the one true unmapped gap from the
-  2026-06-25 mining (agnosticos `planning/ml-product-mining.md`). Deliberately
-  NOT smuggled into M4 (grid + seeded-random match the honest Rust surface);
-  opens when a sibling sweep actually needs it. Prototype on rosnet+tyche.
-
-### Lane 6 — approval / quotas / journal depth (server-stage)
-- The `train/approval` + `budget` remainders from the disposition map: job
-  approval gates, per-set quotas, and a **libro**-backed run journal (audit
-  chain). Single-operator boxes don't need them; multi-user/server-stage does
-  (aegis/kavach seams then too).
-
-### Lane 7 — distributed execution (seema-stage)
-- Multi-node job placement rides the **seema** port (the remaining Tier-A
-  Rust target) — not ifran-local work. The model store is already the shared
-  substrate seema's fleet distribution needs.
-
-### Housekeeping (window opens at 2.1)
-- **`rust-old/` removal** — held (maintainer, 2026-07-05) for a release or
-  two; remove the tree + its `rust-old/docs/` (incl. the relocated Rust-era
-  ADRs) at ~2.1/2.2 as its own confirmed step.
-- **agnos-side story** — Linux-first today (fork/exec/patra all Linux); the
-  on-agnos control plane rides patra's + the kernel's own arcs, not ifran's.
-
-## The extraction watch (second-consumer rule)
-
-The **model store** (`keys.cyr` + `store.cyr`, kept behind a crisp boundary)
-is the named first-extraction candidate — it lifts to a shared lib when a
-second consumer needs the load/verify path without going through ifran (the
-murti-seam / hoosh "load the checkpoint I just produced" case). Do not extract
-ahead of that consumer.
-
-## Recorded by cyrius 6.7.6 (2026-10-08) — ✅ APPLIED at 2.3.0 (cyrius 6.7.9, 2026-11-04)
-
-- ✅ **Git first: a `path` beside `git` / `tag` is a dev override** (`patra`, `sigil`, `cmdit`, `tula`).
-  A default `cyrius deps` / `build` resolves the TAG (commit pin checked) and prints one `hint:` line
-  naming the checkouts not used, so a local build and CI compile the same code. The `cyrius.cyml`
-  comment above `[deps.patra]` and `docs/development/README.md` say so.
-- ✅ Local mode (`CYRIUS_LOCAL=1`, `CYRIUS_LOCAL=<dep,dep>` or `--local`) builds the checkouts from
-  `build/local-deps/` without writing `lib/` or `cyrius.lock`.
-- ✅ Commit pins: `cyrius.lock` has carried them since 2.2.2. The 6.7.9 resolve re-verified all four.
-- n/a CI lock guards and `sed`-the-path-out steps: ifran's CI has neither. `cyrius deps --locked`
-  passes on the 2.3.0 tree, so CI's plain `cyrius deps` could become a lock guard if wanted.
-- ✅ `.gitignore` ignores `/build/local-deps/`, not all of `build/`, because the repo tracks
-  `build/ifran`, `build/probe` and `build/secprobe`. That is enough for the `git check-ignore`
-  check cyrius runs.
-- Reference: the cyrius guide's *Git first; local development is a switch (6.7.6)*.
+- **The extraction watch (second-consumer rule).** The model store
+  (`keys.cyr` + `store.cyr`, kept behind a crisp boundary) is the named
+  first-extraction candidate. It lifts to a shared lib when a second consumer
+  needs the load/verify path without going through ifran (the murti-seam /
+  hoosh "load the checkpoint I just produced" case). Do not extract ahead of
+  that consumer.
+- **Toolchain pins** move per [`dependency-watch.md`](dependency-watch.md):
+  `cyrius lib sync --full`, `cyrius deps`, then `cyrius deps --locked`.

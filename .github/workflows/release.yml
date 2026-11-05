@@ -46,8 +46,9 @@ jobs:
             CYRIUS_VERSION="$CYRIUS_VERSION" sh
           echo "$HOME/.cyrius/bin" >> "$GITHUB_PATH"
 
-      - name: Resolve dependencies
-        run: cyrius deps
+      - name: Resolve dependencies (lock guard)
+        # --locked: see ci.yml. A release builds exactly the committed lib/.
+        run: cyrius deps --locked
 
       - name: Build
         run: |

@@ -1,69 +1,65 @@
-# Contributing to Ifran
+# Contributing to ifran
 
-Thank you for your interest in contributing to Ifran. This document provides guidelines and information to help you get started.
+Thank you for your interest in contributing to ifran. This document covers how
+the project is laid out, how to build and test it, and what a change needs
+before it can merge.
 
 ## Project Overview
 
-Ifran is a Rust-based LLM controller that provides a unified interface for managing, serving, and training large language models. The project is organized as a Cargo workspace containing 8 crates:
+ifran (عرفان) is the AGNOS **training control plane**: a Cyrius CLI that runs
+and records training jobs, keeps a signed checkpoint store, curates datasets,
+runs sweeps and evals, and holds preference data. It orchestrates; the
+sovereign ML siblings (attn11, tarka, tentib, prajna, anukūlana) own the math.
+Start with the [README](README.md), the frozen 2.x surface in
+[`docs/api.md`](docs/api.md), and
+[ADR 0001](docs/adr/0001-port-decomposition.md).
 
-| Crate | Purpose |
+| Path | Purpose |
 |---|---|
-| `ifran-types` | Shared type definitions, error types, and data models |
-| `ifran-core` | Core engine: model registry, download manager, configuration |
-| `ifran-backends` | Pluggable inference backend trait and implementations |
-| `ifran-train` | Training orchestration with Docker/subprocess/native executors |
-| `ifran-api` | REST (Axum) and gRPC (tonic) server |
-| `ifran-bridge` | Bidirectional gRPC bridge (SY <-> Ifran) |
-| `ifran-cli` | Command-line interface |
-| `ifran-desktop` | Tauri-based desktop application shell |
+| `src/main.cyr` | CLI entry: verb dispatch on cmdit |
+| `src/jobspec.cyr` | Job spec parsing (bayan TOML) |
+| `src/run.cyr`, `src/runstore.cyr` | Executor (fork/exec, capture, timeout) + run records (patra) |
+| `src/keys.cyr`, `src/store.cyr` | Operator keys + the signed model store (sigil, tula) |
+| `src/dataset.cyr` | Datasets: ingest, dedup, validate |
+| `src/sweep.cyr` | Sweeps: grid/random expansion, budgets, leaderboard |
+| `src/eval.cyr` | Eval runner + the benchmark store |
+| `src/pref.cyr` | Preference store + JSONL export |
+| `tests/ifran.{tcyr,bcyr,fcyr}` | Test suite, bench harness, fuzz harness |
+| `lib/` | Vendored stdlib + deps, written by `cyrius deps` — never edit by hand |
 
 ## Prerequisites
 
-- **Rust** (stable toolchain) -- install via [rustup](https://rustup.rs/)
-- **protoc** (Protocol Buffers compiler) -- required for gRPC code generation
-- **cmake** -- required by some native dependencies
-- **Docker** (optional) -- needed for containerized training jobs and integration tests
-- **CUDA toolkit** (optional) -- needed only if building GPU-accelerated backends
+- **cyrius**, at the version pinned in `cyrius.cyml` (`[package] cyrius`).
+  `./scripts/setup-dev.sh` checks it and prints the install command if needed.
+- **Linux** — the executor and patra are Linux-first.
+- Sibling checkouts (`../patra`, `../sigil`, `../tula`, `../cmdit`) are
+  optional: builds resolve the pinned git tags, and `CYRIUS_LOCAL=1` (or
+  `--local`) builds against the checkouts instead.
 
 ## Getting Started
 
 ```bash
-# Clone the repository
 git clone https://github.com/MacCracken/ifran.git
 cd ifran
 
-# Install build dependencies (Linux)
-./scripts/install-build-deps.sh
-
-# Or run the dev setup script
+# Toolchain matches the pin; lib/ + cyrius.lock match the pinned tags
 ./scripts/setup-dev.sh
 
-# Build all crates
-make build
+# cyrius deps + cyrius build -> build/ifran
+./scripts/build.sh
 
-# Run the test suite
-make test
+# The full gate: lock guard, suite, bench, fuzz
+./scripts/test.sh
 ```
+
+The golden path (dataset → job → sweep → eval → store → preferences) is in
+[`docs/guides/getting-started.md`](docs/guides/getting-started.md), with runnable
+specs in [`examples/`](examples/).
 
 ## Git Workflow
 
-We use a **Simplified Git Flow** model:
-
-```
-main (stable releases)
- └── develop (integration branch)
-      ├── feature/add-ollama-backend
-      ├── bugfix/fix-download-retry
-      └── docs/update-architecture
-```
-
-- **main** -- always releasable; tags correspond to semver releases.
-- **develop** -- integration branch where feature branches merge.
-- **feature/\*** -- new functionality branched from develop.
-
-### Branch Naming
-
-Use the following prefixes:
+- **main** is always releasable; tags are semver releases.
+- Branch from `main` with a prefix:
 
 | Prefix | Use |
 |---|---|
@@ -74,125 +70,99 @@ Use the following prefixes:
 | `security/` | Security patches or hardening |
 | `chore/` | Build, CI, tooling, dependency updates |
 
-### Conventional Commits
+### Commit Messages
 
-All commit messages must follow [Conventional Commits](https://www.conventionalcommits.org/) format:
+[Conventional Commits](https://www.conventionalcommits.org/) are preferred:
 
 ```
 <type>(<scope>): <description>
-
-[optional body]
-
-[optional footer(s)]
 ```
 
 **Types:** `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`
 
-**Scopes:** `types`, `core`, `backends`, `train`, `api`, `bridge`, `cli`, `desktop`
-
-Examples:
+**Scopes:** `cli`, `run`, `store`, `keys`, `dataset`, `sweep`, `eval`, `pref`, `deps`, `ci`
 
 ```
-feat(backends): add llama.cpp GGUF quantization support
-fix(core): handle interrupted downloads with resume
-docs(api): document OpenAI-compatible endpoint mapping
-chore(ci): add SBOM generation to release workflow
+fix(sweep): carry the template's timeout_s into every combo
+chore(deps): move to cyrius 6.7.18
 ```
 
 ## Pull Request Process
 
-1. Branch from `develop` using the naming convention above.
-2. Make your changes, ensuring all checks pass locally.
-3. Open a PR targeting `develop`.
-4. Fill out the PR template completely.
-5. All CI checks must pass before merge.
-6. At least one approving review is required.
+1. Branch from `main` using the naming convention above.
+2. Run `./scripts/test.sh` locally; it must pass.
+3. Open a PR against `main`.
+4. CI (`.github/workflows/ci.yml`) must pass: lock guard, build, tests.
+5. At least one approving review is required.
 
 ## Coding Standards
 
-### Rust
+- **Format:** cyrfmt-canonical. `cyrius fmt --check <file>` reports;
+  `cyrius fmt <file>` rewrites in place.
+- **Lint:** `cyrius lint src/<file>.cyr` with 0 warnings; lines ≤ 120.
+- **Orchestration, never math.** Anything that computes a gradient, loss or
+  metric belongs in a sibling; ifran spawns, records and stores.
+- **Delegate parsing** to tula/bayan/patra. A new parser of foreign input ships
+  wrap-safe bounds, null-checked allocations and a fuzz harness in the same
+  change.
+- **Read the CHANGELOG "Porting notes"** before touching the stores (patra and
+  bayan gotchas: 0-based binds, no implicit rowid, the TOML getters return a
+  `Str`, …).
+- **The 2.x surface is frozen** (`docs/api.md` + `STABILITY.md`). Additions
+  are additive minors; schema changes ship with in-place migrations; exit codes
+  are the contract (`run` = the child's, `eval` = the gate, usage errors = 2).
 
-- Format with `rustfmt` (default configuration, 100 character line length).
-- Pass `clippy` with `-D warnings` (all warnings are errors).
-- Maximum line length: 100 characters.
-- Write doc comments (`///`) for all public items.
-- Use `thiserror` for error types, `anyhow` only in binaries.
-- Prefer strong typing over stringly-typed interfaces.
-
-```bash
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-```
-
-### TypeScript / Svelte
-
-- Format with Prettier (2-space indent).
-- Lint with ESLint.
-
-### Python
-
-- Format with Black (4-space indent).
-- Lint with Ruff.
+Optional Claude Code hooks: `scripts/hook-quality.sh` (PostToolUse on
+Write|Edit: format-check, plus lint under `src/`) and
+`scripts/hook-release-gate.sh` (PreToolUse on Bash: blocks `git commit` until
+the gate passes). Wire them in `.claude/settings.json` to use them.
 
 ## Testing
 
-- **Unit tests** live alongside source code in each crate (`#[cfg(test)]` modules).
-- **Integration tests** live alongside each crate (e.g. `crates/ifran-api/tests/`).
-- Coverage target: **65%** minimum (CI enforced, current: ~73%).
-- CI runs tests per-package in parallel.
+- `cyrius test tests/ifran.tcyr` — the suite; everything runs against `/tmp`.
+- `cyrius bench tests/ifran.bcyr` — the bench harness;
+  `./scripts/bench-history.sh [label]` appends a run to `benchmarks/history.csv`.
+- `cyrius run tests/ifran.fcyr` — the fuzz harness.
+- Test after every change. A bug fix lands with a test that fails without it.
 
-```bash
-# Run all tests
-cargo test --workspace
+## Dependencies
 
-# Run tests for a specific crate
-cargo test -p ifran-core
-
-# Run with coverage (requires cargo-tarpaulin)
-cargo tarpaulin --workspace --out html
-```
+Pins live in `cyrius.cyml`; what to watch at each one is in
+[`docs/development/dependency-watch.md`](docs/development/dependency-watch.md).
+To move a pin: `cyrius lib sync --full`, then `cyrius deps`, then
+`cyrius deps --locked` to confirm `lib/` and `cyrius.lock` are exactly what the
+tags resolve. Commit `lib/` and `cyrius.lock` with the pin.
 
 ## Documentation
 
-- Update files in `docs/` for any architectural or user-facing changes.
-- Add an **Architecture Decision Record** (ADR) in `docs/adr/` for significant design decisions.
-- Keep the README and CHANGELOG up to date.
+- Update `docs/` for any user-facing change, and add an ADR in `docs/adr/` for
+  a significant design decision.
+- Every change gets a CHANGELOG entry; `docs/development/state.md` is refreshed
+  each release.
 
 ## Security
 
-- **Never** commit secrets, API keys, or credentials.
-- Validate all inputs at API boundaries.
-- Run `cargo audit` before submitting PRs that update dependencies.
-- See [SECURITY.md](SECURITY.md) for the full security policy and reporting instructions.
+- **Never** commit secrets, credentials or operator signing keys.
+- See [SECURITY.md](SECURITY.md) for the security policy and how to report a
+  vulnerability.
 
 ## Release Process
 
-Ifran uses **Semantic Versioning** (semver):
+ifran uses **Semantic Versioning**: `MAJOR.MINOR.PATCH`, or
+`MAJOR.MINOR.PATCH-pre` for pre-releases.
 
-- Format: `MAJOR.MINOR.PATCH` for releases (e.g., `1.0.0`)
-- Format: `MAJOR.MINOR.PATCH-pre` for pre-releases (e.g., `1.1.0-rc1`)
+1. `./scripts/version-set.sh X.Y.Z` sets `VERSION` and the `src/main.cyr`
+   version literal (the `release-automation` workflow runs the same script,
+   then commits and tags).
+2. Write the CHANGELOG entry and refresh `docs/development/state.md`.
+3. Pushing the tag runs `.github/workflows/release.yml`: the CI gate, a
+   version-consistency check, the build, a source tarball + `SHA256SUMS`, and
+   the GitHub release.
 
-Releases are created through the `release-automation` GitHub Actions workflow, which handles:
+## License
 
-1. Version bumping across all workspace crates.
-2. CHANGELOG generation.
-3. Binary builds for supported platforms.
-4. Container image publishing.
-5. GitHub Release creation with artifacts.
-
-## Crate Development Guide
-
-When working on a specific crate, keep these responsibilities in mind:
-
-- **ifran-types** -- Keep this crate dependency-free where possible. Changes here affect the entire workspace.
-- **ifran-core** -- The engine. Manages model registry, downloads, and configuration. Does not depend on any specific backend.
-- **ifran-backends** -- Implement the `InferenceBackend` trait for new backends. Each backend is feature-gated.
-- **ifran-train** -- Orchestrates training jobs. Executor implementations (Docker, subprocess, native) live here.
-- **ifran-api** -- HTTP and gRPC endpoints. Delegates to core and backends. OpenAI-compatible API surface.
-- **ifran-bridge** -- Handles bidirectional communication with SY. Protocol defined in `proto/`.
-- **ifran-cli** -- Thin layer over core functionality. Keep business logic out of this crate.
-- **ifran-desktop** -- Tauri shell. Frontend lives in `crates/ifran-desktop/src/`.
+ifran is GPL-3.0-only; contributions are accepted under the same license.
 
 ---
 
-Thank you for contributing to Ifran.
+Thank you for contributing to ifran.

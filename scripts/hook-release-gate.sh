@@ -1,17 +1,41 @@
 #!/usr/bin/env bash
-# PreToolUse hook: block git commit unless quality + tests pass
+# Claude Code PreToolUse hook (matcher "Bash"): block `git commit` unless the
+# first-party sources are cyrfmt-clean, src/ is lint-clean, lib/ + cyrius.lock match
+# the pinned tags, ifran builds, and the suite passes. Not wired by default —
+# add it under hooks.PreToolUse in .claude/settings.json to use it.
 set -euo pipefail
 
-CMD=$(jq -r '.tool_input.command' < /dev/stdin)
+# The Bash command from the hook's JSON on stdin (jq if installed, else python3)
+INPUT=$(cat)
+if command -v jq &>/dev/null; then
+    CMD=$(jq -r '.tool_input.command // empty' <<< "$INPUT")
+else
+    CMD=$(python3 -I -c 'import json, sys
+d = json.load(sys.stdin)
+print((d.get("tool_input") or {}).get("command") or "")' <<< "$INPUT")
+fi
 
 # Only gate on git commit commands
 if ! echo "$CMD" | grep -qE '^git\s+commit\b'; then
-  exit 0
+    exit 0
 fi
 
-cd /home/macro/Repos/ifran
+cd "$(dirname "$0")/.."
 
-cargo fmt --all -- --check || { echo '{"decision":"block","reason":"cargo fmt check failed"}'; exit 0; }
-cargo clippy --workspace -- -D warnings || { echo '{"decision":"block","reason":"cargo clippy failed"}'; exit 0; }
-cargo check --workspace || { echo '{"decision":"block","reason":"cargo check failed"}'; exit 0; }
-cargo test --workspace || { echo '{"decision":"block","reason":"cargo test failed"}'; exit 0; }
+block() {
+    printf '{"decision":"block","reason":"%s"}\n' "$1"
+    exit 0
+}
+
+for f in src/*.cyr tests/*.tcyr tests/*.bcyr tests/*.fcyr; do
+    cyrius fmt --check "$f" >/dev/null 2>&1 || block "cyrius fmt --check failed: $f"
+done
+# 0 lint warnings is the src/ rule (docs/development/README.md)
+for f in src/*.cyr; do
+    cyrius lint --exit-with-count "$f" >/dev/null 2>&1 || block "cyrius lint failed: $f"
+done
+cyrius deps --locked >/dev/null 2>&1 || block "cyrius deps --locked failed: lib/ or cyrius.lock differ from the pinned tags"
+OUT="$(mktemp -d)"
+trap 'rm -rf "$OUT"' EXIT
+cyrius build src/main.cyr "$OUT/ifran" >/dev/null 2>&1 || block "cyrius build failed"
+cyrius test tests/ifran.tcyr >/dev/null 2>&1 || block "tests/ifran.tcyr failed"
